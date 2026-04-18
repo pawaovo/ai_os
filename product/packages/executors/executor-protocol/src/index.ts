@@ -23,6 +23,7 @@ export interface ExecutorStatus {
 
 export interface RunTask {
   missionId: MissionId;
+  spaceId: SpaceId;
   workspaceId: WorkspaceId;
   prompt: string;
   context?: Record<string, unknown>;
@@ -56,4 +57,16 @@ export interface ExecutorEventMappingContext {
   missionId: MissionId;
   runId: RunId;
   executorId: ExecutorId;
+}
+
+export interface ExecutorProcessCommand {
+  command: string;
+  args: string[];
+  cwd?: string;
+  input?: string;
+}
+
+export interface ExecutorProcessRunner {
+  isAvailable(command: string): Promise<boolean>;
+  run(command: ExecutorProcessCommand): AsyncIterable<string>;
 }

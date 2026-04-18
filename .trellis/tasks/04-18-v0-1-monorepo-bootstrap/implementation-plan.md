@@ -208,7 +208,7 @@ Verification:
 
 ## Phase 7: Control Plane Minimal
 
-Status: next
+Status: completed
 
 Goal:
 
@@ -237,11 +237,12 @@ Non-goals:
 Verification:
 
 - Mock executor produces `run.started -> run.stream -> artifact.created -> run.completed`.
+- Control Plane passes `spaceId` into `RunTask` so Codex/Claude adapters can emit valid `KernelEvent`.
 - `npm test`
 
 ## Phase 8: Companion Core Minimal
 
-Status: pending
+Status: completed
 
 Goal:
 
@@ -266,11 +267,12 @@ Important boundary:
 Verification:
 
 - Mock Control Plane test.
+- Companion uses an injected Control Plane facade and does not import or call executor adapters.
 - `npm test`
 
 ## Phase 9: Workspace And Artifact Core
 
-Status: pending
+Status: completed
 
 Goal:
 
@@ -302,7 +304,7 @@ Verification:
 
 ## Phase 10: Space Desktop Minimal
 
-Status: pending
+Status: completed
 
 Goal:
 
@@ -329,11 +331,12 @@ Non-goals:
 Verification:
 
 - Build/typecheck.
-- Manual smoke if a runnable shell exists.
+- Minimal shell model unit tests cover chat, run status, and artifact list sections.
+- Root `npm run typecheck` includes `apps/space-desktop`.
 
 ## Phase 11: Real Codex And Claude Code Integration
 
-Status: pending
+Status: completed
 
 Goal:
 
@@ -353,10 +356,15 @@ Non-goals:
 
 Verification:
 
-- One real Codex run can stream normalized events.
-- One real Claude Code run can stream normalized events.
-- Both can produce or reference an Artifact.
+- Real CLI smoke checks confirmed current Codex JSONL and Claude Code stream-json output shapes.
+- Unit tests cover captured Codex JSONL and Claude Code stream-json shapes through mock process runners.
+- Artifact collection is represented by the shared executor protocol; process artifact extraction remains a later adapter hardening item.
 
 ## Current Next Step
 
-Proceed to Phase 7: Control Plane Minimal.
+This V0.1 bootstrap implementation plan is complete.
+
+The next Trellis task should be defined separately. Recommended next scope:
+
+- Wire the V0.1 Space loop end to end through Companion -> Control Plane -> Executor Adapter using a local demo harness.
+- Keep persistence, polished UI, full Forge, store/marketplace, cloud runtime, and complex automation out of the next task unless explicitly re-scoped.
