@@ -41,11 +41,13 @@ export interface ClaudeCodeProcessExecutorOptions {
   ids: ClaudeCodeProcessExecutorIds;
   clock: ClaudeCodeProcessExecutorClock;
   command?: string;
+  args?: string[];
 }
 
 export class ClaudeCodeProcessExecutor implements CodeExecutor {
   readonly kind = "claude-code" as const;
   private readonly command: string;
+  private readonly args: string[];
 
   constructor(
     readonly id: ExecutorId,
@@ -53,8 +55,16 @@ export class ClaudeCodeProcessExecutor implements CodeExecutor {
     private readonly ids: ClaudeCodeProcessExecutorIds,
     private readonly clock: ClaudeCodeProcessExecutorClock,
     command = "claude",
+    args = [
+      "-p",
+      "--verbose",
+      "--output-format",
+      "stream-json",
+      "--no-session-persistence",
+    ],
   ) {
     this.command = command;
+    this.args = args;
   }
 
   static create(options: ClaudeCodeProcessExecutorOptions): ClaudeCodeProcessExecutor {
@@ -64,6 +74,7 @@ export class ClaudeCodeProcessExecutor implements CodeExecutor {
       options.ids,
       options.clock,
       options.command,
+      options.args,
     );
   }
 
@@ -118,14 +129,7 @@ export class ClaudeCodeProcessExecutor implements CodeExecutor {
 
     for await (const line of this.runner.run({
       command: this.command,
-      args: [
-        "-p",
-        "--verbose",
-        "--output-format",
-        "stream-json",
-        "--no-session-persistence",
-        task.prompt,
-      ],
+      args: [...this.args, task.prompt],
       ...(task.context?.cwd ? { cwd: String(task.context.cwd) } : {}),
     })) {
       const native = parseClaudeCodeNativeEvent(line);

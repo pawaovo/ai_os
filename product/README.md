@@ -63,7 +63,19 @@ Then open:
 http://localhost:5173
 ```
 
-The demo is a browser-first local validation surface. It lets you enter a goal and run the V0.1 loop through Companion, Control Plane, a deterministic mock executor, normalized events, and artifact return. Codex and Claude Code appear as visible executor targets, but the first manual demo intentionally keeps real process execution disabled.
+The demo is a browser-first local validation surface. It lets you enter a goal and run the V0.1 loop through Companion, Control Plane, normalized executor events, and artifact return.
+
+Executor choices:
+
+- `Mock local executor`: deterministic and safe default for repeatable manual testing.
+- `Codex local CLI`: runs through the local dev server and the `@ai-os/executor-codex` process adapter when `codex` is installed.
+- `Claude Code local CLI`: runs through the local dev server and the `@ai-os/executor-claude-code` process adapter when `claude` is installed.
+
+Real executor calls are bounded by a demo timeout. Override it when needed:
+
+```bash
+AI_SPACE_EXECUTOR_TIMEOUT_MS=120000 npm run dev
+```
 
 ## Non-Goals
 

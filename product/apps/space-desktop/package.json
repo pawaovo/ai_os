@@ -17,6 +17,9 @@
   "dependencies": {
     "@ai-os/companion-core": "0.0.0",
     "@ai-os/control-plane": "0.0.0",
+    "@ai-os/executor-claude-code": "0.0.0",
+    "@ai-os/executor-codex": "0.0.0",
+    "@ai-os/executor-protocol": "0.0.0",
     "@ai-os/kernel-objects": "0.0.0"
   }
 }

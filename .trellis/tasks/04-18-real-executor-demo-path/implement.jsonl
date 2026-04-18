@@ -1,0 +1,11 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend development guide"}
+{"file": ".trellis/tasks/04-18-real-executor-demo-path/prd.md", "reason": "Task PRD"}
+{"file": "product/apps/space-desktop/src/demo-runtime.ts", "reason": "Demo runtime"}
+{"file": "product/apps/space-desktop/src/browser.ts", "reason": "Browser entry"}
+{"file": "product/apps/space-desktop/scripts/dev-server.mjs", "reason": "Dev server"}
+{"file": "product/packages/executors/executor-codex/src/index.ts", "reason": "Codex adapter"}
+{"file": "product/packages/executors/executor-claude-code/src/index.ts", "reason": "Claude Code adapter"}
+{"file": "product/packages/control/control-plane/src/index.ts", "reason": "Control Plane"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Cross-layer guide"}

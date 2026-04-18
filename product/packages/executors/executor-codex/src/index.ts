@@ -42,11 +42,13 @@ export interface CodexProcessExecutorOptions {
   ids: CodexProcessExecutorIds;
   clock: CodexProcessExecutorClock;
   command?: string;
+  args?: string[];
 }
 
 export class CodexProcessExecutor implements CodeExecutor {
   readonly kind = "codex" as const;
   private readonly command: string;
+  private readonly args: string[];
 
   constructor(
     readonly id: ExecutorId,
@@ -54,8 +56,10 @@ export class CodexProcessExecutor implements CodeExecutor {
     private readonly ids: CodexProcessExecutorIds,
     private readonly clock: CodexProcessExecutorClock,
     command = "codex",
+    args = ["exec", "--json"],
   ) {
     this.command = command;
+    this.args = args;
   }
 
   static create(options: CodexProcessExecutorOptions): CodexProcessExecutor {
@@ -65,6 +69,7 @@ export class CodexProcessExecutor implements CodeExecutor {
       options.ids,
       options.clock,
       options.command,
+      options.args,
     );
   }
 
@@ -119,7 +124,7 @@ export class CodexProcessExecutor implements CodeExecutor {
 
     for await (const line of this.runner.run({
       command: this.command,
-      args: ["exec", "--json", task.prompt],
+      args: [...this.args, task.prompt],
       ...(task.context?.cwd ? { cwd: String(task.context.cwd) } : {}),
     })) {
       const native = parseCodexNativeEvent(line);

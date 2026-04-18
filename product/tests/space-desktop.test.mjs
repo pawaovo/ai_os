@@ -18,6 +18,10 @@ const {
   createRunningSpaceDemoState,
   runSpaceDemoGoal,
 } = await import("../apps/space-desktop/dist/demo-runtime.js");
+const {
+  parseSpaceDemoRunRequest,
+  runSpaceDemoRequest,
+} = await import("../apps/space-desktop/dist/server-runtime.js");
 
 test("createSpaceDesktopShellModel returns the default minimal shell", () => {
   const model = createSpaceDesktopShellModel();
@@ -171,6 +175,143 @@ test("runSpaceDemoGoal keeps real executor choices visible but disabled for this
       executorChoice: "codex",
       eventDelayMs: 0,
     }),
-    /Only the deterministic mock executor is enabled/,
+    /Direct browser runtime only supports/,
   );
 });
+
+test("parseSpaceDemoRunRequest validates the local server request shape", () => {
+  assert.deepEqual(
+    parseSpaceDemoRunRequest({
+      goal: "Run from the server",
+      executorChoice: "claude-code",
+    }),
+    {
+      goal: "Run from the server",
+      executorChoice: "claude-code",
+    },
+  );
+
+  assert.throws(
+    () => parseSpaceDemoRunRequest({ goal: "Bad executor", executorChoice: "browser" }),
+    /Unsupported executor choice/,
+  );
+});
+
+test("runSpaceDemoRequest executes the mock path through the server runtime", async () => {
+  const response = await runSpaceDemoRequest(
+    {
+      goal: "Run mock through server",
+      executorChoice: "mock",
+    },
+    {
+      runner: createUnavailableRunner(),
+    },
+  );
+
+  assert.equal(response.state.phase, "completed");
+  assert.equal(response.state.executorChoice, "mock");
+  assert.equal(response.state.artifacts.length, 1);
+});
+
+test("runSpaceDemoRequest surfaces unavailable real executors as failed state", async () => {
+  const response = await runSpaceDemoRequest(
+    {
+      goal: "Run Codex through server",
+      executorChoice: "codex",
+    },
+    {
+      runner: createUnavailableRunner(),
+    },
+  );
+
+  assert.equal(response.state.phase, "failed");
+  assert.equal(response.state.executorChoice, "codex");
+  assert.match(response.state.error, /Codex command not found|not available/);
+});
+
+test("runSpaceDemoRequest can normalize Codex output without launching a real CLI", async () => {
+  const runner = createFakeProcessRunner([
+    '{"type":"thread.started"}',
+    '{"type":"item.completed","item":{"type":"agent_message","text":"Codex result"}}',
+    '{"type":"turn.completed","message":"done"}',
+  ]);
+  const response = await runSpaceDemoRequest(
+    {
+      goal: "Run Codex through fake process",
+      executorChoice: "codex",
+    },
+    {
+      runner,
+    },
+  );
+
+  assert.equal(response.state.phase, "completed");
+  assert.equal(response.state.executorChoice, "codex");
+  assert.deepEqual(
+    response.state.events.map((event) => event.type),
+    ["run.started", "run.stream", "run.completed"],
+  );
+  assert.equal(response.state.artifacts[0].title, "Executor Transcript");
+  assert.match(response.state.artifactContents[response.state.artifacts[0].id], /Codex result/);
+  assert.deepEqual(runner.calls[0].args.slice(0, 5), [
+    "exec",
+    "--json",
+    "--sandbox",
+    "read-only",
+    "--skip-git-repo-check",
+  ]);
+});
+
+test("runSpaceDemoRequest can normalize Claude Code output without launching a real CLI", async () => {
+  const runner = createFakeProcessRunner([
+    '{"type":"system","subtype":"init"}',
+    '{"type":"assistant","message":{"content":[{"type":"text","text":"Claude result"}]}}',
+    '{"type":"result","subtype":"success","is_error":false,"result":"done"}',
+  ]);
+  const response = await runSpaceDemoRequest(
+    {
+      goal: "Run Claude through fake process",
+      executorChoice: "claude-code",
+    },
+    {
+      runner,
+    },
+  );
+
+  assert.equal(response.state.phase, "completed");
+  assert.equal(response.state.executorChoice, "claude-code");
+  assert.deepEqual(
+    response.state.events.map((event) => event.type),
+    ["run.started", "run.stream", "run.completed"],
+  );
+  assert.equal(response.state.artifacts[0].title, "Executor Transcript");
+  assert.match(response.state.artifactContents[response.state.artifacts[0].id], /Claude result/);
+});
+
+function createUnavailableRunner() {
+  return {
+    async isAvailable() {
+      return false;
+    },
+    async *run() {
+      throw new Error("Should not run unavailable executor.");
+    },
+  };
+}
+
+function createFakeProcessRunner(lines) {
+  const calls = [];
+
+  return {
+    calls,
+    async isAvailable() {
+      return true;
+    },
+    run(command) {
+      calls.push(command);
+      return (async function* () {
+        for (const line of lines) yield line;
+      })();
+    },
+  };
+}

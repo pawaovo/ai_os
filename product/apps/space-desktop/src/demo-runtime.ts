@@ -53,6 +53,12 @@ export interface RunSpaceDemoGoalInput {
   eventDelayMs?: number;
 }
 
+export interface RunSpaceDemoGoalWithExecutorInput {
+  goal: string;
+  executorChoice: SpaceDemoExecutorChoice;
+  executor: CodeExecutor;
+}
+
 export interface SpaceDemoRunResult {
   state: SpaceDemoState;
   summary: CompanionRunStatusSummary;
@@ -129,7 +135,7 @@ export async function runSpaceDemoGoal(input: RunSpaceDemoGoalInput): Promise<Sp
   }
 
   if (executorChoice !== "mock") {
-    throw new Error("Only the deterministic mock executor is enabled in this demo build.");
+    throw new Error("Direct browser runtime only supports the deterministic mock executor.");
   }
 
   const ids = createDemoIds();
@@ -139,6 +145,25 @@ export async function runSpaceDemoGoal(input: RunSpaceDemoGoalInput): Promise<Sp
     clock,
     eventDelayMs: input.eventDelayMs ?? DEFAULT_EVENT_DELAY_MS,
   });
+
+  return runSpaceDemoGoalWithExecutor({
+    goal,
+    executorChoice,
+    executor,
+  });
+}
+
+export async function runSpaceDemoGoalWithExecutor(
+  input: RunSpaceDemoGoalWithExecutorInput,
+): Promise<SpaceDemoRunResult> {
+  const goal = normalizeGoal(input.goal);
+
+  if (goal.length === 0) {
+    throw new Error("Goal is required.");
+  }
+
+  const ids = createDemoIds();
+  const clock = createDemoClock();
   const controlPlane = new ControlPlane(
     { missionId: ids.missionId },
     clock,
@@ -149,7 +174,7 @@ export async function runSpaceDemoGoal(input: RunSpaceDemoGoalInput): Promise<Sp
     async runGoal(goalInput) {
       completed = await controlPlane.runMissionToCompletion({
         ...goalInput,
-        executor,
+        executor: input.executor,
       });
 
       return {
@@ -175,10 +200,41 @@ export async function runSpaceDemoGoal(input: RunSpaceDemoGoalInput): Promise<Sp
     summary,
     state: createCompletedSpaceDemoState({
       goal,
-      executorChoice,
+      executorChoice: input.executorChoice,
       completed,
       summary,
     }),
+  };
+}
+
+export function createFailedSpaceDemoState(input: {
+  goal: string;
+  executorChoice: SpaceDemoExecutorChoice;
+  error: string;
+}): SpaceDemoState {
+  const goal = normalizeGoal(input.goal);
+
+  return {
+    phase: "failed",
+    executorChoice: input.executorChoice,
+    goal,
+    shell: createSpaceDesktopShellModel({
+      title: "AI Space Demo",
+      threadId: DEMO_THREAD_ID,
+      transcriptPreview: [`User: ${goal}`, `Assistant: ${input.error}`],
+      runStatus: "failed",
+      runStatusSummary: input.error,
+    }),
+    stream: [],
+    artifacts: [],
+    artifactContents: {},
+    events: [
+      {
+        type: "run.failed",
+        message: input.error,
+      },
+    ],
+    error: input.error,
   };
 }
 
@@ -188,11 +244,20 @@ function createCompletedSpaceDemoState(input: {
   completed: Awaited<ReturnType<ControlPlane["runMissionToCompletion"]>>;
   summary: CompanionRunStatusSummary;
 }): SpaceDemoState {
-  const artifacts = input.completed.artifacts.map(toArtifactListItem);
+  const materializedArtifacts =
+    input.completed.artifacts.length > 0
+      ? input.completed.artifacts
+      : [createTranscriptArtifact(input)];
+  const artifacts = materializedArtifacts.map(toArtifactListItem);
   const artifactContents = Object.fromEntries(
-    input.completed.artifacts.map((artifact) => [artifact.id, artifact.content ?? ""]),
+    materializedArtifacts.map((artifact) => [artifact.id, artifact.content ?? ""]),
   );
   const latestOutput = input.summary.latestOutput ?? "Run completed.";
+  const summary = {
+    ...input.summary,
+    artifactCount: artifacts.length,
+    latestOutput,
+  };
 
   return {
     phase: input.completed.run.status === "completed" ? "completed" : "failed",
@@ -210,8 +275,8 @@ function createCompletedSpaceDemoState(input: {
     artifacts,
     artifactContents,
     events: input.completed.events.map(toEventLogEntry),
-    summary: input.summary,
-    ...(input.summary.error ? { error: input.summary.error } : {}),
+    summary,
+    ...(summary.error ? { error: summary.error } : {}),
   };
 }
 
@@ -350,6 +415,34 @@ function createDemoArtifact(input: {
       "- Executor emitted normalized KernelEvents.",
       "- Artifact returned to the Space shell.",
     ].join("\n"),
+  };
+}
+
+function createTranscriptArtifact(input: {
+  goal: string;
+  completed: Awaited<ReturnType<ControlPlane["runMissionToCompletion"]>>;
+}): Artifact {
+  const now = createDemoClock().now();
+  const content = [
+    "# Executor Transcript",
+    "",
+    `Goal: ${input.goal}`,
+    "",
+    "Output:",
+    ...(input.completed.snapshot.stream.length > 0
+      ? input.completed.snapshot.stream.map((line) => `- ${line}`)
+      : ["- No stream output was emitted."]),
+  ].join("\n");
+
+  return {
+    id: `artifact-transcript-${input.completed.run.id}` as ArtifactId,
+    createdAt: now,
+    updatedAt: now,
+    spaceId: input.completed.mission.spaceId,
+    runId: input.completed.run.id,
+    kind: "markdown",
+    title: "Executor Transcript",
+    content,
   };
 }
 

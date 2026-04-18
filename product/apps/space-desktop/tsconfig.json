@@ -8,6 +8,8 @@
   "references": [
     { "path": "../../packages/companion/companion-core" },
     { "path": "../../packages/control/control-plane" },
+    { "path": "../../packages/executors/executor-claude-code" },
+    { "path": "../../packages/executors/executor-codex" },
     { "path": "../../packages/executors/executor-protocol" },
     { "path": "../../packages/kernel/kernel-events" },
     { "path": "../../packages/kernel/kernel-objects" }

@@ -9,4 +9,10 @@ V0.1 keeps this package intentionally small:
 - `createSpaceDesktopShellModel()` for assembling the minimal app state consumed by later UI work.
 - A browser-first local demo that can be started with `cd product && npm run dev`.
 
-The local demo runs the first visible Space loop with a deterministic mock executor. It is not the final desktop app package, and it does not include persistence, cloud runtime, account management, or polished infinite-canvas behavior.
+The local demo runs the first visible Space loop with a deterministic mock executor by default. It can also send goals to local Codex and Claude Code CLI adapters through the Node dev server. It is not the final desktop app package, and it does not include persistence, cloud runtime, account management, approval UI, or polished infinite-canvas behavior.
+
+Use a larger timeout for longer real executor experiments:
+
+```bash
+AI_SPACE_EXECUTOR_TIMEOUT_MS=120000 npm run dev
+```

@@ -1,7 +1,6 @@
 import {
   createInitialSpaceDemoState,
   createRunningSpaceDemoState,
-  runSpaceDemoGoal,
   type SpaceDemoExecutorChoice,
   type SpaceDemoState,
 } from "./demo-runtime.js";
@@ -50,8 +49,7 @@ async function runDemoFromForm(): Promise<void> {
   elements.runButton.disabled = true;
 
   try {
-    const result = await runSpaceDemoGoal({ goal, executorChoice });
-    state.current = result.state;
+    state.current = await runDemoOnServer({ goal, executorChoice });
   } catch (error) {
     state.current = {
       ...state.current,
@@ -62,6 +60,27 @@ async function runDemoFromForm(): Promise<void> {
     elements.runButton.disabled = false;
     render(state.current);
   }
+}
+
+async function runDemoOnServer(input: {
+  goal: string;
+  executorChoice: SpaceDemoExecutorChoice;
+}): Promise<SpaceDemoState> {
+  const response = await fetch("/api/demo/run", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+
+  const payload = (await response.json()) as { state?: SpaceDemoState; error?: string };
+
+  if (!response.ok || !payload.state) {
+    throw new Error(payload.error ?? "Local demo server failed.");
+  }
+
+  return payload.state;
 }
 
 function render(nextState: SpaceDemoState): void {
