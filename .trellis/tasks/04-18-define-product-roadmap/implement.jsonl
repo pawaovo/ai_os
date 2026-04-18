@@ -1,0 +1,9 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend development guide"}
+{"file": ".trellis/tasks/04-18-define-product-roadmap/prd.md", "reason": "Task PRD"}
+{"file": "ai_os/ai_os_docs/00-ai-os-overview.md", "reason": "Product vision and current-stage boundaries"}
+{"file": "ai_os/ai_os_docs/01-ai-space.md", "reason": "V0.1 Space scope and product loop"}
+{"file": "ai_os/ai_os_docs/02-ai-forge.md", "reason": "Forge staging and non-goals"}
+{"file": "ai_os/ai_os_docs/03-capability-layer-principles.md", "reason": "Provider executor capability trust principles"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Cross-layer planning guide"}
