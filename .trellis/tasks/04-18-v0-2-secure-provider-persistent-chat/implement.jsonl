@@ -1,0 +1,11 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend development guide"}
+{"file": ".trellis/tasks/04-18-v0-2-secure-provider-persistent-chat/prd.md", "reason": "Task PRD"}
+{"file": "ai_os/ai_os_docs/04-implementation-roadmap.md", "reason": "V0.2 roadmap"}
+{"file": "product/apps/space-desktop/scripts/dev-server.mjs", "reason": "Local server and persistence"}
+{"file": "product/apps/space-desktop/src/server-runtime.ts", "reason": "Provider/chat runtime"}
+{"file": "product/apps/space-desktop/src/browser.ts", "reason": "Browser UI"}
+{"file": "product/apps/space-desktop/public/index.html", "reason": "App shell"}
+{"file": "product/tests/space-desktop.test.mjs", "reason": "Existing product preview tests"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Cross-layer guide"}

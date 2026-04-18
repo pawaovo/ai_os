@@ -8,6 +8,8 @@ import type { ChatUiMessage } from "./server-runtime.js";
 
 const state = {
   current: createInitialSpaceDemoState(),
+  activeThreadId: undefined as string | undefined,
+  activeProviderId: undefined as string | undefined,
   chatMessages: [
     {
       role: "system",
@@ -18,14 +20,20 @@ const state = {
 
 const elements = {
   providerForm: getElement("provider-form", HTMLFormElement),
+  providerSelect: getElement("provider-select", HTMLSelectElement),
   providerName: getElement("provider-name", HTMLInputElement),
   providerProtocol: getElement("provider-protocol", HTMLSelectElement),
   providerBaseUrl: getElement("provider-base-url", HTMLInputElement),
   providerApiKey: getElement("provider-api-key", HTMLInputElement),
   providerModel: getElement("provider-model", HTMLInputElement),
   providerSaveButton: getElement("provider-save-button", HTMLButtonElement),
+  providerTestButton: getElement("provider-test-button", HTMLButtonElement),
+  providerModelsButton: getElement("provider-models-button", HTMLButtonElement),
   providerStatus: getElement("provider-status", HTMLElement),
   providerHelp: getElement("provider-help", HTMLElement),
+  threadSelect: getElement("thread-select", HTMLSelectElement),
+  threadNewButton: getElement("thread-new-button", HTMLButtonElement),
+  threadHelp: getElement("thread-help", HTMLElement),
   chatForm: getElement("chat-form", HTMLFormElement),
   chatInput: getElement("chat-input", HTMLTextAreaElement),
   chatSendButton: getElement("chat-send-button", HTMLButtonElement),
@@ -48,6 +56,26 @@ elements.providerForm.addEventListener("submit", (event) => {
   void saveProviderFromForm();
 });
 
+elements.providerSelect.addEventListener("change", () => {
+  void selectProviderFromList();
+});
+
+elements.providerTestButton.addEventListener("click", () => {
+  void testProviderFromForm();
+});
+
+elements.providerModelsButton.addEventListener("click", () => {
+  void loadModelsForSelectedProvider();
+});
+
+elements.threadSelect.addEventListener("change", () => {
+  void loadThread(elements.threadSelect.value);
+});
+
+elements.threadNewButton.addEventListener("click", () => {
+  void createThread();
+});
+
 elements.chatForm.addEventListener("submit", (event) => {
   event.preventDefault();
   void sendChatFromForm();
@@ -58,36 +86,74 @@ elements.form.addEventListener("submit", (event) => {
   void runDemoFromForm();
 });
 
-void loadProviderSettings();
+void initializeAppState();
 renderChatMessages();
 render(state.current);
 
-async function loadProviderSettings(): Promise<void> {
+async function initializeAppState(): Promise<void> {
+  await loadProviders();
+  await loadThreads();
+}
+
+async function loadProviders(): Promise<void> {
   try {
-    const response = await fetch("/api/provider");
+    const response = await fetch("/api/providers");
     const payload = (await response.json()) as {
-      configured: boolean;
-      provider?: {
+      activeProviderId?: string;
+      providers: Array<{
+        id?: string;
         name: string;
         protocol: string;
         baseUrl: string;
         apiKeyPreview: string;
         modelId: string;
-      };
+      }>;
     };
 
-    if (payload.configured && payload.provider) {
-      elements.providerName.value = payload.provider.name;
-      elements.providerProtocol.value = payload.provider.protocol;
-      elements.providerBaseUrl.value = payload.provider.baseUrl;
-      elements.providerModel.value = payload.provider.modelId;
+    elements.providerSelect.replaceChildren(
+      ...payload.providers.map((provider) => {
+        const option = document.createElement("option");
+        option.value = provider.id ?? "";
+        option.textContent = `${provider.name} / ${provider.modelId}`;
+        return option;
+      }),
+    );
+
+    const activeProvider = payload.providers.find((provider) => provider.id === payload.activeProviderId)
+      ?? payload.providers[0];
+    state.activeProviderId = activeProvider?.id;
+
+    if (activeProvider) {
+      elements.providerSelect.value = activeProvider.id ?? "";
+      fillProviderForm(activeProvider);
       elements.providerStatus.textContent = "configured";
       elements.providerStatus.dataset.phase = "completed";
-      elements.providerHelp.textContent = `Saved provider loaded. API key: ${payload.provider.apiKeyPreview}`;
+      elements.providerHelp.textContent = `Saved provider loaded. API key: ${activeProvider.apiKeyPreview}`;
+    } else {
+      elements.providerStatus.textContent = "not configured";
+      elements.providerStatus.dataset.phase = "idle";
+      elements.providerHelp.textContent = "Save a provider before chatting.";
     }
   } catch (error) {
     renderProviderError(error instanceof Error ? error.message : "Failed to load provider settings.");
   }
+}
+
+async function selectProviderFromList(): Promise<void> {
+  state.activeProviderId = elements.providerSelect.value || undefined;
+  await loadProviders();
+}
+
+function fillProviderForm(provider: {
+  name: string;
+  protocol: string;
+  baseUrl: string;
+  modelId: string;
+}): void {
+  elements.providerName.value = provider.name;
+  elements.providerProtocol.value = provider.protocol;
+  elements.providerBaseUrl.value = provider.baseUrl;
+  elements.providerModel.value = provider.modelId;
 }
 
 async function saveProviderFromForm(): Promise<void> {
@@ -102,6 +168,7 @@ async function saveProviderFromForm(): Promise<void> {
         "content-type": "application/json",
       },
       body: JSON.stringify({
+        id: state.activeProviderId,
         name: elements.providerName.value,
         protocol: elements.providerProtocol.value,
         baseUrl: elements.providerBaseUrl.value,
@@ -122,11 +189,131 @@ async function saveProviderFromForm(): Promise<void> {
     elements.providerStatus.textContent = "configured";
     elements.providerStatus.dataset.phase = "completed";
     elements.providerHelp.textContent = `Provider saved locally. API key: ${payload.provider?.apiKeyPreview ?? "saved"}`;
+    await loadProviders();
   } catch (error) {
     renderProviderError(error instanceof Error ? error.message : "Failed to save provider settings.");
   } finally {
     elements.providerSaveButton.disabled = false;
   }
+}
+
+async function testProviderFromForm(): Promise<void> {
+  elements.providerTestButton.disabled = true;
+  elements.providerStatus.textContent = "testing";
+  elements.providerStatus.dataset.phase = "running";
+
+  try {
+    const response = await fetch("/api/providers/doctor", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(providerDraftFromForm()),
+    });
+    const payload = (await response.json()) as { available: boolean; message: string; models: string[] };
+
+    elements.providerStatus.textContent = payload.available ? "healthy" : "failed";
+    elements.providerStatus.dataset.phase = payload.available ? "completed" : "failed";
+    elements.providerHelp.textContent = `${payload.message}${payload.models.length ? ` Models: ${payload.models.slice(0, 5).join(", ")}` : ""}`;
+  } catch (error) {
+    renderProviderError(error instanceof Error ? error.message : "Provider Doctor failed.");
+  } finally {
+    elements.providerTestButton.disabled = false;
+  }
+}
+
+async function loadModelsForSelectedProvider(): Promise<void> {
+  if (!state.activeProviderId) {
+    renderProviderError("Save or select a provider before loading models.");
+    return;
+  }
+
+  elements.providerModelsButton.disabled = true;
+  try {
+    const response = await fetch(`/api/providers/${encodeURIComponent(state.activeProviderId)}/models`);
+    const payload = (await response.json()) as { available: boolean; message: string; models: string[] };
+
+    if (!payload.available) {
+      throw new Error(payload.message);
+    }
+
+    elements.providerHelp.textContent = `Loaded models: ${payload.models.slice(0, 8).join(", ")}`;
+    if (payload.models.length > 0) {
+      elements.providerModel.value = payload.models[0] ?? elements.providerModel.value;
+    }
+  } catch (error) {
+    renderProviderError(error instanceof Error ? error.message : "Failed to load models.");
+  } finally {
+    elements.providerModelsButton.disabled = false;
+  }
+}
+
+function providerDraftFromForm() {
+  return {
+    id: state.activeProviderId,
+    name: elements.providerName.value,
+    protocol: elements.providerProtocol.value,
+    baseUrl: elements.providerBaseUrl.value,
+    apiKey: elements.providerApiKey.value,
+    modelId: elements.providerModel.value,
+  };
+}
+
+async function loadThreads(): Promise<void> {
+  const response = await fetch("/api/threads");
+  const payload = (await response.json()) as {
+    activeThreadId?: string;
+    threads: Array<{ id: string; title: string; messageCount: number }>;
+  };
+
+  elements.threadSelect.replaceChildren(
+    ...payload.threads.map((thread) => {
+      const option = document.createElement("option");
+      option.value = thread.id;
+      option.textContent = `${thread.title} (${thread.messageCount})`;
+      return option;
+    }),
+  );
+
+  const activeThread = payload.threads.find((thread) => thread.id === payload.activeThreadId) ?? payload.threads[0];
+  state.activeThreadId = activeThread?.id;
+
+  if (activeThread) {
+    elements.threadSelect.value = activeThread.id;
+    await loadThread(activeThread.id);
+  } else {
+    elements.threadHelp.textContent = "Create a thread to start persistent chat.";
+  }
+}
+
+async function createThread(): Promise<void> {
+  const response = await fetch("/api/threads", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      title: "New Thread",
+      providerId: state.activeProviderId,
+      modelId: elements.providerModel.value,
+    }),
+  });
+  const payload = (await response.json()) as { thread: { id: string } };
+  state.activeThreadId = payload.thread.id;
+  await loadThreads();
+}
+
+async function loadThread(threadId: string): Promise<void> {
+  if (!threadId) return;
+
+  const response = await fetch(`/api/threads/${encodeURIComponent(threadId)}/messages`);
+  const payload = (await response.json()) as {
+    thread: { id: string; title: string };
+    messages: ChatUiMessage[];
+  };
+
+  state.activeThreadId = payload.thread.id;
+  state.chatMessages = payload.messages.length > 0
+    ? payload.messages
+    : [{ role: "system", content: "This thread has no messages yet." }];
+  elements.threadHelp.textContent = `Active thread: ${payload.thread.title}`;
+  renderChatMessages();
 }
 
 async function sendChatFromForm(): Promise<void> {
@@ -143,19 +330,25 @@ async function sendChatFromForm(): Promise<void> {
   renderChatMessages();
 
   try {
-    const response = await fetch("/api/chat/send", {
+    const threadId = state.activeThreadId;
+    const response = await fetch(
+      threadId ? `/api/threads/${encodeURIComponent(threadId)}/messages` : "/api/chat/send",
+      {
       method: "POST",
       headers: {
         "content-type": "application/json",
       },
       body: JSON.stringify({
         message,
-        history: state.chatMessages.slice(0, -1),
+        threadId,
+        providerId: state.activeProviderId,
       }),
-    });
+      },
+    );
     const payload = (await response.json()) as {
       error?: string;
       messages?: ChatUiMessage[];
+      threadId?: string;
     };
 
     if (!response.ok || !payload.messages) {
@@ -163,6 +356,8 @@ async function sendChatFromForm(): Promise<void> {
     }
 
     state.chatMessages = payload.messages;
+    state.activeThreadId = payload.threadId ?? state.activeThreadId;
+    await loadThreads();
   } catch (error) {
     state.chatMessages = [
       ...state.chatMessages,

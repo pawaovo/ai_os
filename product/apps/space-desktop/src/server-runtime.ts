@@ -46,6 +46,7 @@ export interface SpaceDemoRunResponse {
 }
 
 export interface StoredProviderConfig {
+  id?: string;
   name: string;
   protocol: ProviderProtocol;
   baseUrl: string;
@@ -54,6 +55,7 @@ export interface StoredProviderConfig {
 }
 
 export interface ProviderSettingsInput {
+  id?: string;
   name: string;
   protocol: ProviderProtocol;
   baseUrl: string;
@@ -64,6 +66,7 @@ export interface ProviderSettingsInput {
 export interface ProviderSettingsResponse {
   configured: boolean;
   provider?: {
+    id?: string;
     name: string;
     protocol: ProviderProtocol;
     baseUrl: string;
@@ -72,19 +75,46 @@ export interface ProviderSettingsResponse {
   };
 }
 
+export interface ProviderListResponse {
+  providers: Array<NonNullable<ProviderSettingsResponse["provider"]>>;
+  activeProviderId?: string;
+}
+
+export interface ProviderDoctorResponse {
+  available: boolean;
+  message: string;
+  models: string[];
+}
+
+export interface ChatThreadSummary {
+  id: string;
+  title: string;
+  updatedAt: string;
+}
+
+export interface ChatThreadListResponse {
+  threads: ChatThreadSummary[];
+  activeThreadId?: string;
+}
+
 export type ChatUiRole = Extract<ChatRole, "user" | "assistant" | "system">;
 
 export interface ChatUiMessage {
+  id?: string;
   role: ChatUiRole;
   content: string;
+  createdAt?: string;
 }
 
 export interface ChatSendRequest {
   message: string;
   history: ChatUiMessage[];
+  threadId?: string;
+  providerId?: string;
 }
 
 export interface ChatSendResponse {
+  threadId?: string;
   messages: ChatUiMessage[];
   assistantMessage: string;
 }
@@ -166,6 +196,7 @@ export function parseProviderSettingsInput(
   }
 
   return {
+    ...readIdProperty(value.id),
     name,
     protocol,
     baseUrl,
@@ -184,6 +215,7 @@ export function createProviderSettingsResponse(
   return {
     configured: true,
     provider: {
+      ...(provider.id ? { id: provider.id } : {}),
       name: provider.name,
       protocol: provider.protocol,
       baseUrl: provider.baseUrl,
@@ -206,7 +238,53 @@ export function parseChatSendRequest(value: unknown): ChatSendRequest {
   return {
     message,
     history,
+    ...readThreadIdProperty(value.threadId),
+    ...readProviderIdProperty(value.providerId),
   };
+}
+
+export function createProviderListResponse(
+  providers: StoredProviderConfig[],
+  activeProviderId?: string,
+): ProviderListResponse {
+  return {
+    providers: providers
+      .map((provider) => createProviderSettingsResponse(provider).provider)
+      .filter((provider): provider is NonNullable<ProviderSettingsResponse["provider"]> => Boolean(provider)),
+    ...(activeProviderId ? { activeProviderId } : {}),
+  };
+}
+
+export async function runProviderDoctor(input: {
+  provider: StoredProviderConfig | undefined;
+  fetch: typeof fetch;
+}): Promise<ProviderDoctorResponse> {
+  if (!input.provider) {
+    return {
+      available: false,
+      message: "Configure a model provider first.",
+      models: [],
+    };
+  }
+
+  const registry = createProviderRegistry();
+  const providerConfig = toModelProviderConfig(input.provider);
+  const providerRuntime = createProviderRuntime(input.provider, input.fetch);
+
+  try {
+    const models = await registry.listModels(providerConfig, providerRuntime);
+    return {
+      available: true,
+      message: "Provider connection succeeded.",
+      models: models.map((model) => model.id),
+    };
+  } catch (error) {
+    return {
+      available: false,
+      message: error instanceof Error ? error.message : "Provider connection failed.",
+      models: [],
+    };
+  }
 }
 
 export async function runChatSendRequest(input: {
@@ -226,16 +304,7 @@ export async function runChatSendRequest(input: {
   const conversationMessages = messages.map(toConversationMessage);
   const registry = createProviderRegistry();
   const providerConfig = toModelProviderConfig(provider);
-  const providerRuntime: ProviderRuntime = {
-    fetch: input.fetch,
-    async resolveSecret(ref) {
-      if (ref !== ACTIVE_SECRET_REF) {
-        throw new Error(`Unknown secret ref: ${ref}`);
-      }
-
-      return provider.apiKey;
-    },
-  };
+  const providerRuntime = createProviderRuntime(provider, input.fetch);
   let assistantMessage = "";
 
   for await (const event of streamConversation({
@@ -266,6 +335,7 @@ export async function runChatSendRequest(input: {
   }
 
   return {
+    ...(input.request.threadId ? { threadId: input.request.threadId } : {}),
     assistantMessage,
     messages: [
       ...messages,
@@ -309,6 +379,19 @@ function createProviderRegistry(): ProviderRegistry {
   registry.register(new OpenAiCompatibleProvider("provider-openai-compatible-preview" as ProviderId));
   registry.register(new AnthropicCompatibleProvider("provider-anthropic-compatible-preview" as ProviderId));
   return registry;
+}
+
+function createProviderRuntime(provider: StoredProviderConfig, runtimeFetch: typeof fetch): ProviderRuntime {
+  return {
+    fetch: runtimeFetch,
+    async resolveSecret(ref) {
+      if (ref !== ACTIVE_SECRET_REF) {
+        throw new Error(`Unknown secret ref: ${ref}`);
+      }
+
+      return provider.apiKey;
+    },
+  };
 }
 
 function toModelProviderConfig(provider: StoredProviderConfig): ModelProviderConfig {
@@ -376,6 +459,21 @@ function readRequiredString(value: unknown, field: string): string {
 
 function readOptionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function readIdProperty(value: unknown): { id?: string } {
+  const id = readOptionalString(value);
+  return id ? { id } : {};
+}
+
+function readThreadIdProperty(value: unknown): { threadId?: string } {
+  const threadId = readOptionalString(value);
+  return threadId ? { threadId } : {};
+}
+
+function readProviderIdProperty(value: unknown): { providerId?: string } {
+  const providerId = readOptionalString(value);
+  return providerId ? { providerId } : {};
 }
 
 function toConversationMessage(message: ChatUiMessage, index: number): ConversationMessage {

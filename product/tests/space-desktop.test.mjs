@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
+import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 
 const productRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -309,6 +312,70 @@ test("runChatSendRequest sends Anthropic-compatible chat through the provider la
   assert.match(String(calls[0].init.body), /"model":"claude-demo"/);
 });
 
+test("space desktop dev server persists providers, threads, and messages without leaking secrets", async () => {
+  const storageDir = await mkdtemp(`${tmpdir()}/ai-os-v02-`);
+  const providerServer = await startMockOpenAiProvider();
+  const appPort = await getAvailablePort();
+  const appServer = startSpaceDesktopServer({
+    port: appPort,
+    storageDir,
+  });
+  let restartedServer;
+
+  try {
+    await waitForHttp(`http://127.0.0.1:${appPort}/`);
+
+    const provider = await postJson(`http://127.0.0.1:${appPort}/api/providers`, {
+      name: "Persistent Mock Provider",
+      protocol: "openai-compatible",
+      baseUrl: `http://127.0.0.1:${providerServer.port}/v1`,
+      apiKey: "sk-persistent-secret",
+      modelId: "mock-model",
+    });
+
+    assert.equal(provider.configured, true);
+    assert.equal(provider.provider.apiKey, undefined);
+
+    const thread = await postJson(`http://127.0.0.1:${appPort}/api/threads`, {
+      title: "Persistent Thread",
+    });
+    await postJson(`http://127.0.0.1:${appPort}/api/threads/${thread.thread.id}/messages`, {
+      message: "hello persistent server",
+    });
+
+    await appServer.stop();
+    restartedServer = startSpaceDesktopServer({
+      port: appPort,
+      storageDir,
+    });
+
+    await waitForHttp(`http://127.0.0.1:${appPort}/`);
+
+    const providers = await getJson(`http://127.0.0.1:${appPort}/api/providers`);
+    assert.equal(providers.providers.length, 1);
+    assert.equal(providers.providers[0].name, "Persistent Mock Provider");
+    assert.equal(providers.providers[0].apiKey, undefined);
+
+    const messages = await getJson(`http://127.0.0.1:${appPort}/api/threads/${thread.thread.id}/messages`);
+    assert.equal(messages.thread.title, "Persistent Thread");
+    assert.deepEqual(
+      messages.messages.map((message) => `${message.role}:${message.content}`),
+      ["user:hello persistent server", "assistant:persistent chat ok"],
+    );
+
+    const dbBytes = await readFile(`${storageDir}/app.db`);
+    assert.equal(dbBytes.includes(Buffer.from("sk-persistent-secret")), false);
+
+    const secretStore = JSON.parse(await readFile(`${storageDir}/secrets.json`, "utf8"));
+    assert.equal(Object.values(secretStore)[0], "sk-persistent-secret");
+  } finally {
+    await restartedServer?.stop();
+    await appServer.stop();
+    await providerServer.stop();
+    await rm(storageDir, { recursive: true, force: true });
+  }
+});
+
 test("runSpaceDemoRequest executes the mock path through the server runtime", async () => {
   const response = await runSpaceDemoRequest(
     {
@@ -440,4 +507,124 @@ function createSseResponse(text) {
       status: 200,
     },
   );
+}
+
+function startSpaceDesktopServer({ port, storageDir }) {
+  const child = spawn(
+    process.execPath,
+    ["./apps/space-desktop/scripts/dev-server.mjs"],
+    {
+      cwd: productRoot,
+      env: {
+        ...process.env,
+        PORT: String(port),
+        AI_SPACE_SKIP_BUILD: "1",
+        AI_SPACE_STORAGE_DIR: storageDir,
+        AI_SPACE_SECRET_BACKEND: "file",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  let stderr = "";
+
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+
+  return {
+    process: child,
+    async stop() {
+      if (child.exitCode !== null || child.signalCode !== null) return;
+
+      child.kill("SIGTERM");
+      await new Promise((resolve) => {
+        child.once("close", resolve);
+        setTimeout(resolve, 1000);
+      });
+    },
+    stderr() {
+      return stderr;
+    },
+  };
+}
+
+async function startMockOpenAiProvider() {
+  const server = createServer((request, response) => {
+    if (request.url?.endsWith("/chat/completions")) {
+      request.resume();
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.end('data: {"choices":[{"delta":{"content":"persistent chat ok"}}]}\n\n');
+      return;
+    }
+
+    if (request.url?.endsWith("/models")) {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ data: [{ id: "mock-model" }] }));
+      return;
+    }
+
+    response.writeHead(404);
+    response.end("not found");
+  });
+  const port = await listenOnRandomPort(server);
+
+  return {
+    port,
+    async stop() {
+      await new Promise((resolve) => server.close(resolve));
+    },
+  };
+}
+
+async function listenOnRandomPort(server) {
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.equal(typeof address, "object");
+  assert.notEqual(address, null);
+  return address.port;
+}
+
+async function getAvailablePort() {
+  const server = createServer();
+  const port = await listenOnRandomPort(server);
+  await new Promise((resolve) => server.close(resolve));
+  return port;
+}
+
+async function waitForHttp(url) {
+  const startedAt = Date.now();
+  let lastError;
+
+  while (Date.now() - startedAt < 5000) {
+    try {
+      const response = await fetch(url);
+      if (response.ok) return;
+    } catch (error) {
+      lastError = error;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  throw lastError ?? new Error(`Timed out waiting for ${url}`);
+}
+
+async function getJson(url) {
+  const response = await fetch(url);
+  assert.equal(response.ok, true);
+  return response.json();
+}
+
+async function postJson(url, body) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  assert.equal(response.ok, true);
+  return response.json();
 }

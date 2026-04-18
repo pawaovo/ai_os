@@ -68,18 +68,19 @@ The demo is a browser-first local validation surface. It lets you enter a goal a
 Product preview capabilities:
 
 - Configure an OpenAI-compatible or Anthropic-compatible model provider.
-- Save provider name, protocol, API base URL, API key, and model locally.
+- Save provider name, protocol, API base URL, and model in local SQLite.
+- Save provider API keys in macOS Keychain.
 - Send real chat messages through the configured provider.
 - Keep a multi-message chat transcript in the current app session.
 - Run the executor/artifact demo path from the same app.
 
-V0.1 preview provider settings are stored locally at:
+V0.2 provider metadata, thread list, and messages are stored locally under:
 
 ```text
-~/.ai_os/space-demo/provider.json
+~/.ai_os/space-demo/app.db
 ```
 
-This file stores the API key in plain text for the preview build. Keychain-backed storage is a later V0.2 hardening task.
+Provider API keys are stored separately in macOS Keychain using the provider id as the account key. Test builds may opt into `AI_SPACE_SECRET_BACKEND=file`, but the default app path uses Keychain.
 
 Executor choices:
 
@@ -110,6 +111,6 @@ This V0.1 app opens a native macOS window using WebKit and starts the local Spac
 
 ## Non-Goals
 
-This V0.1 build does not implement database persistence, keychain-backed credential storage, managed executor process lifecycle, signed installer packaging, Forge, Store, cloud runtime, or team permissions.
+This V0.2 build does not implement managed executor process lifecycle, signed installer packaging, Forge, Store, cloud runtime, or team permissions.
 
 The workspace/artifact core packages stay intentionally narrow in V0.1: reference creation and artifact-to-run/space linking only, with no database layer, file synchronization, or preview pipeline.

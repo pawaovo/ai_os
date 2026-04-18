@@ -32,6 +32,10 @@
         </div>
         <h2 id="provider-title">Provider Settings</h2>
         <form id="provider-form" class="provider-form">
+          <label>
+            Saved providers
+            <select id="provider-select"></select>
+          </label>
           <div class="form-grid">
             <label>
               Provider name
@@ -59,9 +63,21 @@
           </label>
           <div class="form-row">
             <button id="provider-save-button" type="submit">Save Provider</button>
-            <p id="provider-help" class="inline-help">Saved locally for V0.1 preview. Keychain storage comes later.</p>
+            <button id="provider-test-button" type="button">Test Provider</button>
+            <button id="provider-models-button" type="button">Load Models</button>
+            <p id="provider-help" class="inline-help">Provider metadata is stored in SQLite. API keys are stored in macOS Keychain.</p>
           </div>
         </form>
+      </section>
+
+      <section class="threads-panel" aria-labelledby="threads-title">
+        <p class="eyebrow">Threads</p>
+        <h2 id="threads-title">Chat Threads</h2>
+        <div class="form-row">
+          <select id="thread-select"></select>
+          <button id="thread-new-button" type="button">New Thread</button>
+        </div>
+        <p id="thread-help" class="inline-help">Threads and messages persist locally in V0.2.</p>
       </section>
 
       <section class="chat-panel" aria-labelledby="chat-title">
