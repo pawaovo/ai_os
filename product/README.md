@@ -77,8 +77,23 @@ Real executor calls are bounded by a demo timeout. Override it when needed:
 AI_SPACE_EXECUTOR_TIMEOUT_MS=120000 npm run dev
 ```
 
+## Build The V0.1 macOS App
+
+```bash
+npm run package:mac
+open "build/AI OS.app"
+```
+
+The generated app bundle is:
+
+```text
+product/build/AI OS.app
+```
+
+This V0.1 app opens a native macOS window using WebKit and starts the local Space Demo server internally. It is intentionally not signed, notarized, or packaged as a `.dmg` yet. The V0.1 app expects Node to be available on the local machine, because the bundled desktop shell still uses the local Node server runtime.
+
 ## Non-Goals
 
-This initial skeleton does not implement database persistence, real model network smoke tests, managed executor process lifecycle, Forge, Store, cloud runtime, or team permissions.
+This V0.1 build does not implement database persistence, real model network smoke tests, managed executor process lifecycle, signed installer packaging, Forge, Store, cloud runtime, or team permissions.
 
 The workspace/artifact core packages stay intentionally narrow in V0.1: reference creation and artifact-to-run/space linking only, with no database layer, file synchronization, or preview pipeline.

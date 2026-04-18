@@ -1,0 +1,9 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend development guide"}
+{"file": ".trellis/tasks/04-18-package-v0-1-desktop-app/prd.md", "reason": "Task PRD"}
+{"file": "product/apps/space-desktop/scripts/dev-server.mjs", "reason": "Demo server"}
+{"file": "product/apps/space-desktop/public/index.html", "reason": "Demo HTML"}
+{"file": "product/apps/space-desktop/src/server-runtime.ts", "reason": "Server runtime"}
+{"file": "product/package.json", "reason": "Product scripts"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Cross-layer guide"}

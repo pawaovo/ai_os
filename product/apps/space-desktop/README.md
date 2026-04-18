@@ -16,3 +16,12 @@ Use a larger timeout for longer real executor experiments:
 ```bash
 AI_SPACE_EXECUTOR_TIMEOUT_MS=120000 npm run dev
 ```
+
+Build the clickable V0.1 macOS app from `product/`:
+
+```bash
+npm run package:mac
+open "build/AI OS.app"
+```
+
+The generated `.app` opens a native WebKit window and starts the local Space Demo server internally. For V0.1 it requires Node to be available on the machine and is not signed or notarized.

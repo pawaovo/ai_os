@@ -6,6 +6,7 @@ reference_projects/
 # Node / TypeScript outputs.
 node_modules/
 product/node_modules/
+product/build/
 product/**/dist/
 product/**/*.tsbuildinfo
 
@@ -21,4 +22,3 @@ product/**/*.tsbuildinfo
 .codex/
 .cursor/
 .agents/
-

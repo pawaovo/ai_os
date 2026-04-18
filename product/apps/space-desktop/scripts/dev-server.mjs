@@ -13,7 +13,9 @@ const publicRoot = join(appRoot, "public");
 const port = Number.parseInt(process.env.PORT ?? "5173", 10);
 const executorTimeoutMs = Number.parseInt(process.env.AI_SPACE_EXECUTOR_TIMEOUT_MS ?? "60000", 10);
 
-buildProduct();
+if (process.env.AI_SPACE_SKIP_BUILD !== "1") {
+  buildProduct();
+}
 
 const { parseSpaceDemoRunRequest, runSpaceDemoRequest } = await import(
   pathToImportUrl(join(appRoot, "dist/server-runtime.js"))

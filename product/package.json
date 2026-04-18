@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "node ./apps/space-desktop/scripts/dev-server.mjs",
     "build": "npm run typecheck",
+    "package:mac": "node ./apps/space-desktop/scripts/package-macos.mjs",
     "typecheck": "tsc -b",
     "test": "npm run typecheck && node --test tests/*.test.mjs"
   },
