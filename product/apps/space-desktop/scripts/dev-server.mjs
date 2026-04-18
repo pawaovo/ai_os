@@ -219,6 +219,7 @@ class NodeProcessRunner {
       stdio: ["pipe", "pipe", "pipe"],
     });
     let timedOut = false;
+    let lastStdoutLine = "";
     const timeout = setTimeout(() => {
       timedOut = true;
       child.kill("SIGTERM");
@@ -245,6 +246,7 @@ class NodeProcessRunner {
     });
 
     for await (const line of lines) {
+      lastStdoutLine = line;
       yield line;
     }
 
@@ -252,7 +254,9 @@ class NodeProcessRunner {
       clearTimeout(timeout);
     });
     if (timedOut) {
-      throw new Error(`${command.command} exceeded ${this.timeoutMs}ms demo timeout.`);
+      throw new Error(
+        `${command.command} exceeded ${this.timeoutMs}ms demo timeout.${summarizeProcessOutput(lastStdoutLine)}`,
+      );
     }
 
     if (code !== 0) {
@@ -282,6 +286,37 @@ class LocalProviderStore {
     await mkdir(dirname(this.filePath), { recursive: true });
     await writeFile(this.filePath, JSON.stringify(provider, null, 2), "utf8");
   }
+}
+
+function summarizeProcessOutput(line) {
+  if (!line) return "";
+
+  try {
+    const event = JSON.parse(line);
+    const parts = [
+      event.type,
+      event.subtype,
+      event.error_status ? `HTTP ${event.error_status}` : undefined,
+      typeof event.error === "string" ? event.error : undefined,
+    ].filter(Boolean);
+
+    if (parts.length > 0) {
+      return ` Last process event: ${parts.join(" / ")}.`;
+    }
+  } catch {
+    const trimmed = line.trim();
+    if (trimmed.length > 0) {
+      return ` Last process output: ${redactProcessOutput(trimmed).slice(0, 180)}.`;
+    }
+  }
+
+  return "";
+}
+
+function redactProcessOutput(value) {
+  return value
+    .replace(/https?:\/\/[^\s"']+/g, "[redacted-url]")
+    .replace(/[A-Za-z0-9_-]{20,}/g, "[redacted-token]");
 }
 
 processRunner = new NodeProcessRunner(productRoot, executorTimeoutMs);

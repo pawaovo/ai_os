@@ -1,0 +1,6 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend development guide"}
+{"file": ".trellis/tasks/04-18-verify-v0-1-local-cli-configs/prd.md", "reason": "Task PRD"}
+{"file": "product/apps/space-desktop/scripts/dev-server.mjs", "reason": "CLI runner diagnostics"}
+{"file": "product/apps/space-desktop/src/server-runtime.ts", "reason": "Executor server runtime"}
