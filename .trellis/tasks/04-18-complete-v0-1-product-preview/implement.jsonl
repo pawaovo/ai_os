@@ -1,0 +1,14 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend development guide"}
+{"file": ".trellis/tasks/04-18-complete-v0-1-product-preview/prd.md", "reason": "Task PRD"}
+{"file": "ai_os/ai_os_docs/01-ai-space.md", "reason": "V0.1 product scope"}
+{"file": "ai_os/ai_os_docs/03-capability-layer-principles.md", "reason": "Provider and executor boundaries"}
+{"file": "product/apps/space-desktop/public/index.html", "reason": "Current app UI"}
+{"file": "product/apps/space-desktop/src/browser.ts", "reason": "Browser entry"}
+{"file": "product/apps/space-desktop/src/server-runtime.ts", "reason": "Server runtime"}
+{"file": "product/apps/space-desktop/scripts/dev-server.mjs", "reason": "Local server API"}
+{"file": "product/packages/model-providers/provider-openai-compatible/src/index.ts", "reason": "OpenAI provider adapter"}
+{"file": "product/packages/model-providers/provider-anthropic-compatible/src/index.ts", "reason": "Anthropic provider adapter"}
+{"file": "product/packages/model-providers/provider-registry/src/index.ts", "reason": "Provider registry"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Cross-layer guide"}

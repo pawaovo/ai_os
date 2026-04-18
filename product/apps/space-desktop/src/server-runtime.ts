@@ -1,7 +1,26 @@
+import type { ChatRole, ConversationMessage } from "@ai-os/conversation-core";
+import { streamConversation } from "@ai-os/conversation-runtime";
 import { ClaudeCodeProcessExecutor } from "@ai-os/executor-claude-code";
 import { CodexProcessExecutor } from "@ai-os/executor-codex";
 import type { CodeExecutor, ExecutorProcessRunner } from "@ai-os/executor-protocol";
-import type { ArtifactId, ExecutorId, IsoDateTime, RunId } from "@ai-os/kernel-objects";
+import type {
+  ArtifactId,
+  ExecutorId,
+  IsoDateTime,
+  MessageId,
+  ProviderId,
+  RunId,
+  ThreadId,
+} from "@ai-os/kernel-objects";
+import { AnthropicCompatibleProvider } from "@ai-os/provider-anthropic-compatible";
+import { OpenAiCompatibleProvider } from "@ai-os/provider-openai-compatible";
+import type {
+  ModelProviderConfig,
+  ProviderProtocol,
+  ProviderRuntime,
+  SecretRef,
+} from "@ai-os/provider-protocol";
+import { ProviderRegistry } from "@ai-os/provider-registry";
 
 import {
   createFailedSpaceDemoState,
@@ -26,7 +45,54 @@ export interface SpaceDemoRunResponse {
   state: SpaceDemoState;
 }
 
+export interface StoredProviderConfig {
+  name: string;
+  protocol: ProviderProtocol;
+  baseUrl: string;
+  apiKey: string;
+  modelId: string;
+}
+
+export interface ProviderSettingsInput {
+  name: string;
+  protocol: ProviderProtocol;
+  baseUrl: string;
+  apiKey?: string;
+  modelId: string;
+}
+
+export interface ProviderSettingsResponse {
+  configured: boolean;
+  provider?: {
+    name: string;
+    protocol: ProviderProtocol;
+    baseUrl: string;
+    apiKeyPreview: string;
+    modelId: string;
+  };
+}
+
+export type ChatUiRole = Extract<ChatRole, "user" | "assistant" | "system">;
+
+export interface ChatUiMessage {
+  role: ChatUiRole;
+  content: string;
+}
+
+export interface ChatSendRequest {
+  message: string;
+  history: ChatUiMessage[];
+}
+
+export interface ChatSendResponse {
+  messages: ChatUiMessage[];
+  assistantMessage: string;
+}
+
 const DEFAULT_CODEX_ARGS = ["exec", "--json", "--sandbox", "read-only", "--skip-git-repo-check"];
+const ACTIVE_PROVIDER_ID = "provider-local-preview" as ProviderId;
+const ACTIVE_THREAD_ID = "thread-product-preview" as ThreadId;
+const ACTIVE_SECRET_REF = "secret:active-provider-api-key" as SecretRef;
 
 export function parseSpaceDemoRunRequest(value: unknown): SpaceDemoRunRequest {
   if (!isRecord(value)) {
@@ -81,6 +147,136 @@ export async function runSpaceDemoRequest(
   }
 }
 
+export function parseProviderSettingsInput(
+  value: unknown,
+  existing?: StoredProviderConfig,
+): StoredProviderConfig {
+  if (!isRecord(value)) {
+    throw new Error("Provider settings body must be a JSON object.");
+  }
+
+  const name = readRequiredString(value.name, "name");
+  const protocol = parseProviderProtocol(value.protocol);
+  const baseUrl = readRequiredString(value.baseUrl, "baseUrl").replace(/\/+$/, "");
+  const apiKey = readOptionalString(value.apiKey) || existing?.apiKey;
+  const modelId = readRequiredString(value.modelId, "modelId");
+
+  if (!apiKey) {
+    throw new Error("Provider API key is required.");
+  }
+
+  return {
+    name,
+    protocol,
+    baseUrl,
+    apiKey,
+    modelId,
+  };
+}
+
+export function createProviderSettingsResponse(
+  provider: StoredProviderConfig | undefined,
+): ProviderSettingsResponse {
+  if (!provider) {
+    return { configured: false };
+  }
+
+  return {
+    configured: true,
+    provider: {
+      name: provider.name,
+      protocol: provider.protocol,
+      baseUrl: provider.baseUrl,
+      apiKeyPreview: maskSecret(provider.apiKey),
+      modelId: provider.modelId,
+    },
+  };
+}
+
+export function parseChatSendRequest(value: unknown): ChatSendRequest {
+  if (!isRecord(value)) {
+    throw new Error("Chat request body must be a JSON object.");
+  }
+
+  const message = readRequiredString(value.message, "message");
+  const history = Array.isArray(value.history)
+    ? value.history.map(parseChatUiMessage)
+    : [];
+
+  return {
+    message,
+    history,
+  };
+}
+
+export async function runChatSendRequest(input: {
+  request: ChatSendRequest;
+  provider: StoredProviderConfig | undefined;
+  fetch: typeof fetch;
+}): Promise<ChatSendResponse> {
+  if (!input.provider) {
+    throw new Error("Configure a model provider before chatting.");
+  }
+
+  const provider = input.provider;
+  const messages = [
+    ...input.request.history,
+    { role: "user" as const, content: input.request.message },
+  ];
+  const conversationMessages = messages.map(toConversationMessage);
+  const registry = createProviderRegistry();
+  const providerConfig = toModelProviderConfig(provider);
+  const providerRuntime: ProviderRuntime = {
+    fetch: input.fetch,
+    async resolveSecret(ref) {
+      if (ref !== ACTIVE_SECRET_REF) {
+        throw new Error(`Unknown secret ref: ${ref}`);
+      }
+
+      return provider.apiKey;
+    },
+  };
+  let assistantMessage = "";
+
+  for await (const event of streamConversation({
+    registry,
+    providerConfig,
+    providerRuntime,
+    chatRequest: {
+      threadId: ACTIVE_THREAD_ID,
+      providerId: ACTIVE_PROVIDER_ID,
+      modelId: provider.modelId,
+      messages: conversationMessages,
+    },
+  })) {
+    switch (event.type) {
+      case "text.delta":
+        assistantMessage += event.delta;
+        break;
+      case "message.completed":
+        assistantMessage += messageToText(event.message);
+        break;
+      case "error":
+        throw new Error(event.message);
+    }
+  }
+
+  if (assistantMessage.length === 0) {
+    throw new Error("Provider returned an empty assistant response.");
+  }
+
+  return {
+    assistantMessage,
+    messages: [
+      ...messages,
+      {
+        role: "assistant",
+        content: assistantMessage,
+      },
+    ],
+  };
+}
+
 function createProcessExecutor(
   executorChoice: Exclude<SpaceDemoExecutorChoice, "mock">,
   runtime: SpaceDemoServerRuntime,
@@ -108,6 +304,34 @@ function createProcessExecutor(
   });
 }
 
+function createProviderRegistry(): ProviderRegistry {
+  const registry = new ProviderRegistry();
+  registry.register(new OpenAiCompatibleProvider("provider-openai-compatible-preview" as ProviderId));
+  registry.register(new AnthropicCompatibleProvider("provider-anthropic-compatible-preview" as ProviderId));
+  return registry;
+}
+
+function toModelProviderConfig(provider: StoredProviderConfig): ModelProviderConfig {
+  return {
+    id: ACTIVE_PROVIDER_ID,
+    name: provider.name,
+    protocol: provider.protocol,
+    baseUrl: provider.baseUrl,
+    apiKeyRef: ACTIVE_SECRET_REF,
+    defaultModelId: provider.modelId,
+  };
+}
+
+function parseProviderProtocol(value: unknown): ProviderProtocol {
+  switch (value) {
+    case "openai-compatible":
+    case "anthropic-compatible":
+      return value;
+    default:
+      throw new Error("Unsupported provider protocol.");
+  }
+}
+
 function parseExecutorChoice(value: unknown): SpaceDemoExecutorChoice {
   switch (value) {
     case "codex":
@@ -118,6 +342,68 @@ function parseExecutorChoice(value: unknown): SpaceDemoExecutorChoice {
     default:
       throw new Error("Unsupported executor choice.");
   }
+}
+
+function parseChatUiMessage(value: unknown): ChatUiMessage {
+  if (!isRecord(value)) {
+    throw new Error("Chat history entries must be JSON objects.");
+  }
+
+  const role = parseChatUiRole(value.role);
+  const content = readRequiredString(value.content, "content");
+
+  return { role, content };
+}
+
+function parseChatUiRole(value: unknown): ChatUiRole {
+  switch (value) {
+    case "user":
+    case "assistant":
+    case "system":
+      return value;
+    default:
+      throw new Error("Unsupported chat role.");
+  }
+}
+
+function readRequiredString(value: unknown, field: string): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`Provider settings field is required: ${field}`);
+  }
+
+  return value.trim();
+}
+
+function readOptionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function toConversationMessage(message: ChatUiMessage, index: number): ConversationMessage {
+  return {
+    id: `message-preview-${index + 1}` as MessageId,
+    role: message.role,
+    parts: [
+      {
+        type: "text",
+        text: message.content,
+      },
+    ],
+  };
+}
+
+function messageToText(message: ConversationMessage): string {
+  return message.parts
+    .map((part) => part.text ?? part.ref ?? "")
+    .filter(Boolean)
+    .join("\n");
+}
+
+function maskSecret(secret: string): string {
+  if (secret.length <= 8) {
+    return "****";
+  }
+
+  return `${secret.slice(0, 3)}...${secret.slice(-4)}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

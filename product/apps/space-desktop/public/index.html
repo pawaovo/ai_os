@@ -20,9 +20,64 @@
         <p class="eyebrow">AI OS / V0.1 local validation surface</p>
         <h1 id="app-title">AI Space Demo</h1>
         <p class="hero-copy">
-          Test the first visible loop: goal input, Companion handoff, Control Plane run,
-          normalized executor events, and artifact return.
+          Configure a model provider, chat with it, then test the executor loop with
+          Companion, Control Plane, normalized events, and artifact return.
         </p>
+      </section>
+
+      <section class="provider-panel" aria-labelledby="provider-title">
+        <div class="panel-heading">
+          <p class="eyebrow">Model Provider</p>
+          <span id="provider-status" class="status-pill" data-phase="idle">not configured</span>
+        </div>
+        <h2 id="provider-title">Provider Settings</h2>
+        <form id="provider-form" class="provider-form">
+          <div class="form-grid">
+            <label>
+              Provider name
+              <input id="provider-name" value="Local OpenAI-Compatible" autocomplete="off" />
+            </label>
+            <label>
+              Protocol
+              <select id="provider-protocol">
+                <option value="openai-compatible" selected>OpenAI-compatible</option>
+                <option value="anthropic-compatible">Anthropic-compatible</option>
+              </select>
+            </label>
+            <label>
+              API base URL
+              <input id="provider-base-url" placeholder="https://api.openai.com/v1" autocomplete="off" />
+            </label>
+            <label>
+              Model
+              <input id="provider-model" placeholder="gpt-4.1-mini" autocomplete="off" />
+            </label>
+          </div>
+          <label>
+            API key
+            <input id="provider-api-key" type="password" placeholder="Paste API key. Leave blank to keep saved key." autocomplete="off" />
+          </label>
+          <div class="form-row">
+            <button id="provider-save-button" type="submit">Save Provider</button>
+            <p id="provider-help" class="inline-help">Saved locally for V0.1 preview. Keychain storage comes later.</p>
+          </div>
+        </form>
+      </section>
+
+      <section class="chat-panel" aria-labelledby="chat-title">
+        <p class="eyebrow">Chatbot</p>
+        <h2 id="chat-title">Real Chat</h2>
+        <ul id="chat-messages" class="message-list"></ul>
+        <form id="chat-form" class="chat-form">
+          <label for="chat-input">Message</label>
+          <textarea id="chat-input" rows="4">Hello, summarize what AI OS can do in V0.1.</textarea>
+          <button id="chat-send-button" type="submit">Send Chat</button>
+        </form>
+      </section>
+
+      <section class="executor-panel" aria-labelledby="executor-title">
+        <p class="eyebrow">Executor Loop</p>
+        <h2 id="executor-title">Run A Task</h2>
         <form id="goal-form" class="goal-form">
           <label for="goal-input">Goal</label>
           <textarea id="goal-input" rows="5">Draft a concise plan for organizing my AI OS workspace.</textarea>
@@ -48,9 +103,9 @@
         <p id="mission-meta" class="mission-meta">Executor mock / waiting for a goal</p>
       </section>
 
-      <section class="chat-panel" aria-labelledby="chat-title">
-        <p class="eyebrow">Chat Surface</p>
-        <h2 id="chat-title">Transcript Preview</h2>
+      <section class="transcript-panel" aria-labelledby="transcript-title">
+        <p class="eyebrow">Executor Transcript</p>
+        <h2 id="transcript-title">Transcript Preview</h2>
         <ul id="transcript" class="stack-list"></ul>
       </section>
 

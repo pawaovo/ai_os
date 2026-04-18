@@ -11,6 +11,15 @@ V0.1 keeps this package intentionally small:
 
 The local demo runs the first visible Space loop with a deterministic mock executor by default. It can also send goals to local Codex and Claude Code CLI adapters through the Node dev server. It is not the final desktop app package, and it does not include persistence, cloud runtime, account management, approval UI, or polished infinite-canvas behavior.
 
+The V0.1 Product Preview also includes:
+
+- Provider settings for OpenAI-compatible and Anthropic-compatible model providers.
+- Local provider config persistence at `~/.ai_os/space-demo/provider.json`.
+- Real chat requests through the configured provider.
+- Session-local chat transcript rendering.
+
+Provider API keys are stored in plain text for V0.1 preview only. Keychain-backed storage is intentionally deferred.
+
 Use a larger timeout for longer real executor experiments:
 
 ```bash

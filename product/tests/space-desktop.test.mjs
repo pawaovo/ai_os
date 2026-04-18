@@ -19,7 +19,11 @@ const {
   runSpaceDemoGoal,
 } = await import("../apps/space-desktop/dist/demo-runtime.js");
 const {
+  createProviderSettingsResponse,
+  parseChatSendRequest,
+  parseProviderSettingsInput,
   parseSpaceDemoRunRequest,
+  runChatSendRequest,
   runSpaceDemoRequest,
 } = await import("../apps/space-desktop/dist/server-runtime.js");
 
@@ -197,6 +201,114 @@ test("parseSpaceDemoRunRequest validates the local server request shape", () => 
   );
 });
 
+test("provider settings parsing preserves an existing API key when the form leaves it blank", () => {
+  const provider = parseProviderSettingsInput(
+    {
+      name: "Preview Provider",
+      protocol: "openai-compatible",
+      baseUrl: "https://example.test/v1/",
+      apiKey: "",
+      modelId: "demo-model",
+    },
+    {
+      name: "Old Provider",
+      protocol: "openai-compatible",
+      baseUrl: "https://old.test/v1",
+      apiKey: "sk-existing-key",
+      modelId: "old-model",
+    },
+  );
+
+  assert.deepEqual(provider, {
+    name: "Preview Provider",
+    protocol: "openai-compatible",
+    baseUrl: "https://example.test/v1",
+    apiKey: "sk-existing-key",
+    modelId: "demo-model",
+  });
+  assert.deepEqual(createProviderSettingsResponse(provider), {
+    configured: true,
+    provider: {
+      name: "Preview Provider",
+      protocol: "openai-compatible",
+      baseUrl: "https://example.test/v1",
+      apiKeyPreview: "sk-...-key",
+      modelId: "demo-model",
+    },
+  });
+});
+
+test("parseChatSendRequest validates chat message and history shape", () => {
+  assert.deepEqual(
+    parseChatSendRequest({
+      message: "Hello",
+      history: [{ role: "assistant", content: "Hi" }],
+    }),
+    {
+      message: "Hello",
+      history: [{ role: "assistant", content: "Hi" }],
+    },
+  );
+
+  assert.throws(
+    () => parseChatSendRequest({ message: "Hello", history: [{ role: "tool", content: "bad" }] }),
+    /Unsupported chat role/,
+  );
+});
+
+test("runChatSendRequest sends OpenAI-compatible chat through the provider layer", async () => {
+  const calls = [];
+  const response = await runChatSendRequest({
+    request: {
+      message: "What can V0.1 do?",
+      history: [{ role: "system", content: "Answer briefly." }],
+    },
+    provider: {
+      name: "Preview Provider",
+      protocol: "openai-compatible",
+      baseUrl: "https://provider.test/v1",
+      apiKey: "sk-test",
+      modelId: "demo-model",
+    },
+    fetch: async (url, init) => {
+      calls.push({ url, init });
+      return createSseResponse('data: {"choices":[{"delta":{"content":"It can chat."}}]}\n\n');
+    },
+  });
+
+  assert.equal(response.assistantMessage, "It can chat.");
+  assert.deepEqual(response.messages.map((message) => message.role), ["system", "user", "assistant"]);
+  assert.equal(calls[0].url, "https://provider.test/v1/chat/completions");
+  assert.equal(calls[0].init.headers.Authorization, "Bearer sk-test");
+  assert.match(String(calls[0].init.body), /"model":"demo-model"/);
+});
+
+test("runChatSendRequest sends Anthropic-compatible chat through the provider layer", async () => {
+  const calls = [];
+  const response = await runChatSendRequest({
+    request: {
+      message: "What can V0.1 do?",
+      history: [{ role: "assistant", content: "Earlier answer" }],
+    },
+    provider: {
+      name: "Anthropic Preview",
+      protocol: "anthropic-compatible",
+      baseUrl: "https://anthropic.test/v1",
+      apiKey: "sk-ant-test",
+      modelId: "claude-demo",
+    },
+    fetch: async (url, init) => {
+      calls.push({ url, init });
+      return createSseResponse('data: {"type":"content_block_delta","delta":{"text":"It can chat."}}\n\n');
+    },
+  });
+
+  assert.equal(response.assistantMessage, "It can chat.");
+  assert.equal(calls[0].url, "https://anthropic.test/v1/messages");
+  assert.equal(calls[0].init.headers["x-api-key"], "sk-ant-test");
+  assert.match(String(calls[0].init.body), /"model":"claude-demo"/);
+});
+
 test("runSpaceDemoRequest executes the mock path through the server runtime", async () => {
   const response = await runSpaceDemoRequest(
     {
@@ -314,4 +426,18 @@ function createFakeProcessRunner(lines) {
       })();
     },
   };
+}
+
+function createSseResponse(text) {
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(text));
+        controller.close();
+      },
+    }),
+    {
+      status: 200,
+    },
+  );
 }

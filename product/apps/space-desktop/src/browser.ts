@@ -4,12 +4,32 @@ import {
   type SpaceDemoExecutorChoice,
   type SpaceDemoState,
 } from "./demo-runtime.js";
+import type { ChatUiMessage } from "./server-runtime.js";
 
 const state = {
   current: createInitialSpaceDemoState(),
+  chatMessages: [
+    {
+      role: "system",
+      content: "Configure a provider, then send a real chat message.",
+    },
+  ] as ChatUiMessage[],
 };
 
 const elements = {
+  providerForm: getElement("provider-form", HTMLFormElement),
+  providerName: getElement("provider-name", HTMLInputElement),
+  providerProtocol: getElement("provider-protocol", HTMLSelectElement),
+  providerBaseUrl: getElement("provider-base-url", HTMLInputElement),
+  providerApiKey: getElement("provider-api-key", HTMLInputElement),
+  providerModel: getElement("provider-model", HTMLInputElement),
+  providerSaveButton: getElement("provider-save-button", HTMLButtonElement),
+  providerStatus: getElement("provider-status", HTMLElement),
+  providerHelp: getElement("provider-help", HTMLElement),
+  chatForm: getElement("chat-form", HTMLFormElement),
+  chatInput: getElement("chat-input", HTMLTextAreaElement),
+  chatSendButton: getElement("chat-send-button", HTMLButtonElement),
+  chatMessages: getElement("chat-messages", HTMLElement),
   form: getElement("goal-form", HTMLFormElement),
   input: getElement("goal-input", HTMLTextAreaElement),
   executor: getElement("executor-select", HTMLSelectElement),
@@ -23,12 +43,139 @@ const elements = {
   missionMeta: getElement("mission-meta", HTMLElement),
 };
 
+elements.providerForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void saveProviderFromForm();
+});
+
+elements.chatForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void sendChatFromForm();
+});
+
 elements.form.addEventListener("submit", (event) => {
   event.preventDefault();
   void runDemoFromForm();
 });
 
+void loadProviderSettings();
+renderChatMessages();
 render(state.current);
+
+async function loadProviderSettings(): Promise<void> {
+  try {
+    const response = await fetch("/api/provider");
+    const payload = (await response.json()) as {
+      configured: boolean;
+      provider?: {
+        name: string;
+        protocol: string;
+        baseUrl: string;
+        apiKeyPreview: string;
+        modelId: string;
+      };
+    };
+
+    if (payload.configured && payload.provider) {
+      elements.providerName.value = payload.provider.name;
+      elements.providerProtocol.value = payload.provider.protocol;
+      elements.providerBaseUrl.value = payload.provider.baseUrl;
+      elements.providerModel.value = payload.provider.modelId;
+      elements.providerStatus.textContent = "configured";
+      elements.providerStatus.dataset.phase = "completed";
+      elements.providerHelp.textContent = `Saved provider loaded. API key: ${payload.provider.apiKeyPreview}`;
+    }
+  } catch (error) {
+    renderProviderError(error instanceof Error ? error.message : "Failed to load provider settings.");
+  }
+}
+
+async function saveProviderFromForm(): Promise<void> {
+  elements.providerSaveButton.disabled = true;
+  elements.providerStatus.textContent = "saving";
+  elements.providerStatus.dataset.phase = "running";
+
+  try {
+    const response = await fetch("/api/provider", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        name: elements.providerName.value,
+        protocol: elements.providerProtocol.value,
+        baseUrl: elements.providerBaseUrl.value,
+        apiKey: elements.providerApiKey.value,
+        modelId: elements.providerModel.value,
+      }),
+    });
+    const payload = (await response.json()) as {
+      error?: string;
+      provider?: { apiKeyPreview: string };
+    };
+
+    if (!response.ok) {
+      throw new Error(payload.error ?? "Failed to save provider settings.");
+    }
+
+    elements.providerApiKey.value = "";
+    elements.providerStatus.textContent = "configured";
+    elements.providerStatus.dataset.phase = "completed";
+    elements.providerHelp.textContent = `Provider saved locally. API key: ${payload.provider?.apiKeyPreview ?? "saved"}`;
+  } catch (error) {
+    renderProviderError(error instanceof Error ? error.message : "Failed to save provider settings.");
+  } finally {
+    elements.providerSaveButton.disabled = false;
+  }
+}
+
+async function sendChatFromForm(): Promise<void> {
+  const message = elements.chatInput.value.trim();
+
+  if (!message) return;
+
+  state.chatMessages = [
+    ...state.chatMessages.filter((entry) => entry.role !== "system"),
+    { role: "user", content: message },
+  ];
+  elements.chatInput.value = "";
+  elements.chatSendButton.disabled = true;
+  renderChatMessages();
+
+  try {
+    const response = await fetch("/api/chat/send", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        message,
+        history: state.chatMessages.slice(0, -1),
+      }),
+    });
+    const payload = (await response.json()) as {
+      error?: string;
+      messages?: ChatUiMessage[];
+    };
+
+    if (!response.ok || !payload.messages) {
+      throw new Error(payload.error ?? "Chat request failed.");
+    }
+
+    state.chatMessages = payload.messages;
+  } catch (error) {
+    state.chatMessages = [
+      ...state.chatMessages,
+      {
+        role: "system",
+        content: error instanceof Error ? error.message : "Chat request failed.",
+      },
+    ];
+  } finally {
+    elements.chatSendButton.disabled = false;
+    renderChatMessages();
+  }
+}
 
 async function runDemoFromForm(): Promise<void> {
   const goal = elements.input.value.trim();
@@ -88,6 +235,16 @@ function render(nextState: SpaceDemoState): void {
   renderTranscript(nextState);
   renderEvents(nextState);
   renderArtifacts(nextState);
+}
+
+function renderChatMessages(): void {
+  elements.chatMessages.replaceChildren(
+    ...state.chatMessages.map((message) => {
+      const item = createListItem(message.content);
+      item.dataset.role = message.role;
+      return item;
+    }),
+  );
 }
 
 function renderStatus(nextState: SpaceDemoState): void {
@@ -167,4 +324,10 @@ function toExecutorChoice(value: string): SpaceDemoExecutorChoice {
     default:
       return "mock";
   }
+}
+
+function renderProviderError(message: string): void {
+  elements.providerStatus.textContent = "failed";
+  elements.providerStatus.dataset.phase = "failed";
+  elements.providerHelp.textContent = message;
 }

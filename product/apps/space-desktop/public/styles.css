@@ -43,8 +43,11 @@ textarea {
 }
 
 .hero-panel,
+.provider-panel,
+.executor-panel,
 .status-panel,
 .chat-panel,
+.transcript-panel,
 .event-panel,
 .artifact-panel {
   border: 1px solid var(--line);
@@ -60,12 +63,16 @@ textarea {
 }
 
 .status-panel,
+.provider-panel,
+.executor-panel,
 .chat-panel,
+.transcript-panel,
 .event-panel,
 .artifact-panel {
   padding: 1.3rem;
 }
 
+.provider-panel,
 .artifact-panel {
   grid-column: 1 / -1;
 }
@@ -135,6 +142,7 @@ h2 {
 }
 
 textarea,
+input,
 select {
   width: 100%;
   border: 1px solid var(--line);
@@ -152,6 +160,10 @@ textarea {
 select {
   min-width: 15rem;
   padding: 0.8rem 1rem;
+}
+
+input {
+  padding: 0.85rem 1rem;
 }
 
 button {
@@ -202,6 +214,7 @@ button:disabled {
 }
 
 .stack-list,
+.message-list,
 .event-list {
   display: grid;
   gap: 0.65rem;
@@ -211,11 +224,56 @@ button:disabled {
 }
 
 .stack-list li,
+.message-list li,
 .event-list li {
   border: 1px solid var(--line);
   border-radius: 16px;
   padding: 0.85rem;
   background: rgba(255, 253, 244, 0.64);
+}
+
+.message-list li {
+  max-width: 78%;
+}
+
+.message-list li[data-role="user"] {
+  justify-self: end;
+  border-color: rgba(49, 95, 105, 0.26);
+  background: rgba(232, 244, 242, 0.82);
+}
+
+.message-list li[data-role="assistant"] {
+  justify-self: start;
+  border-color: rgba(81, 107, 52, 0.26);
+  background: rgba(241, 247, 229, 0.82);
+}
+
+.message-list li[data-role="system"] {
+  max-width: 100%;
+  color: var(--muted);
+  font-family: "Menlo", "Monaco", monospace;
+  font-size: 0.82rem;
+  background: rgba(255, 253, 244, 0.5);
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.provider-form,
+.chat-form {
+  display: grid;
+  gap: 0.85rem;
+  margin-top: 1rem;
+}
+
+.inline-help {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.4;
 }
 
 .event-list li {
@@ -269,5 +327,13 @@ button:disabled {
 
   .event-list li {
     grid-template-columns: 1fr;
+  }
+
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .message-list li {
+    max-width: 100%;
   }
 }

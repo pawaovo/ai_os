@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { createServer } from "node:http";
-import { readFile, stat } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
+import { homedir } from "node:os";
 import { dirname, join, normalize, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -17,13 +18,34 @@ if (process.env.AI_SPACE_SKIP_BUILD !== "1") {
   buildProduct();
 }
 
-const { parseSpaceDemoRunRequest, runSpaceDemoRequest } = await import(
-  pathToImportUrl(join(appRoot, "dist/server-runtime.js"))
-);
+const {
+  createProviderSettingsResponse,
+  parseChatSendRequest,
+  parseProviderSettingsInput,
+  parseSpaceDemoRunRequest,
+  runChatSendRequest,
+  runSpaceDemoRequest,
+} = await import(pathToImportUrl(join(appRoot, "dist/server-runtime.js")));
 let processRunner;
+let providerStore;
 
 const server = createServer(async (request, response) => {
   try {
+    if (request.method === "GET" && request.url?.startsWith("/api/provider")) {
+      await handleGetProvider(response);
+      return;
+    }
+
+    if (request.method === "POST" && request.url?.startsWith("/api/provider")) {
+      await handleSaveProvider(request, response);
+      return;
+    }
+
+    if (request.method === "POST" && request.url?.startsWith("/api/chat/send")) {
+      await handleChatSend(request, response);
+      return;
+    }
+
     if (request.method === "POST" && request.url?.startsWith("/api/demo/run")) {
       await handleRunRequest(request, response);
       return;
@@ -53,6 +75,45 @@ function buildProduct() {
     cwd: productRoot,
     stdio: "inherit",
   });
+}
+
+async function handleGetProvider(response) {
+  const provider = await providerStore.read();
+  writeJson(response, 200, createProviderSettingsResponse(provider));
+}
+
+async function handleSaveProvider(request, response) {
+  try {
+    const body = await readJsonBody(request);
+    const existing = await providerStore.read();
+    const provider = parseProviderSettingsInput(body, existing);
+    await providerStore.write(provider);
+
+    writeJson(response, 200, createProviderSettingsResponse(provider));
+  } catch (error) {
+    writeJson(response, 400, {
+      error: error instanceof Error ? error.message : "Invalid provider settings.",
+    });
+  }
+}
+
+async function handleChatSend(request, response) {
+  try {
+    const body = await readJsonBody(request);
+    const chatRequest = parseChatSendRequest(body);
+    const provider = await providerStore.read();
+    const payload = await runChatSendRequest({
+      request: chatRequest,
+      provider,
+      fetch: globalThis.fetch,
+    });
+
+    writeJson(response, 200, payload);
+  } catch (error) {
+    writeJson(response, 400, {
+      error: error instanceof Error ? error.message : "Chat request failed.",
+    });
+  }
 }
 
 async function handleRunRequest(request, response) {
@@ -200,6 +261,32 @@ class NodeProcessRunner {
   }
 }
 
+class LocalProviderStore {
+  constructor(filePath) {
+    this.filePath = filePath;
+  }
+
+  async read() {
+    try {
+      return JSON.parse(await readFile(this.filePath, "utf8"));
+    } catch (error) {
+      if (error?.code === "ENOENT") {
+        return undefined;
+      }
+
+      throw error;
+    }
+  }
+
+  async write(provider) {
+    await mkdir(dirname(this.filePath), { recursive: true });
+    await writeFile(this.filePath, JSON.stringify(provider, null, 2), "utf8");
+  }
+}
+
 processRunner = new NodeProcessRunner(productRoot, executorTimeoutMs);
+providerStore = new LocalProviderStore(
+  join(homedir(), ".ai_os", "space-demo", "provider.json"),
+);
 
 class NotFoundError extends Error {}

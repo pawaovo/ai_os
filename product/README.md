@@ -65,6 +65,22 @@ http://localhost:5173
 
 The demo is a browser-first local validation surface. It lets you enter a goal and run the V0.1 loop through Companion, Control Plane, normalized executor events, and artifact return.
 
+Product preview capabilities:
+
+- Configure an OpenAI-compatible or Anthropic-compatible model provider.
+- Save provider name, protocol, API base URL, API key, and model locally.
+- Send real chat messages through the configured provider.
+- Keep a multi-message chat transcript in the current app session.
+- Run the executor/artifact demo path from the same app.
+
+V0.1 preview provider settings are stored locally at:
+
+```text
+~/.ai_os/space-demo/provider.json
+```
+
+This file stores the API key in plain text for the preview build. Keychain-backed storage is a later V0.2 hardening task.
+
 Executor choices:
 
 - `Mock local executor`: deterministic and safe default for repeatable manual testing.
@@ -94,6 +110,6 @@ This V0.1 app opens a native macOS window using WebKit and starts the local Spac
 
 ## Non-Goals
 
-This V0.1 build does not implement database persistence, real model network smoke tests, managed executor process lifecycle, signed installer packaging, Forge, Store, cloud runtime, or team permissions.
+This V0.1 build does not implement database persistence, keychain-backed credential storage, managed executor process lifecycle, signed installer packaging, Forge, Store, cloud runtime, or team permissions.
 
 The workspace/artifact core packages stay intentionally narrow in V0.1: reference creation and artifact-to-run/space linking only, with no database layer, file synchronization, or preview pipeline.
