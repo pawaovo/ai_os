@@ -8,6 +8,8 @@
     "packages/*/*"
   ],
   "scripts": {
+    "dev": "node ./apps/space-desktop/scripts/dev-server.mjs",
+    "build": "npm run typecheck",
     "typecheck": "tsc -b",
     "test": "npm run typecheck && node --test tests/*.test.mjs"
   },

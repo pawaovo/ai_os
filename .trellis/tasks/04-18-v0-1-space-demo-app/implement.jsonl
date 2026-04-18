@@ -1,0 +1,13 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend development guide"}
+{"file": ".trellis/tasks/04-18-v0-1-space-demo-app/prd.md", "reason": "Task PRD"}
+{"file": "product/apps/space-desktop/src/index.ts", "reason": "Existing Space shell model"}
+{"file": "product/packages/control/control-plane/src/index.ts", "reason": "Control Plane orchestration"}
+{"file": "product/packages/companion/companion-core/src/index.ts", "reason": "Companion boundary"}
+{"file": "product/packages/executors/executor-protocol/src/index.ts", "reason": "Executor protocol"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Cross-layer data flow guide"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Code reuse guide"}
+{"file": "product/apps/space-desktop/src/demo-runtime.ts", "reason": "Demo runtime"}
+{"file": "product/apps/space-desktop/src/browser.ts", "reason": "Browser entry"}
+{"file": "product/apps/space-desktop/public/index.html", "reason": "Demo HTML shell"}

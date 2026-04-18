@@ -50,8 +50,23 @@ Provider adapters support mockable OpenAI-compatible and Anthropic-compatible ca
 
 `apps/space-desktop` currently exposes a minimal TypeScript shell model for the Space desktop surface. It defines the first app-shell sections for chat, run status, and artifact list without introducing a UI framework.
 
+## Run The V0.1 Space Demo
+
+```bash
+npm install
+npm run dev
+```
+
+Then open:
+
+```text
+http://localhost:5173
+```
+
+The demo is a browser-first local validation surface. It lets you enter a goal and run the V0.1 loop through Companion, Control Plane, a deterministic mock executor, normalized events, and artifact return. Codex and Claude Code appear as visible executor targets, but the first manual demo intentionally keeps real process execution disabled.
+
 ## Non-Goals
 
-This initial skeleton does not implement UI, database persistence, real model network smoke tests, managed executor process lifecycle, Forge, Store, cloud runtime, or team permissions.
+This initial skeleton does not implement database persistence, real model network smoke tests, managed executor process lifecycle, Forge, Store, cloud runtime, or team permissions.
 
 The workspace/artifact core packages stay intentionally narrow in V0.1: reference creation and artifact-to-run/space linking only, with no database layer, file synchronization, or preview pipeline.

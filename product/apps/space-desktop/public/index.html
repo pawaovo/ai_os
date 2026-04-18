@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI Space Demo</title>
+    <link rel="stylesheet" href="/assets/styles.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "@ai-os/companion-core": "/packages/companion/companion-core/dist/index.js",
+          "@ai-os/control-plane": "/packages/control/control-plane/dist/index.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <main class="demo-shell">
+      <section class="hero-panel" aria-labelledby="app-title">
+        <p class="eyebrow">AI OS / V0.1 local validation surface</p>
+        <h1 id="app-title">AI Space Demo</h1>
+        <p class="hero-copy">
+          Test the first visible loop: goal input, Companion handoff, Control Plane run,
+          normalized executor events, and artifact return.
+        </p>
+        <form id="goal-form" class="goal-form">
+          <label for="goal-input">Goal</label>
+          <textarea id="goal-input" rows="5">Draft a concise plan for organizing my AI OS workspace.</textarea>
+          <div class="form-row">
+            <label for="executor-select">Executor</label>
+            <select id="executor-select">
+              <option value="mock" selected>Mock local executor</option>
+              <option value="codex">Codex target (visible, not enabled)</option>
+              <option value="claude-code">Claude Code target (visible, not enabled)</option>
+            </select>
+            <button id="run-button" type="submit">Run Demo</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="status-panel" aria-labelledby="status-title">
+        <div class="panel-heading">
+          <p class="eyebrow">Mission / Run</p>
+          <span id="status-pill" class="status-pill" data-phase="idle">idle</span>
+        </div>
+        <h2 id="status-title">Control Plane Status</h2>
+        <p id="run-summary" class="run-summary">Enter a goal to start the local demo run.</p>
+        <p id="mission-meta" class="mission-meta">Executor mock / waiting for a goal</p>
+      </section>
+
+      <section class="chat-panel" aria-labelledby="chat-title">
+        <p class="eyebrow">Chat Surface</p>
+        <h2 id="chat-title">Transcript Preview</h2>
+        <ul id="transcript" class="stack-list"></ul>
+      </section>
+
+      <section class="event-panel" aria-labelledby="event-title">
+        <p class="eyebrow">Kernel Events</p>
+        <h2 id="event-title">Run Event Stream</h2>
+        <ul id="event-log" class="event-list"></ul>
+      </section>
+
+      <section class="artifact-panel" aria-labelledby="artifact-title">
+        <p class="eyebrow">Artifacts</p>
+        <h2 id="artifact-title">Returned To Space</h2>
+        <ul id="artifact-list" class="stack-list"></ul>
+        <pre id="artifact-preview" class="artifact-preview">Artifacts will render here after a run completes.</pre>
+      </section>
+    </main>
+
+    <script type="module" src="/apps/space-desktop/dist/browser.js"></script>
+  </body>
+</html>

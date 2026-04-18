@@ -6,6 +6,10 @@
     "outDir": "dist"
   },
   "references": [
+    { "path": "../../packages/companion/companion-core" },
+    { "path": "../../packages/control/control-plane" },
+    { "path": "../../packages/executors/executor-protocol" },
+    { "path": "../../packages/kernel/kernel-events" },
     { "path": "../../packages/kernel/kernel-objects" }
   ],
   "include": ["src/**/*.ts"]

@@ -11,9 +11,12 @@
     }
   },
   "scripts": {
+    "dev": "node ./scripts/dev-server.mjs",
     "typecheck": "tsc -b"
   },
   "dependencies": {
+    "@ai-os/companion-core": "0.0.0",
+    "@ai-os/control-plane": "0.0.0",
     "@ai-os/kernel-objects": "0.0.0"
   }
 }
