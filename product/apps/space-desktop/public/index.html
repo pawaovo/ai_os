@@ -54,6 +54,10 @@
             </label>
             <label>
               Model
+              <select id="provider-model-select"></select>
+            </label>
+            <label>
+              Manual model fallback
               <input id="provider-model" placeholder="gpt-4.1-mini" autocomplete="off" />
             </label>
           </div>
@@ -65,6 +69,7 @@
             <button id="provider-save-button" type="submit">Save Provider</button>
             <button id="provider-test-button" type="button">Test Provider</button>
             <button id="provider-models-button" type="button">Load Models</button>
+            <button id="provider-delete-button" type="button">Delete Provider</button>
             <p id="provider-help" class="inline-help">Provider metadata is stored in SQLite. API keys are stored in macOS Keychain.</p>
           </div>
         </form>
@@ -76,6 +81,8 @@
         <div class="form-row">
           <select id="thread-select"></select>
           <button id="thread-new-button" type="button">New Thread</button>
+          <button id="thread-rename-button" type="button">Rename Thread</button>
+          <button id="thread-delete-button" type="button">Delete Thread</button>
         </div>
         <p id="thread-help" class="inline-help">Threads and messages persist locally in V0.2.</p>
       </section>

@@ -25,14 +25,18 @@ const elements = {
   providerProtocol: getElement("provider-protocol", HTMLSelectElement),
   providerBaseUrl: getElement("provider-base-url", HTMLInputElement),
   providerApiKey: getElement("provider-api-key", HTMLInputElement),
+  providerModelSelect: getElement("provider-model-select", HTMLSelectElement),
   providerModel: getElement("provider-model", HTMLInputElement),
   providerSaveButton: getElement("provider-save-button", HTMLButtonElement),
   providerTestButton: getElement("provider-test-button", HTMLButtonElement),
   providerModelsButton: getElement("provider-models-button", HTMLButtonElement),
+  providerDeleteButton: getElement("provider-delete-button", HTMLButtonElement),
   providerStatus: getElement("provider-status", HTMLElement),
   providerHelp: getElement("provider-help", HTMLElement),
   threadSelect: getElement("thread-select", HTMLSelectElement),
   threadNewButton: getElement("thread-new-button", HTMLButtonElement),
+  threadRenameButton: getElement("thread-rename-button", HTMLButtonElement),
+  threadDeleteButton: getElement("thread-delete-button", HTMLButtonElement),
   threadHelp: getElement("thread-help", HTMLElement),
   chatForm: getElement("chat-form", HTMLFormElement),
   chatInput: getElement("chat-input", HTMLTextAreaElement),
@@ -68,12 +72,28 @@ elements.providerModelsButton.addEventListener("click", () => {
   void loadModelsForSelectedProvider();
 });
 
+elements.providerDeleteButton.addEventListener("click", () => {
+  void deleteSelectedProvider();
+});
+
+elements.providerModelSelect.addEventListener("change", () => {
+  elements.providerModel.value = elements.providerModelSelect.value;
+});
+
 elements.threadSelect.addEventListener("change", () => {
   void loadThread(elements.threadSelect.value);
 });
 
 elements.threadNewButton.addEventListener("click", () => {
   void createThread();
+});
+
+elements.threadRenameButton.addEventListener("click", () => {
+  void renameSelectedThread();
+});
+
+elements.threadDeleteButton.addEventListener("click", () => {
+  void deleteSelectedThread();
 });
 
 elements.chatForm.addEventListener("submit", (event) => {
@@ -129,10 +149,12 @@ async function loadProviders(): Promise<void> {
       elements.providerStatus.textContent = "configured";
       elements.providerStatus.dataset.phase = "completed";
       elements.providerHelp.textContent = `Saved provider loaded. API key: ${activeProvider.apiKeyPreview}`;
+      setModelOptions([activeProvider.modelId], activeProvider.modelId);
     } else {
       elements.providerStatus.textContent = "not configured";
       elements.providerStatus.dataset.phase = "idle";
       elements.providerHelp.textContent = "Save a provider before chatting.";
+      setModelOptions([], "");
     }
   } catch (error) {
     renderProviderError(error instanceof Error ? error.message : "Failed to load provider settings.");
@@ -154,6 +176,7 @@ function fillProviderForm(provider: {
   elements.providerProtocol.value = provider.protocol;
   elements.providerBaseUrl.value = provider.baseUrl;
   elements.providerModel.value = provider.modelId;
+  setModelOptions([provider.modelId], provider.modelId);
 }
 
 async function saveProviderFromForm(): Promise<void> {
@@ -197,6 +220,30 @@ async function saveProviderFromForm(): Promise<void> {
   }
 }
 
+async function deleteSelectedProvider(): Promise<void> {
+  if (!state.activeProviderId) {
+    renderProviderError("Select a provider before deleting.");
+    return;
+  }
+
+  elements.providerDeleteButton.disabled = true;
+  try {
+    await fetch(`/api/providers/${encodeURIComponent(state.activeProviderId)}`, {
+      method: "DELETE",
+    });
+    state.activeProviderId = undefined;
+    elements.providerApiKey.value = "";
+    elements.providerName.value = "Local OpenAI-Compatible";
+    elements.providerBaseUrl.value = "";
+    elements.providerModel.value = "";
+    await loadProviders();
+  } catch (error) {
+    renderProviderError(error instanceof Error ? error.message : "Failed to delete provider.");
+  } finally {
+    elements.providerDeleteButton.disabled = false;
+  }
+}
+
 async function testProviderFromForm(): Promise<void> {
   elements.providerTestButton.disabled = true;
   elements.providerStatus.textContent = "testing";
@@ -213,6 +260,7 @@ async function testProviderFromForm(): Promise<void> {
     elements.providerStatus.textContent = payload.available ? "healthy" : "failed";
     elements.providerStatus.dataset.phase = payload.available ? "completed" : "failed";
     elements.providerHelp.textContent = `${payload.message}${payload.models.length ? ` Models: ${payload.models.slice(0, 5).join(", ")}` : ""}`;
+    setModelOptions(payload.models, elements.providerModel.value);
   } catch (error) {
     renderProviderError(error instanceof Error ? error.message : "Provider Doctor failed.");
   } finally {
@@ -236,14 +284,39 @@ async function loadModelsForSelectedProvider(): Promise<void> {
     }
 
     elements.providerHelp.textContent = `Loaded models: ${payload.models.slice(0, 8).join(", ")}`;
+    setModelOptions(payload.models, elements.providerModel.value);
     if (payload.models.length > 0) {
       elements.providerModel.value = payload.models[0] ?? elements.providerModel.value;
+      elements.providerModelSelect.value = elements.providerModel.value;
     }
   } catch (error) {
     renderProviderError(error instanceof Error ? error.message : "Failed to load models.");
   } finally {
     elements.providerModelsButton.disabled = false;
   }
+}
+
+function setModelOptions(models: string[], selectedModel: string): void {
+  const uniqueModels = [...new Set(models.filter(Boolean))];
+
+  elements.providerModelSelect.replaceChildren(
+    ...uniqueModels.map((model) => {
+      const option = document.createElement("option");
+      option.value = model;
+      option.textContent = model;
+      return option;
+    }),
+  );
+
+  if (uniqueModels.length === 0) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "Load models or type manually";
+    elements.providerModelSelect.append(option);
+    return;
+  }
+
+  elements.providerModelSelect.value = uniqueModels.includes(selectedModel) ? selectedModel : uniqueModels[0] ?? "";
 }
 
 function providerDraftFromForm() {
@@ -296,6 +369,39 @@ async function createThread(): Promise<void> {
   });
   const payload = (await response.json()) as { thread: { id: string } };
   state.activeThreadId = payload.thread.id;
+  await loadThreads();
+}
+
+async function renameSelectedThread(): Promise<void> {
+  if (!state.activeThreadId) {
+    elements.threadHelp.textContent = "Create or select a thread before renaming.";
+    return;
+  }
+
+  const selected = elements.threadSelect.selectedOptions[0]?.textContent?.replace(/\s+\(\d+\)$/, "") ?? "Thread";
+  const title = globalThis.prompt("Thread name", selected)?.trim();
+  if (!title) return;
+
+  await fetch(`/api/threads/${encodeURIComponent(state.activeThreadId)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ title }),
+  });
+  await loadThreads();
+}
+
+async function deleteSelectedThread(): Promise<void> {
+  if (!state.activeThreadId) {
+    elements.threadHelp.textContent = "Create or select a thread before deleting.";
+    return;
+  }
+
+  await fetch(`/api/threads/${encodeURIComponent(state.activeThreadId)}`, {
+    method: "DELETE",
+  });
+  state.activeThreadId = undefined;
+  state.chatMessages = [{ role: "system", content: "Thread deleted. Create a new thread to continue." }];
+  renderChatMessages();
   await loadThreads();
 }
 
