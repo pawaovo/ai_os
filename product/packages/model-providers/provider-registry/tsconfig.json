@@ -1,0 +1,14 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "references": [
+    { "path": "../../conversation/conversation-core" },
+    { "path": "../provider-protocol" }
+  ],
+  "include": ["src/**/*.ts"]
+}
+

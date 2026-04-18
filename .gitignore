@@ -1,0 +1,24 @@
+.DS_Store
+
+# Reference projects are local research material, not product source.
+reference_projects/
+
+# Node / TypeScript outputs.
+node_modules/
+product/node_modules/
+product/**/dist/
+product/**/*.tsbuildinfo
+
+# Trellis local state.
+.trellis/.developer
+.trellis/.current-task
+.trellis/workspace/
+.trellis/**/*.pyc
+.trellis/**/__pycache__/
+
+# Local agent/tool state. Commit these later only if intentionally shared.
+.claude/
+.codex/
+.cursor/
+.agents/
+

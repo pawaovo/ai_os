@@ -1,0 +1,17 @@
+{
+  "name": "@ai-os/product",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*/*"
+  ],
+  "scripts": {
+    "typecheck": "tsc -b",
+    "test": "npm run typecheck && node --test tests/*.test.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}

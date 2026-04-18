@@ -1,0 +1,8 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend development guide"}
+{"file": "ai_os/ai_os_docs/00-ai-os-overview.md", "reason": "Product and architecture overview"}
+{"file": "ai_os/ai_os_docs/01-ai-space.md", "reason": "AI Space V0.1 scope and engineering constraints"}
+{"file": "ai_os/ai_os_docs/02-ai-forge.md", "reason": "Forge boundary and future capability creation scope"}
+{"file": "ai_os/ai_os_docs/03-capability-layer-principles.md", "reason": "Provider, executor, capability, event, trust principles"}
+{"file": ".trellis/tasks/04-18-v0-1-monorepo-bootstrap/implementation-plan.md", "reason": "V0.1 monorepo bootstrap implementation plan"}

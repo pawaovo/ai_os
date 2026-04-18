@@ -1,0 +1,21 @@
+{
+  "name": "@ai-os/executor-protocol",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "@ai-os/kernel-events": "0.0.0",
+    "@ai-os/kernel-objects": "0.0.0"
+  }
+}
+

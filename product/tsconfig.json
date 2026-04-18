@@ -1,0 +1,16 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/kernel/kernel-objects" },
+    { "path": "./packages/kernel/kernel-events" },
+    { "path": "./packages/conversation/conversation-core" },
+    { "path": "./packages/conversation/conversation-runtime" },
+    { "path": "./packages/model-providers/provider-protocol" },
+    { "path": "./packages/model-providers/provider-registry" },
+    { "path": "./packages/model-providers/provider-openai-compatible" },
+    { "path": "./packages/model-providers/provider-anthropic-compatible" },
+    { "path": "./packages/executors/executor-protocol" },
+    { "path": "./packages/executors/executor-codex" },
+    { "path": "./packages/executors/executor-claude-code" }
+  ]
+}
