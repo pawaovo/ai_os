@@ -1,0 +1,7 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend development guide"}
+{"file": "product/apps/space-desktop/public/index.html", "reason": "Product shell markup"}
+{"file": "product/apps/space-desktop/public/styles.css", "reason": "Product shell styling"}
+{"file": "product/apps/space-desktop/src/browser.ts", "reason": "Product shell navigation"}
+{"file": "product/tests/space-desktop.test.mjs", "reason": "Shell smoke tests"}

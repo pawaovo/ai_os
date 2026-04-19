@@ -15,21 +15,33 @@
     </script>
   </head>
   <body>
-    <main class="space-workbench" data-layout="v0.6-automation-workbench">
+    <main class="space-workbench app-shell" data-layout="v0.6.1-product-shell">
       <header class="workbench-hero" aria-labelledby="app-title">
         <div>
-          <p class="eyebrow">AI OS / V0.6 automation and proactive assistant</p>
-          <h1 id="app-title">Automation Workbench</h1>
+          <p class="eyebrow">AI OS / V0.6.1 product shell</p>
+          <h1 id="app-title">AI OS Space</h1>
         </div>
         <p class="hero-copy">
-          Create local reminders, scheduled tasks, and heartbeat follow-ups while risky
-          automation actions continue through approval and trust controls.
+          Work from one focused area at a time. Navigate Space, chat, runs, automation,
+          artifacts, approvals, providers, and settings without scrolling through one long console.
         </p>
         <span id="active-workspace-label" class="status-pill" data-phase="idle">no workspace</span>
       </header>
 
+      <aside class="app-nav" aria-label="Main navigation">
+        <p class="eyebrow">Navigate</p>
+        <button class="nav-button" type="button" data-page-target="space">Space</button>
+        <button class="nav-button" type="button" data-page-target="chat">Chat</button>
+        <button class="nav-button" type="button" data-page-target="runs">Runs</button>
+        <button class="nav-button" type="button" data-page-target="automations">Automations</button>
+        <button class="nav-button" type="button" data-page-target="artifacts">Artifacts</button>
+        <button class="nav-button" type="button" data-page-target="approvals">Approvals</button>
+        <button class="nav-button" type="button" data-page-target="providers">Providers</button>
+        <button class="nav-button" type="button" data-page-target="settings">Settings</button>
+      </aside>
+
       <aside class="left-rail" aria-label="Workspace and threads">
-        <section class="workspace-panel panel" aria-labelledby="workspace-title">
+        <section class="workspace-panel panel page-section" data-pages="space settings" aria-labelledby="workspace-title">
           <div class="panel-heading">
             <p class="eyebrow">Workspace</p>
             <span class="mini-label">local-first</span>
@@ -64,7 +76,7 @@
           </form>
         </section>
 
-        <section class="threads-panel panel" aria-labelledby="threads-title">
+        <section class="threads-panel panel page-section" data-pages="space" aria-labelledby="threads-title">
           <div class="panel-heading">
             <p class="eyebrow">Scoped Threads</p>
             <span class="mini-label">chat history</span>
@@ -81,7 +93,7 @@
           </div>
         </section>
 
-        <section class="automation-panel panel" aria-labelledby="automation-title">
+        <section class="automation-panel panel page-section" data-pages="automations" aria-labelledby="automation-title">
           <div class="panel-heading">
             <p class="eyebrow">Automation</p>
             <span class="mini-label">local scheduler</span>
@@ -119,7 +131,7 @@
       </aside>
 
       <section class="center-stage" aria-label="Chat and current run">
-        <section class="chat-panel panel tall-panel" aria-labelledby="chat-title">
+        <section class="chat-panel panel tall-panel page-section" data-pages="space chat" aria-labelledby="chat-title">
           <div class="panel-heading">
             <p class="eyebrow">Chat Output</p>
             <span class="mini-label">provider-backed</span>
@@ -133,7 +145,7 @@
           </form>
         </section>
 
-        <section class="executor-panel panel" aria-labelledby="executor-title">
+        <section class="executor-panel panel page-section" data-pages="runs" aria-labelledby="executor-title">
           <div class="panel-heading">
             <p class="eyebrow">Current Run</p>
             <span id="status-pill" class="status-pill" data-phase="idle">idle</span>
@@ -163,7 +175,7 @@
           <p id="mission-meta" class="mission-meta">Executor mock / waiting for a goal</p>
         </section>
 
-        <section id="approval-panel" class="approval-panel panel" aria-labelledby="approval-title">
+        <section id="approval-panel" class="approval-panel panel page-section" data-pages="runs approvals" aria-labelledby="approval-title">
           <div class="panel-heading">
             <p class="eyebrow">Approval</p>
             <span id="approval-status" class="mini-label">no request</span>
@@ -188,7 +200,7 @@
           </div>
         </section>
 
-        <section class="run-output-panel panel" aria-labelledby="run-output-title">
+        <section class="run-output-panel panel page-section" data-pages="runs" aria-labelledby="run-output-title">
           <div class="panel-heading">
             <p class="eyebrow">Run Output</p>
             <span class="mini-label">live stream</span>
@@ -208,10 +220,25 @@
           <ul id="run-artifact-list" class="stack-list compact-list"></ul>
           <pre id="run-artifact-preview" class="artifact-preview">Run artifacts will render here after a task completes.</pre>
         </section>
+
+        <section class="settings-panel panel page-section" data-pages="settings" aria-labelledby="settings-title">
+          <div class="panel-heading">
+            <p class="eyebrow">Settings</p>
+            <span class="mini-label">system</span>
+          </div>
+          <h2 id="settings-title">App Settings</h2>
+          <ul class="settings-list">
+            <li><strong>Providers</strong><span>Configure model providers and API keys in the Providers page.</span></li>
+            <li><strong>Executors</strong><span>Check Codex / Claude Code availability from Providers or Runs.</span></li>
+            <li><strong>Workspace Trust</strong><span>Change trust mode in the Workspace card.</span></li>
+            <li><strong>Automation</strong><span>Create and pause local automations from the Automations page.</span></li>
+            <li><strong>Diagnostics</strong><span>Local server, SQLite, Keychain, and bundled resources are checked by tests and smoke runs.</span></li>
+          </ul>
+        </section>
       </section>
 
       <aside class="right-rail" aria-label="Provider, run history, and saved artifacts">
-        <section class="executor-status-panel panel" aria-labelledby="executor-status-title">
+        <section class="executor-status-panel panel page-section" data-pages="runs providers settings" aria-labelledby="executor-status-title">
           <div class="panel-heading">
             <p class="eyebrow">Executor Doctor</p>
             <span class="mini-label">local CLI health</span>
@@ -221,7 +248,7 @@
           <p id="executor-status-help" class="inline-help">Codex and Claude Code are checked from the local machine.</p>
         </section>
 
-        <section class="provider-panel panel" aria-labelledby="provider-title">
+        <section class="provider-panel panel page-section" data-pages="providers settings" aria-labelledby="provider-title">
           <div class="panel-heading">
             <p class="eyebrow">Model Provider</p>
             <span id="provider-status" class="status-pill" data-phase="idle">not configured</span>
@@ -271,7 +298,7 @@
           </form>
         </section>
 
-        <section class="run-history-panel panel" aria-labelledby="run-history-title">
+        <section class="run-history-panel panel page-section" data-pages="runs" aria-labelledby="run-history-title">
           <div class="panel-heading">
             <p class="eyebrow">Run History</p>
             <span class="mini-label">persisted</span>
@@ -282,7 +309,7 @@
           <ul id="run-event-history" class="event-list compact-list"></ul>
         </section>
 
-        <section class="approval-history-panel panel" aria-labelledby="approval-history-title">
+        <section class="approval-history-panel panel page-section" data-pages="approvals settings" aria-labelledby="approval-history-title">
           <div class="panel-heading">
             <p class="eyebrow">Approval History</p>
             <span class="mini-label">auditable</span>
@@ -292,7 +319,7 @@
           <p id="approval-history-help" class="inline-help">Risk decisions in the active workspace appear here.</p>
         </section>
 
-        <section class="automation-history-panel panel" aria-labelledby="automation-history-title">
+        <section class="automation-history-panel panel page-section" data-pages="automations" aria-labelledby="automation-history-title">
           <div class="panel-heading">
             <p class="eyebrow">Automation Runs</p>
             <span class="mini-label">proactive</span>
@@ -302,7 +329,7 @@
           <p id="automation-run-help" class="inline-help">Scheduled and heartbeat results appear here.</p>
         </section>
 
-        <section class="artifact-panel panel" aria-labelledby="artifact-title">
+        <section class="artifact-panel panel page-section" data-pages="space artifacts" aria-labelledby="artifact-title">
           <div class="panel-heading">
             <p class="eyebrow">Saved Artifacts</p>
             <span class="mini-label">manual / chat / run</span>

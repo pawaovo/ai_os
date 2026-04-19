@@ -139,14 +139,18 @@ test("createInitialSpaceDemoState exposes the visible local demo shell", () => {
   assert.equal(state.events[0].type, "space.ready");
 });
 
-test("space desktop V0.6 page exposes automation controls", async () => {
+test("space desktop V0.6.1 page exposes product shell navigation and settings", async () => {
   const html = await readFile(resolve(productRoot, "apps/space-desktop/public/index.html"), "utf8");
   const styles = await readFile(resolve(productRoot, "apps/space-desktop/public/styles.css"), "utf8");
 
   assert.doesNotMatch(html, /data-layout="v0\.3-workbench"/);
   assert.doesNotMatch(html, /data-layout="v0\.4-executor-workbench"/);
   assert.doesNotMatch(html, /data-layout="v0\.5-approval-trust-workbench"/);
-  assert.match(html, /data-layout="v0\.6-automation-workbench"/);
+  assert.doesNotMatch(html, /data-layout="v0\.6-automation-workbench"/);
+  assert.match(html, /data-layout="v0\.6\.1-product-shell"/);
+  assert.match(html, /class="app-nav"/);
+  assert.match(html, /data-page-target="settings"/);
+  assert.match(html, /id="settings-title"/);
   assert.match(html, /id="workspace-select"/);
   assert.match(html, /id="workspace-trust-level"/);
   assert.match(html, /id="active-workspace-label"/);
@@ -174,6 +178,9 @@ test("space desktop V0.6 page exposes automation controls", async () => {
   assert.match(styles, /\.left-rail/);
   assert.match(styles, /\.center-stage/);
   assert.match(styles, /\.right-rail/);
+  assert.match(styles, /\.app-nav/);
+  assert.match(styles, /\.nav-button/);
+  assert.match(styles, /\.page-section\[hidden\]/);
   assert.match(styles, /awaiting-approval/);
   assert.match(styles, /approval-detail-grid/);
 });

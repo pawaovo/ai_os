@@ -140,6 +140,7 @@ const state = {
   activeArtifactId: undefined as string | undefined,
   activeArtifact: undefined as ArtifactSummary | undefined,
   activeRunId: undefined as string | undefined,
+  activePage: "space",
   chatMessages: [
     {
       role: "system",
@@ -149,6 +150,8 @@ const state = {
 };
 
 const elements = {
+  navButtons: Array.from(document.querySelectorAll<HTMLButtonElement>("[data-page-target]")),
+  pageSections: Array.from(document.querySelectorAll<HTMLElement>(".page-section")),
   activeWorkspaceLabel: getElement("active-workspace-label", HTMLElement),
   workspaceForm: getElement("workspace-form", HTMLFormElement),
   workspaceSelect: getElement("workspace-select", HTMLSelectElement),
@@ -235,6 +238,12 @@ const elements = {
   artifactPreview: getElement("artifact-preview", HTMLElement),
   artifactHelp: getElement("artifact-help", HTMLElement),
 };
+
+elements.navButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    setActivePage(button.dataset.pageTarget ?? "space");
+  });
+});
 
 elements.workspaceForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -370,6 +379,7 @@ elements.artifactList.addEventListener("click", (event) => {
 void initializeAppState();
 renderChatMessages();
 renderCurrentRunView();
+setActivePage(state.activePage);
 
 async function initializeAppState(): Promise<void> {
   await loadWorkspaces();
@@ -381,6 +391,20 @@ async function initializeAppState(): Promise<void> {
   await loadApprovals();
   await loadAutomations();
   await loadAutomationRuns();
+}
+
+function setActivePage(page: string): void {
+  state.activePage = page;
+
+  elements.navButtons.forEach((button) => {
+    const active = button.dataset.pageTarget === page;
+    button.setAttribute("aria-current", active ? "page" : "false");
+  });
+
+  elements.pageSections.forEach((section) => {
+    const pages = (section.dataset.pages ?? "").split(/\s+/).filter(Boolean);
+    section.hidden = !pages.includes(page);
+  });
 }
 
 async function loadExecutors(): Promise<void> {
