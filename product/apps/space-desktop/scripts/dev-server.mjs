@@ -183,6 +183,36 @@ async function handleRequest(request, response) {
     return;
   }
 
+  if (request.method === "GET" && pathname === "/api/recipes") {
+    await handleListRecipes(response);
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/recipes/from-run") {
+    await handleCreateRecipeFromRun(request, response);
+    return;
+  }
+
+  if (request.method === "PATCH" && isRecipePath(pathname)) {
+    await handleUpdateRecipe(request, response, recipeIdFromPath(pathname));
+    return;
+  }
+
+  if (request.method === "POST" && isRecipeTestPath(pathname)) {
+    await handleTestRecipe(response, recipeIdFromPath(pathname));
+    return;
+  }
+
+  if (request.method === "POST" && isRecipeExportPath(pathname)) {
+    await handleExportRecipe(response, recipeIdFromPath(pathname));
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/recipe-tests") {
+    await handleListRecipeTests(response);
+    return;
+  }
+
   if (request.method === "GET" && pathname === "/api/automations") {
     await handleListAutomations(response);
     return;
@@ -488,6 +518,92 @@ async function handleRunCapability(response, capabilityId) {
 
 async function handleListCapabilityRuns(response) {
   writeJson(response, 200, appStore.listCapabilityRuns(appStore.getSetting("activeWorkspaceId")));
+}
+
+async function handleListRecipes(response) {
+  writeJson(response, 200, appStore.listRecipes(appStore.getSetting("activeWorkspaceId")));
+}
+
+async function handleCreateRecipeFromRun(request, response) {
+  try {
+    const body = await readJsonBody(request);
+    const runId = readRequiredString(body.runId, "runId");
+    const run = appStore.getRun(runId);
+    const activeWorkspaceId = appStore.getSetting("activeWorkspaceId");
+    if (!run || run.status !== "completed") throw new Error("Select a completed run before creating a recipe.");
+    if (activeWorkspaceId && run.workspaceId !== activeWorkspaceId) throw new Error("Run is not in the active workspace.");
+
+    const recipe = appStore.createRecipe({
+      title: `Recipe: ${run.goal.slice(0, 48)}`,
+      prompt: run.goal,
+      inputSpec: "Goal text",
+      outputSpec: "Markdown report artifact",
+      sourceRunId: run.id,
+      workspaceId: run.workspaceId,
+    });
+    writeJson(response, 200, { recipe });
+  } catch (error) {
+    writeJson(response, 400, { error: sanitizeErrorMessage(error) });
+  }
+}
+
+async function handleUpdateRecipe(request, response, recipeId) {
+  try {
+    const body = await readJsonBody(request);
+    requireRecipeInActiveWorkspace(recipeId);
+    const recipe = appStore.updateRecipe(recipeId, {
+      title: readOptionalString(body.title),
+      prompt: readOptionalString(body.prompt),
+      inputSpec: readOptionalString(body.inputSpec),
+      outputSpec: readOptionalString(body.outputSpec),
+    });
+    writeJson(response, 200, { recipe });
+  } catch (error) {
+    writeJson(response, 400, { error: sanitizeErrorMessage(error) });
+  }
+}
+
+async function handleTestRecipe(response, recipeId) {
+  try {
+    const recipe = requireRecipeInActiveWorkspace(recipeId);
+    const test = appStore.createRecipeTest({
+      recipeId,
+      workspaceId: recipe.workspaceId,
+      status: "completed",
+      result: createRecipeTestResult(recipe),
+      startedAt: nowIso(),
+      completedAt: nowIso(),
+    });
+    appStore.markRecipeTested(recipeId, test.completedAt);
+    writeJson(response, 200, { test });
+  } catch (error) {
+    writeJson(response, 400, { error: sanitizeErrorMessage(error) });
+  }
+}
+
+async function handleExportRecipe(response, recipeId) {
+  try {
+    const recipe = requireRecipeInActiveWorkspace(recipeId);
+    const capability = appStore.exportRecipeAsCapability(recipe);
+    writeJson(response, 200, { recipe: appStore.getRecipe(recipeId), capability });
+  } catch (error) {
+    writeJson(response, 400, { error: sanitizeErrorMessage(error) });
+  }
+}
+
+async function handleListRecipeTests(response) {
+  writeJson(response, 200, appStore.listRecipeTests(appStore.getSetting("activeWorkspaceId")));
+}
+
+function requireRecipeInActiveWorkspace(recipeId) {
+  const recipe = appStore.getRecipe(recipeId);
+  const activeWorkspaceId = appStore.getSetting("activeWorkspaceId");
+
+  if (!recipe || (activeWorkspaceId && recipe.workspaceId !== activeWorkspaceId)) {
+    throw new Error("Recipe not found in active workspace.");
+  }
+
+  return recipe;
 }
 
 async function handleListAutomations(response) {
@@ -933,6 +1049,21 @@ function createAutomationResult(automation) {
   ].join("\n");
 }
 
+function createRecipeTestResult(recipe) {
+  return [
+    `# Recipe Test: ${recipe.title}`,
+    "",
+    `Prompt: ${recipe.prompt}`,
+    `Input Spec: ${recipe.inputSpec}`,
+    `Output Spec: ${recipe.outputSpec}`,
+    "",
+    "Validation:",
+    "- Recipe prompt is editable.",
+    "- Recipe can be replayed locally.",
+    "- Recipe can be exported as a local capability.",
+  ].join("\n");
+}
+
 function runLocalCapability(capability, workspaceId) {
   const run = appStore.createCapabilityRun({
     capabilityId: capability.id,
@@ -975,6 +1106,20 @@ function runLocalCapability(capability, workspaceId) {
 
 function createCapabilityResult(capability, workspaceId) {
   const workspace = workspaceId ? appStore.getWorkspace(workspaceId) : undefined;
+  const recipe = appStore.getRecipeByCapabilityId(capability.id);
+
+  if (recipe) {
+    return [
+      `# ${recipe.title}`,
+      "",
+      "Recipe replay:",
+      `Prompt: ${recipe.prompt}`,
+      `Input: ${recipe.inputSpec}`,
+      `Output: ${recipe.outputSpec}`,
+      "",
+      `Workspace: ${workspace?.name ?? "No workspace selected"}`,
+    ].join("\n");
+  }
 
   switch (capability.id) {
     case "capability-workspace-summary": {
@@ -1661,6 +1806,22 @@ function capabilityIdFromPath(pathname) {
   return decodeURIComponent(pathname.split("/")[3] ?? "");
 }
 
+function isRecipePath(pathname) {
+  return /^\/api\/recipes\/[^/]+$/.test(pathname);
+}
+
+function isRecipeTestPath(pathname) {
+  return /^\/api\/recipes\/[^/]+\/test$/.test(pathname);
+}
+
+function isRecipeExportPath(pathname) {
+  return /^\/api\/recipes\/[^/]+\/export$/.test(pathname);
+}
+
+function recipeIdFromPath(pathname) {
+  return decodeURIComponent(pathname.split("/")[3] ?? "");
+}
+
 function isThreadPath(pathname) {
   return /^\/api\/threads\/[^/]+$/.test(pathname);
 }
@@ -1873,6 +2034,28 @@ class SqliteAppStore {
         type TEXT NOT NULL,
         message TEXT NOT NULL,
         created_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS recipes (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        prompt TEXT NOT NULL,
+        input_spec TEXT NOT NULL,
+        output_spec TEXT NOT NULL,
+        source_run_id TEXT,
+        workspace_id TEXT,
+        capability_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        last_tested_at TEXT
+      );
+      CREATE TABLE IF NOT EXISTS recipe_tests (
+        id TEXT PRIMARY KEY,
+        recipe_id TEXT NOT NULL,
+        workspace_id TEXT,
+        status TEXT NOT NULL,
+        result TEXT,
+        started_at TEXT NOT NULL,
+        completed_at TEXT
       );
       CREATE TABLE IF NOT EXISTS automations (
         id TEXT PRIMARY KEY,
@@ -2465,6 +2648,129 @@ class SqliteAppStore {
     return { runs: rows.map(capabilityRunRowToSummary) };
   }
 
+  createRecipe(input) {
+    const id = randomUUID();
+    const timestamp = nowIso();
+    this.db.prepare(`
+      INSERT INTO recipes (
+        id, title, prompt, input_spec, output_spec, source_run_id, workspace_id, capability_id, created_at, updated_at, last_tested_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      input.title,
+      input.prompt,
+      input.inputSpec,
+      input.outputSpec,
+      input.sourceRunId ?? null,
+      input.workspaceId ?? null,
+      null,
+      timestamp,
+      timestamp,
+      null,
+    );
+    return this.getRecipe(id);
+  }
+
+  updateRecipe(id, input) {
+    const current = this.getRecipe(id);
+    if (!current) throw new Error("Recipe not found.");
+    this.db.prepare(`
+      UPDATE recipes
+      SET title = ?, prompt = ?, input_spec = ?, output_spec = ?, updated_at = ?
+      WHERE id = ?
+    `).run(
+      input.title ?? current.title,
+      input.prompt ?? current.prompt,
+      input.inputSpec ?? current.inputSpec,
+      input.outputSpec ?? current.outputSpec,
+      nowIso(),
+      id,
+    );
+    return this.getRecipe(id);
+  }
+
+  getRecipe(id) {
+    const row = this.db.prepare("SELECT * FROM recipes WHERE id = ?").get(id);
+    return row ? recipeRowToSummary(row) : undefined;
+  }
+
+  getRecipeByCapabilityId(capabilityId) {
+    const row = this.db.prepare("SELECT * FROM recipes WHERE capability_id = ?").get(capabilityId);
+    return row ? recipeRowToSummary(row) : undefined;
+  }
+
+  listRecipes(workspaceId) {
+    const rows = workspaceId
+      ? this.db.prepare("SELECT * FROM recipes WHERE workspace_id = ? ORDER BY updated_at DESC").all(workspaceId)
+      : this.db.prepare("SELECT * FROM recipes ORDER BY updated_at DESC").all();
+    return { recipes: rows.map(recipeRowToSummary) };
+  }
+
+  createRecipeTest(input) {
+    const id = randomUUID();
+    this.db.prepare(`
+      INSERT INTO recipe_tests (id, recipe_id, workspace_id, status, result, started_at, completed_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      input.recipeId,
+      input.workspaceId ?? null,
+      input.status,
+      input.result ?? null,
+      input.startedAt ?? nowIso(),
+      input.completedAt ?? null,
+    );
+    return this.getRecipeTest(id);
+  }
+
+  getRecipeTest(id) {
+    const row = this.db.prepare("SELECT * FROM recipe_tests WHERE id = ?").get(id);
+    return row ? recipeTestRowToSummary(row) : undefined;
+  }
+
+  listRecipeTests(workspaceId) {
+    const rows = workspaceId
+      ? this.db.prepare("SELECT * FROM recipe_tests WHERE workspace_id = ? ORDER BY started_at DESC").all(workspaceId)
+      : this.db.prepare("SELECT * FROM recipe_tests ORDER BY started_at DESC").all();
+    return { tests: rows.map(recipeTestRowToSummary) };
+  }
+
+  markRecipeTested(id, testedAt) {
+    this.db.prepare("UPDATE recipes SET last_tested_at = ?, updated_at = ? WHERE id = ?").run(testedAt, nowIso(), id);
+  }
+
+  exportRecipeAsCapability(recipe) {
+    const capabilityId = recipe.capabilityId ?? `capability-recipe-${recipe.id}`;
+    const timestamp = nowIso();
+    const permissions = [
+      { category: "workspace-read", description: "Read the active workspace while replaying the recipe." },
+      { category: "artifact-read", description: "Read artifacts created by the source workflow." },
+    ];
+    const createdAt = this.db.prepare("SELECT created_at FROM capabilities WHERE id = ?").get(capabilityId)?.created_at ?? timestamp;
+    this.db.prepare(`
+      INSERT INTO capabilities (id, title, description, kind, permissions_json, enabled, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        title = excluded.title,
+        description = excluded.description,
+        permissions_json = excluded.permissions_json,
+        enabled = excluded.enabled,
+        updated_at = excluded.updated_at
+    `).run(
+      capabilityId,
+      recipe.title,
+      `Recipe capability exported from ${recipe.sourceRunId ?? "manual recipe"}.`,
+      "local",
+      JSON.stringify(permissions),
+      1,
+      createdAt,
+      timestamp,
+    );
+    this.db.prepare("UPDATE recipes SET capability_id = ?, updated_at = ? WHERE id = ?").run(capabilityId, timestamp, recipe.id);
+    return this.getCapability(capabilityId);
+  }
+
   createAutomation(input) {
     const id = randomUUID();
     const timestamp = nowIso();
@@ -2766,6 +3072,34 @@ function capabilityRunRowToSummary(row) {
     status: row.status,
     ...(row.result ? { result: row.result } : {}),
     ...(row.artifact_id ? { artifactId: row.artifact_id } : {}),
+    startedAt: row.started_at,
+    ...(row.completed_at ? { completedAt: row.completed_at } : {}),
+  };
+}
+
+function recipeRowToSummary(row) {
+  return {
+    id: row.id,
+    title: row.title,
+    prompt: row.prompt,
+    inputSpec: row.input_spec,
+    outputSpec: row.output_spec,
+    ...(row.source_run_id ? { sourceRunId: row.source_run_id } : {}),
+    ...(row.workspace_id ? { workspaceId: row.workspace_id } : {}),
+    ...(row.capability_id ? { capabilityId: row.capability_id } : {}),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    ...(row.last_tested_at ? { lastTestedAt: row.last_tested_at } : {}),
+  };
+}
+
+function recipeTestRowToSummary(row) {
+  return {
+    id: row.id,
+    recipeId: row.recipe_id,
+    ...(row.workspace_id ? { workspaceId: row.workspace_id } : {}),
+    status: row.status,
+    ...(row.result ? { result: row.result } : {}),
     startedAt: row.started_at,
     ...(row.completed_at ? { completedAt: row.completed_at } : {}),
   };

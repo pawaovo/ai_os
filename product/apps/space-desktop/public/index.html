@@ -15,15 +15,15 @@
     </script>
   </head>
   <body>
-    <main class="space-workbench app-shell" data-layout="v0.8-capability-workbench">
+    <main class="space-workbench app-shell" data-layout="v0.9-forge-preview-workbench">
       <header class="workbench-hero" aria-labelledby="app-title">
         <div>
-          <p class="eyebrow">AI OS / V0.8 capability system</p>
+          <p class="eyebrow">AI OS / V0.9 AI Forge preview</p>
           <h1 id="app-title">AI OS Space</h1>
         </div>
         <p class="hero-copy">
-          Use local capabilities to extend AI OS safely. Inspect permissions, enable or disable installed
-          capabilities, run them, and review execution history without opening the system up to arbitrary plugins.
+          Turn successful local runs into editable recipes, test them, and export them as reusable
+          local capabilities without opening the system up to marketplace or arbitrary plugin execution.
         </p>
         <span id="active-workspace-label" class="status-pill" data-phase="idle">no workspace</span>
       </header>
@@ -38,6 +38,7 @@
         <button class="nav-button" type="button" data-page-target="approvals">Approvals</button>
         <button class="nav-button" type="button" data-page-target="memory">Memory</button>
         <button class="nav-button" type="button" data-page-target="capabilities">Capabilities</button>
+        <button class="nav-button" type="button" data-page-target="forge">Forge</button>
         <button class="nav-button" type="button" data-page-target="providers">Providers</button>
         <button class="nav-button" type="button" data-page-target="settings">Settings</button>
       </aside>
@@ -176,6 +177,23 @@
           <ul id="capability-list" class="action-list"></ul>
           <p id="capability-help" class="inline-help">Capabilities stay local and expose declared permissions.</p>
         </section>
+
+        <section class="forge-panel panel page-section" data-pages="forge" aria-labelledby="forge-title">
+          <div class="panel-heading">
+            <p class="eyebrow">Forge</p>
+            <span class="mini-label">recipe builder</span>
+          </div>
+          <h2 id="forge-title">Recipe From Run</h2>
+          <div class="stack-form">
+            <label>
+              Successful run
+              <select id="forge-run-select"></select>
+            </label>
+            <button id="forge-create-button" type="button">Create Recipe</button>
+          </div>
+          <ul id="recipe-list" class="action-list"></ul>
+          <p id="forge-help" class="inline-help">Create a recipe from a successful run, then test and export it as a local capability.</p>
+        </section>
       </aside>
 
       <section class="center-stage" aria-label="Chat and current run">
@@ -299,6 +317,38 @@
             <button id="capability-run-button" type="button" class="secondary-button">Run Capability</button>
           </div>
         </section>
+
+        <section class="recipe-editor-panel panel page-section" data-pages="forge" aria-labelledby="recipe-editor-title">
+          <div class="panel-heading">
+            <p class="eyebrow">Recipe Editor</p>
+            <span id="recipe-status" class="mini-label">not selected</span>
+          </div>
+          <h2 id="recipe-editor-title">Prompt App Draft</h2>
+          <form id="recipe-form" class="stack-form">
+            <label>
+              Title
+              <input id="recipe-title-input" autocomplete="off" />
+            </label>
+            <label>
+              Prompt
+              <textarea id="recipe-prompt-input" rows="4"></textarea>
+            </label>
+            <label>
+              Input spec
+              <textarea id="recipe-input-spec" rows="3"></textarea>
+            </label>
+            <label>
+              Output spec
+              <textarea id="recipe-output-spec" rows="3"></textarea>
+            </label>
+            <div class="button-grid">
+              <button id="recipe-save-button" type="submit">Save Recipe</button>
+              <button id="recipe-test-button" type="button" class="secondary-button">Test Recipe</button>
+              <button id="recipe-export-button" type="button" class="secondary-button">Save As Capability</button>
+            </div>
+          </form>
+          <pre id="recipe-test-preview" class="artifact-preview">Recipe test output appears here.</pre>
+        </section>
       </section>
 
       <aside class="right-rail" aria-label="Provider, run history, and saved artifacts">
@@ -320,6 +370,16 @@
           <h2 id="capability-history-title">Execution History</h2>
           <ul id="capability-run-list" class="action-list"></ul>
           <p id="capability-run-help" class="inline-help">Capability execution history appears here.</p>
+        </section>
+
+        <section class="recipe-test-history-panel panel page-section" data-pages="forge" aria-labelledby="recipe-test-history-title">
+          <div class="panel-heading">
+            <p class="eyebrow">Recipe Tests</p>
+            <span class="mini-label">validation</span>
+          </div>
+          <h2 id="recipe-test-history-title">Validation Runs</h2>
+          <ul id="recipe-test-list" class="action-list"></ul>
+          <p id="recipe-test-help" class="inline-help">Recipe validation history appears here.</p>
         </section>
 
         <section class="executor-status-panel panel page-section" data-pages="runs providers settings" aria-labelledby="executor-status-title">

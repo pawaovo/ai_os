@@ -139,7 +139,7 @@ test("createInitialSpaceDemoState exposes the visible local demo shell", () => {
   assert.equal(state.events[0].type, "space.ready");
 });
 
-test("space desktop V0.8 page exposes capability controls", async () => {
+test("space desktop V0.9 page exposes forge preview controls", async () => {
   const html = await readFile(resolve(productRoot, "apps/space-desktop/public/index.html"), "utf8");
   const styles = await readFile(resolve(productRoot, "apps/space-desktop/public/styles.css"), "utf8");
 
@@ -149,10 +149,12 @@ test("space desktop V0.8 page exposes capability controls", async () => {
   assert.doesNotMatch(html, /data-layout="v0\.6-automation-workbench"/);
   assert.doesNotMatch(html, /data-layout="v0\.6\.1-product-shell"/);
   assert.doesNotMatch(html, /data-layout="v0\.7-local-memory-workbench"/);
-  assert.match(html, /data-layout="v0\.8-capability-workbench"/);
+  assert.doesNotMatch(html, /data-layout="v0\.8-capability-workbench"/);
+  assert.match(html, /data-layout="v0\.9-forge-preview-workbench"/);
   assert.match(html, /class="app-nav"/);
   assert.match(html, /data-page-target="memory"/);
   assert.match(html, /data-page-target="capabilities"/);
+  assert.match(html, /data-page-target="forge"/);
   assert.match(html, /data-page-target="settings"/);
   assert.match(html, /id="settings-title"/);
   assert.match(html, /id="memory-title"/);
@@ -167,6 +169,17 @@ test("space desktop V0.8 page exposes capability controls", async () => {
   assert.match(html, /id="capability-toggle-button"/);
   assert.match(html, /id="capability-run-button"/);
   assert.match(html, /id="capability-run-list"/);
+  assert.match(html, /id="forge-run-select"/);
+  assert.match(html, /id="forge-create-button"/);
+  assert.match(html, /id="recipe-list"/);
+  assert.match(html, /id="recipe-form"/);
+  assert.match(html, /id="recipe-title-input"/);
+  assert.match(html, /id="recipe-prompt-input"/);
+  assert.match(html, /id="recipe-input-spec"/);
+  assert.match(html, /id="recipe-output-spec"/);
+  assert.match(html, /id="recipe-test-button"/);
+  assert.match(html, /id="recipe-export-button"/);
+  assert.match(html, /id="recipe-test-list"/);
   assert.match(html, /id="workspace-select"/);
   assert.match(html, /id="workspace-trust-level"/);
   assert.match(html, /id="active-workspace-label"/);
@@ -836,6 +849,88 @@ test("space desktop V0.8 capabilities can be inspected, toggled, and run", async
 
     const artifacts = await getJson(`http://127.0.0.1:${appPort}/api/artifacts`);
     assert.equal(artifacts.artifacts.some((artifact) => artifact.source === "capability"), true);
+  } finally {
+    await appServer.stop();
+    await rm(storageDir, { recursive: true, force: true });
+  }
+});
+
+test("space desktop V0.9 forge recipes can be created, tested, exported, and rerun", async () => {
+  const storageDir = await mkdtemp(`${tmpdir()}/ai-os-v09-`);
+  const appPort = await getAvailablePort();
+  const appServer = startSpaceDesktopServer({
+    port: appPort,
+    storageDir,
+  });
+
+  try {
+    await waitForHttp(`http://127.0.0.1:${appPort}/`);
+
+    const workspace = await postJson(`http://127.0.0.1:${appPort}/api/workspaces`, {
+      name: "V0.9 Workspace",
+      path: storageDir,
+    });
+    assert.equal(workspace.workspace.name, "V0.9 Workspace");
+
+    const started = await postJson(`http://127.0.0.1:${appPort}/api/runs/start`, {
+      goal: "summarize workspace status for recipe preview",
+      executorChoice: "mock",
+      timeoutMs: 5000,
+    });
+    const completed = await waitForLiveRun(appPort, started.live.runId, (live) => live.status === "completed");
+    assert.equal(completed.status, "completed");
+
+    const created = await postJson(`http://127.0.0.1:${appPort}/api/recipes/from-run`, {
+      runId: started.live.runId,
+    });
+    assert.match(created.recipe.title, /Recipe:/);
+    assert.equal(created.recipe.prompt, "summarize workspace status for recipe preview");
+    assert.equal(created.recipe.sourceRunId, started.live.runId);
+    assert.equal(created.recipe.workspaceId, workspace.workspace.id);
+
+    const updated = await patchJson(`http://127.0.0.1:${appPort}/api/recipes/${created.recipe.id}`, {
+      title: "Workspace Digest Recipe",
+      prompt: "Create a concise workspace digest.",
+      inputSpec: "Workspace goal and recent run context",
+      outputSpec: "Markdown digest with next actions",
+    });
+    assert.equal(updated.recipe.title, "Workspace Digest Recipe");
+    assert.equal(updated.recipe.prompt, "Create a concise workspace digest.");
+
+    const tested = await postJson(`http://127.0.0.1:${appPort}/api/recipes/${created.recipe.id}/test`, {});
+    assert.equal(tested.test.status, "completed");
+    assert.equal(tested.test.recipeId, created.recipe.id);
+    assert.match(tested.test.result, /Workspace Digest Recipe/);
+    assert.match(tested.test.result, /Create a concise workspace digest/);
+
+    const exported = await postJson(`http://127.0.0.1:${appPort}/api/recipes/${created.recipe.id}/export`, {});
+    assert.equal(exported.recipe.capabilityId, exported.capability.id);
+    assert.equal(exported.capability.kind, "local");
+    assert.equal(exported.capability.enabled, true);
+
+    await patchJson(`http://127.0.0.1:${appPort}/api/recipes/${created.recipe.id}`, {
+      title: "Workspace Digest Recipe V2",
+      outputSpec: "Markdown digest with risks and next actions",
+    });
+    const reexported = await postJson(`http://127.0.0.1:${appPort}/api/recipes/${created.recipe.id}/export`, {});
+    assert.equal(reexported.capability.id, exported.capability.id);
+    assert.equal(reexported.capability.title, "Workspace Digest Recipe V2");
+
+    const rerun = await postJson(`http://127.0.0.1:${appPort}/api/capabilities/${reexported.capability.id}/run`, {});
+    assert.equal(rerun.run.status, "completed");
+    assert.equal(rerun.artifact.source, "capability");
+    assert.match(rerun.run.result, /Recipe replay/);
+    assert.match(rerun.artifact.content, /Workspace Digest Recipe V2/);
+    assert.match(rerun.artifact.content, /Markdown digest with risks and next actions/);
+
+    const capabilityRuns = await getJson(`http://127.0.0.1:${appPort}/api/capability-runs`);
+    assert.equal(capabilityRuns.runs.some((run) => run.capabilityId === reexported.capability.id), true);
+
+    const recipes = await getJson(`http://127.0.0.1:${appPort}/api/recipes`);
+    assert.equal(recipes.recipes.some((recipe) => recipe.id === created.recipe.id && recipe.capabilityId === reexported.capability.id), true);
+
+    const recipeTests = await getJson(`http://127.0.0.1:${appPort}/api/recipe-tests`);
+    assert.equal(recipeTests.tests.some((testRun) => testRun.recipeId === created.recipe.id), true);
   } finally {
     await appServer.stop();
     await rm(storageDir, { recursive: true, force: true });

@@ -43,3 +43,27 @@ export interface CapabilityRunEvent {
   message: string;
   createdAt: string;
 }
+
+export interface RecipeRecord {
+  id: string;
+  title: string;
+  prompt: string;
+  inputSpec: string;
+  outputSpec: string;
+  sourceRunId?: string;
+  workspaceId?: string;
+  capabilityId?: string;
+  createdAt: string;
+  updatedAt: string;
+  lastTestedAt?: string;
+}
+
+export interface RecipeTestRecord {
+  id: string;
+  recipeId: string;
+  workspaceId?: string;
+  status: "completed" | "failed";
+  result?: string;
+  startedAt: string;
+  completedAt?: string;
+}

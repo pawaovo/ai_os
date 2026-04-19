@@ -5,7 +5,7 @@ import {
 } from "./demo-runtime.js";
 import type { ChatUiMessage } from "./server-runtime.js";
 import type { ApprovalRecord, WorkspaceTrustLevel } from "@ai-os/approval-core";
-import type { CapabilityPermission, CapabilityRecord, CapabilityRunRecord } from "@ai-os/capability-contract";
+import type { CapabilityPermission, CapabilityRecord, CapabilityRunRecord, RecipeRecord, RecipeTestRecord } from "@ai-os/capability-contract";
 import type { MemoryRecord, MemoryScope, MemorySensitivity, RetrievedMemory } from "@ai-os/kernel-memory";
 
 type ProviderProtocol = "openai-compatible" | "anthropic-compatible";
@@ -104,6 +104,8 @@ interface AutomationRunSummary {
 interface MemorySummary extends MemoryRecord {}
 
 interface CapabilitySummary extends CapabilityRecord {}
+interface RecipeSummary extends RecipeRecord {}
+interface RecipeTestSummary extends RecipeTestRecord {}
 
 interface LiveRunState {
   runId: string;
@@ -141,6 +143,8 @@ const state = {
   memories: [] as MemorySummary[],
   capabilities: [] as CapabilitySummary[],
   capabilityRuns: [] as CapabilityRunRecord[],
+  recipes: [] as RecipeSummary[],
+  recipeTests: [] as RecipeTestSummary[],
   memoryUsage: [] as RetrievedMemory[],
   executorStatuses: [] as ExecutorStatusSummary[],
   liveRun: undefined as LiveRunState | undefined,
@@ -152,6 +156,7 @@ const state = {
   activeArtifact: undefined as ArtifactSummary | undefined,
   activeRunId: undefined as string | undefined,
   activeCapabilityId: undefined as string | undefined,
+  activeRecipeId: undefined as string | undefined,
   activePage: "space",
   chatMessages: [
     {
@@ -246,6 +251,22 @@ const elements = {
   capabilityRunButton: getElement("capability-run-button", HTMLButtonElement),
   capabilityRunList: getElement("capability-run-list", HTMLElement),
   capabilityRunHelp: getElement("capability-run-help", HTMLElement),
+  forgeRunSelect: getElement("forge-run-select", HTMLSelectElement),
+  forgeCreateButton: getElement("forge-create-button", HTMLButtonElement),
+  forgeHelp: getElement("forge-help", HTMLElement),
+  recipeList: getElement("recipe-list", HTMLElement),
+  recipeForm: getElement("recipe-form", HTMLFormElement),
+  recipeStatus: getElement("recipe-status", HTMLElement),
+  recipeTitleInput: getElement("recipe-title-input", HTMLInputElement),
+  recipePromptInput: getElement("recipe-prompt-input", HTMLTextAreaElement),
+  recipeInputSpec: getElement("recipe-input-spec", HTMLTextAreaElement),
+  recipeOutputSpec: getElement("recipe-output-spec", HTMLTextAreaElement),
+  recipeSaveButton: getElement("recipe-save-button", HTMLButtonElement),
+  recipeTestButton: getElement("recipe-test-button", HTMLButtonElement),
+  recipeExportButton: getElement("recipe-export-button", HTMLButtonElement),
+  recipeTestPreview: getElement("recipe-test-preview", HTMLElement),
+  recipeTestList: getElement("recipe-test-list", HTMLElement),
+  recipeTestHelp: getElement("recipe-test-help", HTMLElement),
   automationForm: getElement("automation-form", HTMLFormElement),
   automationTitleInput: getElement("automation-title-input", HTMLInputElement),
   automationKind: getElement("automation-kind", HTMLSelectElement),
@@ -391,6 +412,33 @@ elements.capabilityRunButton.addEventListener("click", () => {
   void runSelectedCapability();
 });
 
+elements.forgeCreateButton.addEventListener("click", () => {
+  void createRecipeFromSelectedRun();
+});
+
+elements.recipeList.addEventListener("click", (event) => {
+  const target = event.target instanceof HTMLElement
+    ? event.target.closest<HTMLButtonElement>("button[data-recipe-id]")
+    : null;
+  if (target?.dataset.recipeId) {
+    state.activeRecipeId = target.dataset.recipeId;
+    renderRecipes();
+  }
+});
+
+elements.recipeForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void saveSelectedRecipe();
+});
+
+elements.recipeTestButton.addEventListener("click", () => {
+  void testSelectedRecipe();
+});
+
+elements.recipeExportButton.addEventListener("click", () => {
+  void exportSelectedRecipe();
+});
+
 elements.automationForm.addEventListener("submit", (event) => {
   event.preventDefault();
   void createAutomationFromForm();
@@ -455,6 +503,8 @@ async function initializeAppState(): Promise<void> {
   await loadMemories();
   await loadCapabilities();
   await loadCapabilityRuns();
+  await loadRecipes();
+  await loadRecipeTests();
 }
 
 function setActivePage(page: string): void {
@@ -1302,6 +1352,7 @@ async function loadRuns(): Promise<void> {
   try {
     const payload = await apiJson<{ runs: RunSummary[] }>("/api/runs");
     state.runs = payload.runs;
+    renderForgeRunOptions();
     const selected = state.runs.find((run) => run.id === state.activeRunId) ?? state.runs[0];
     state.activeRunId = selected?.id;
 
@@ -1316,6 +1367,14 @@ async function loadRuns(): Promise<void> {
     elements.runHistoryHelp.textContent = errorToMessage(error, "Failed to load run history.");
     renderRunHistory();
   }
+}
+
+function renderForgeRunOptions(): void {
+  const completedRuns = state.runs.filter((run) => run.status === "completed");
+  elements.forgeRunSelect.replaceChildren(
+    createOption("", completedRuns.length > 0 ? "Select a completed run" : "No completed runs"),
+    ...completedRuns.map((run) => createOption(run.id, `${run.goal} / ${formatDate(run.startedAt)}`)),
+  );
 }
 
 async function loadApprovals(): Promise<void> {
@@ -1531,6 +1590,155 @@ function renderCapabilityRuns(): void {
     })),
   );
   elements.capabilityRunHelp.textContent = `${state.capabilityRuns.length} capability run${state.capabilityRuns.length === 1 ? "" : "s"} recorded.`;
+}
+
+async function loadRecipes(): Promise<void> {
+  try {
+    const payload = await apiJson<{ recipes: RecipeSummary[] }>("/api/recipes");
+    state.recipes = payload.recipes;
+    if (!state.activeRecipeId && payload.recipes.length > 0) {
+      state.activeRecipeId = payload.recipes[0]?.id;
+    }
+    renderRecipes();
+  } catch (error) {
+    elements.forgeHelp.textContent = errorToMessage(error, "Failed to load recipes.");
+    renderRecipes();
+  }
+}
+
+async function loadRecipeTests(): Promise<void> {
+  try {
+    const payload = await apiJson<{ tests: RecipeTestSummary[] }>("/api/recipe-tests");
+    state.recipeTests = payload.tests;
+    renderRecipeTests();
+  } catch (error) {
+    elements.recipeTestHelp.textContent = errorToMessage(error, "Failed to load recipe tests.");
+    renderRecipeTests();
+  }
+}
+
+async function createRecipeFromSelectedRun(): Promise<void> {
+  const runId = elements.forgeRunSelect.value;
+  if (!runId) {
+    elements.forgeHelp.textContent = "Select a completed run first.";
+    return;
+  }
+
+  const payload = await apiJson<{ recipe: RecipeSummary }>("/api/recipes/from-run", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ runId }),
+  });
+  state.activeRecipeId = payload.recipe.id;
+  await loadRecipes();
+}
+
+async function saveSelectedRecipe(): Promise<void> {
+  const recipe = getActiveRecipe();
+  if (!recipe) return;
+
+  const payload = await apiJson<{ recipe: RecipeSummary }>(`/api/recipes/${encodeURIComponent(recipe.id)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      title: elements.recipeTitleInput.value,
+      prompt: elements.recipePromptInput.value,
+      inputSpec: elements.recipeInputSpec.value,
+      outputSpec: elements.recipeOutputSpec.value,
+    }),
+  });
+  state.recipes = state.recipes.map((item) => item.id === recipe.id ? payload.recipe : item);
+  renderRecipes();
+}
+
+async function testSelectedRecipe(): Promise<void> {
+  const recipe = getActiveRecipe();
+  if (!recipe) return;
+
+  const payload = await apiJson<{ test: RecipeTestSummary }>(`/api/recipes/${encodeURIComponent(recipe.id)}/test`, {
+    method: "POST",
+  });
+  elements.recipeTestPreview.textContent = payload.test.result ?? "Recipe test completed.";
+  await loadRecipes();
+  await loadRecipeTests();
+}
+
+async function exportSelectedRecipe(): Promise<void> {
+  const recipe = getActiveRecipe();
+  if (!recipe) return;
+
+  const payload = await apiJson<{ recipe: RecipeSummary; capability: CapabilitySummary }>(
+    `/api/recipes/${encodeURIComponent(recipe.id)}/export`,
+    { method: "POST" },
+  );
+  state.activeRecipeId = payload.recipe.id;
+  state.activeCapabilityId = payload.capability.id;
+  await loadRecipes();
+  await loadCapabilities();
+}
+
+function renderRecipes(): void {
+  if (state.recipes.length === 0) {
+    elements.recipeList.replaceChildren(createListItem("No recipes yet. Create one from a completed run."));
+    elements.recipeStatus.textContent = "not selected";
+    elements.recipeTitleInput.value = "";
+    elements.recipePromptInput.value = "";
+    elements.recipeInputSpec.value = "";
+    elements.recipeOutputSpec.value = "";
+    elements.recipeSaveButton.disabled = true;
+    elements.recipeTestButton.disabled = true;
+    elements.recipeExportButton.disabled = true;
+    elements.recipeExportButton.textContent = "Save As Capability";
+    return;
+  }
+
+  const activeRecipe = getActiveRecipe() ?? state.recipes[0];
+  state.activeRecipeId = activeRecipe?.id;
+  elements.recipeList.replaceChildren(
+    ...state.recipes.map((recipe) => createActionListItem({
+      id: recipe.id,
+      idName: "recipeId",
+      title: recipe.title,
+      meta: `${recipe.capabilityId ? "exported" : "draft"} / ${recipe.lastTestedAt ? `tested ${formatDate(recipe.lastTestedAt)}` : "not tested"}`,
+      pressed: recipe.id === activeRecipe?.id,
+      source: recipe.capabilityId ? "completed" : "running",
+    })),
+  );
+
+  if (!activeRecipe) return;
+  elements.recipeStatus.textContent = activeRecipe.capabilityId ? "exported" : "draft";
+  elements.recipeTitleInput.value = activeRecipe.title;
+  elements.recipePromptInput.value = activeRecipe.prompt;
+  elements.recipeInputSpec.value = activeRecipe.inputSpec;
+  elements.recipeOutputSpec.value = activeRecipe.outputSpec;
+  elements.recipeSaveButton.disabled = false;
+  elements.recipeTestButton.disabled = false;
+  elements.recipeExportButton.disabled = false;
+  elements.recipeExportButton.textContent = activeRecipe.capabilityId ? "Update Capability" : "Save As Capability";
+}
+
+function renderRecipeTests(): void {
+  if (state.recipeTests.length === 0) {
+    elements.recipeTestList.replaceChildren(createListItem("No recipe validation runs yet."));
+    elements.recipeTestHelp.textContent = "Test a recipe to validate it locally.";
+    return;
+  }
+
+  elements.recipeTestList.replaceChildren(
+    ...state.recipeTests.map((test) => createActionListItem({
+      id: test.id,
+      idName: "recipeTestId",
+      title: test.status,
+      meta: `${test.result ?? "No result"} / ${formatDate(test.startedAt)}`,
+      pressed: false,
+      source: test.status,
+    })),
+  );
+  elements.recipeTestHelp.textContent = `${state.recipeTests.length} recipe test${state.recipeTests.length === 1 ? "" : "s"} recorded.`;
+}
+
+function getActiveRecipe(): RecipeSummary | undefined {
+  return state.recipes.find((recipe) => recipe.id === state.activeRecipeId);
 }
 
 function renderApprovalHistory(): void {
@@ -1909,7 +2117,7 @@ function createEventListItem(typeText: string, messageText: string): HTMLLIEleme
 
 function createActionListItem(input: {
   id: string;
-  idName: "artifactId" | "runId" | "approvalId" | "memoryId" | "capabilityId";
+  idName: "artifactId" | "runId" | "approvalId" | "memoryId" | "capabilityId" | "recipeId" | "recipeTestId";
   title: string;
   meta: string;
   pressed: boolean;
