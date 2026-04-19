@@ -1,0 +1,352 @@
+# Journal - zzz (Part 1)
+
+> AI development session journal
+> Started: 2026-04-18
+
+---
+
+
+
+## Session 1: Complete V0.1 bootstrap foundations
+
+**Date**: 2026-04-18
+**Task**: Complete V0.1 bootstrap foundations
+**Branch**: `main`
+
+### Summary
+
+Completed V0.1 bootstrap phases 7-11: control plane, companion core, workspace/artifact core, space desktop shell model, Codex/Claude process adapter paths, tests and task plan updates.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0656042` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 2: Build V0.1 Space Demo App
+
+**Date**: 2026-04-18
+**Task**: Build V0.1 Space Demo App
+**Branch**: `main`
+
+### Summary
+
+Added browser-first local Space demo app with dev server, Companion -> Control Plane -> mock executor runtime, static UI, tests, and docs.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6ad7688` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 3: Enable Real Executor Demo Path
+
+**Date**: 2026-04-18
+**Task**: Enable Real Executor Demo Path
+**Branch**: `main`
+
+### Summary
+
+Enabled local dev server API for mock, Codex, and Claude Code executor demo runs; added server runtime, Node process runner, timeout handling, browser API call, tests, and docs.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `36739d8` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 4: Package V0.1 Desktop App
+
+**Date**: 2026-04-18
+**Task**: Package V0.1 Desktop App
+**Branch**: `main`
+
+### Summary
+
+Added macOS WebKit app shell and package:mac build script producing product/build/AI OS.app; verified tests, package build, packaged server resources, and app launch.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `663f1be` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 5: Complete V0.1 Product Preview
+
+**Date**: 2026-04-18
+**Task**: Complete V0.1 Product Preview
+**Branch**: `main`
+
+### Summary
+
+Added Provider Settings, local provider persistence, real chat API/UI through OpenAI-compatible and Anthropic-compatible providers, tests, docs, and rebuilt AI OS.app.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2d3ade8` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 6: Verify V0.1 App Local CLI Configs
+
+**Date**: 2026-04-18
+**Task**: Verify V0.1 App Local CLI Configs
+**Branch**: `main`
+
+### Summary
+
+Validated V0.1 app with local Codex and Claude Code configs without printing secrets; Codex succeeded, Claude returned provider-side HTTP 503 api_retry, and timeout diagnostics now surface the last process event.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `93f85af` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 7: Define AI OS Product Roadmap
+
+**Date**: 2026-04-18
+**Task**: Define AI OS Product Roadmap
+**Branch**: `main`
+
+### Summary
+
+Added product implementation roadmap from V0.1 Product Preview to V1.0, including version goals, tasks, acceptance criteria, non-goals, parallelization plan, and SDK/executor technology strategy.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3fb7bc3` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 8: V0.2 Secure Provider And Persistent Chat
+
+**Date**: 2026-04-19
+**Task**: V0.2 Secure Provider And Persistent Chat
+**Branch**: `main`
+
+### Summary
+
+Implemented V0.2 secure provider and persistent chat: SQLite metadata/thread/message storage, Keychain provider secrets, provider doctor/model loading APIs, thread UI, persistent server integration tests, and rebuilt macOS app.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c34e606` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 9: V0.2 Polish Provider And Thread Controls
+
+**Date**: 2026-04-19
+**Task**: V0.2 Polish Provider And Thread Controls
+**Branch**: `main`
+
+### Summary
+
+Finished V0.2 UI controls for provider delete, model dropdown with manual fallback, thread rename/delete, and verified tests/package smoke.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7af83b9` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 10: Complete Electron cross-platform desktop shell
+
+**Date**: 2026-04-20
+**Task**: Complete Electron cross-platform desktop shell
+**Branch**: `codex/electron-cross-platform-desktop`
+
+### Summary
+
+(Add summary)
+
+### Main Changes
+
+| Area | Result |
+|------|--------|
+| Product shell | Migrated the primary desktop packaging path from the legacy macOS WebKit shell to Electron for macOS and Windows. |
+| Runtime | Added an Electron main process that boots the local AI OS server, waits for readiness, and opens a locked-down BrowserWindow. |
+| Packaging | Added Electron Builder config, macOS and Windows package scripts, an after-pack hook, and a static Electron config validator. |
+| Secrets | Routed packaged Electron builds to `safeStorage`, kept Windows non-Electron fallback on protected files, and preserved existing local behavior for other dev paths. |
+| Docs and UI | Updated README, app install hints, and readiness/install copy to reflect Electron as the product shell. |
+| Verification | Passed `npm ci --ignore-scripts --dry-run`, `npm test`, `npm run validate:electron`, `npm run package:mac`, and a packaged-app smoke test against `/api/app/readiness`. |
+
+**Key files**:
+- `product/apps/space-desktop/electron-app/main.cjs`
+- `product/electron-builder.config.cjs`
+- `product/apps/space-desktop/scripts/dev-server.mjs`
+- `product/tests/space-desktop.test.mjs`
+- `.trellis/spec/backend/electron-desktop-shell.md`
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bb0ea8073e78bddca490bec8cd6374e1188751b1` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
