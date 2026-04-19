@@ -6,6 +6,7 @@
     "outDir": "dist"
   },
   "references": [
+    { "path": "../../packages/control/approval-core" },
     { "path": "../../packages/companion/companion-core" },
     { "path": "../../packages/control/control-plane" },
     { "path": "../../packages/conversation/conversation-core" },

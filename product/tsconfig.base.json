@@ -19,6 +19,7 @@
       "@ai-os/conversation-core": ["packages/conversation/conversation-core/src/index.ts"],
       "@ai-os/conversation-runtime": ["packages/conversation/conversation-runtime/src/index.ts"],
       "@ai-os/companion-core": ["packages/companion/companion-core/src/index.ts"],
+      "@ai-os/approval-core": ["packages/control/approval-core/src/index.ts"],
       "@ai-os/control-plane": ["packages/control/control-plane/src/index.ts"],
       "@ai-os/workspace-core": ["packages/workspace/workspace-core/src/index.ts"],
       "@ai-os/artifact-core": ["packages/workspace/artifact-core/src/index.ts"],

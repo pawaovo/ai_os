@@ -41,6 +41,11 @@ const {
   createRunSnapshot,
   reduceRunSnapshot,
 } = await import(pathToImportUrl(join(productRoot, "packages/control/control-plane/dist/index.js")));
+const {
+  assessRunApproval,
+  normalizeApprovalDecision,
+  normalizeWorkspaceTrustLevel,
+} = await import(pathToImportUrl(join(productRoot, "packages/control/approval-core/dist/index.js")));
 
 await mkdir(storageRoot, { recursive: true });
 
@@ -94,6 +99,11 @@ async function handleRequest(request, response) {
 
   if (request.method === "DELETE" && isArtifactPath(pathname)) {
     await handleDeleteArtifact(response, artifactIdFromPath(pathname));
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/approvals") {
+    await handleListApprovals(response);
     return;
   }
 
@@ -243,6 +253,7 @@ async function handleCreateWorkspace(request, response) {
   const workspace = appStore.createWorkspace({
     name: readRequiredString(body.name, "name"),
     path: readOptionalString(body.path),
+    trustLevel: normalizeWorkspaceTrustLevel(body.trustLevel),
   });
 
   writeJson(response, 200, { workspace });
@@ -253,6 +264,7 @@ async function handleUpdateWorkspace(request, response, workspaceId) {
   const workspace = appStore.updateWorkspace(workspaceId, {
     name: readOptionalString(body.name),
     path: readOptionalString(body.path),
+    trustLevel: body.trustLevel !== undefined ? normalizeWorkspaceTrustLevel(body.trustLevel) : undefined,
   });
 
   writeJson(response, 200, { workspace });
@@ -309,6 +321,10 @@ async function handleGetArtifact(response, artifactId) {
 async function handleDeleteArtifact(response, artifactId) {
   appStore.deleteArtifact(artifactId);
   writeJson(response, 200, appStore.listArtifacts(appStore.getSetting("activeWorkspaceId")));
+}
+
+async function handleListApprovals(response) {
+  writeJson(response, 200, appStore.listApprovals(appStore.getSetting("activeWorkspaceId")));
 }
 
 async function handleListRuns(response) {
@@ -626,6 +642,7 @@ async function createRunSession(input) {
     executorChoice: input.executorChoice,
     workspaceId: workspace.id,
     workspacePath: workspace.path,
+    trustLevel: normalizeWorkspaceTrustLevel(workspace.trustLevel),
     threadId: appStore.getSetting("activeThreadId"),
     timeoutMs: input.timeoutMs,
     status: "queued",
@@ -643,7 +660,13 @@ async function createRunSession(input) {
   };
 
   runSessions.set(runId, session);
-  session.pendingApproval = createPreRunApproval(session);
+  const approvalRequirement = assessRunApproval({
+    goal: session.goal,
+    executorChoice: session.executorChoice,
+    workspacePath: session.workspacePath,
+    trustLevel: session.trustLevel,
+  });
+  session.pendingApproval = approvalRequirement ? createPreRunApproval(session, approvalRequirement) : undefined;
   appStore.createRunRecord({
     id: runId,
     goal: session.goal,
@@ -656,9 +679,27 @@ async function createRunSession(input) {
   session.status = session.pendingApproval ? "awaiting-approval" : "running";
 
   if (session.pendingApproval) {
+    if (session.pendingApproval.autoDecision === "grant") {
+      appStore.resolveApproval(session.pendingApproval.approvalId, {
+        status: "granted",
+        decision: "grant",
+        note: "Auto-granted by trusted local workspace rule.",
+      });
+      appendLiveEvent(session, {
+        type: "approval.granted",
+        message: `Auto-granted ${session.pendingApproval.category} (${session.pendingApproval.riskLevel}).`,
+        approvalId: session.pendingApproval.approvalId,
+      });
+      session.pendingApproval = undefined;
+      session.status = "running";
+      appStore.updateRunStatus(session.runId, "running");
+      session.promise = runSessionWork(session);
+      return session;
+    }
+
     appendLiveEvent(session, {
       type: "approval.requested",
-      message: session.pendingApproval.reason,
+      message: `${session.pendingApproval.reason} [${session.pendingApproval.category} / ${session.pendingApproval.riskLevel}]`,
       approvalId: session.pendingApproval.approvalId,
     });
   } else {
@@ -668,12 +709,24 @@ async function createRunSession(input) {
   return session;
 }
 
-function createPreRunApproval(session) {
-  if (session.executorChoice === "mock") return undefined;
+function createPreRunApproval(session, requirement) {
+  const approvalId = `approval-${randomUUID()}`;
+
+  appStore.createApproval({
+    id: approvalId,
+    runId: session.runId,
+    workspaceId: session.workspaceId,
+    executorChoice: session.executorChoice,
+    category: requirement.category,
+    riskLevel: requirement.riskLevel,
+    reason: requirement.reason,
+    requestedAction: requirement.requestedAction,
+    status: "pending",
+  });
 
   return {
-    approvalId: `approval-${randomUUID()}`,
-    reason: `Approve ${session.executorChoice} to inspect and operate inside ${session.workspacePath}.`,
+    approvalId,
+    ...requirement,
     stage: "pre-run",
   };
 }
@@ -685,6 +738,11 @@ async function resolveRunApproval(session, decision) {
 
   const approvalDecision = normalizeApprovalDecision(decision);
   const approval = session.pendingApproval;
+  appStore.resolveApproval(approval.approvalId, {
+    status: approvalDecision === "grant" ? "granted" : "rejected",
+    decision: approvalDecision,
+    note: approvalDecision === "grant" ? "Granted by user." : "Rejected by user.",
+  });
 
   appendLiveEvent(session, {
     type: approvalDecision === "grant" ? "approval.granted" : "approval.rejected",
@@ -721,6 +779,11 @@ async function cancelRunSession(session) {
   if (isTerminalRunStatus(session.status)) return;
 
   if (session.pendingApproval) {
+    appStore.resolveApproval(session.pendingApproval.approvalId, {
+      status: "rejected",
+      decision: "reject",
+      note: "Interrupted while waiting for approval.",
+    });
     session.pendingApproval = undefined;
     await session.executor?.interruptRun(session.runId);
     finalizeSession(session, "interrupted", "Run interrupted while waiting for approval.");
@@ -810,9 +873,23 @@ function appendKernelEvent(session, event) {
       session.status = "awaiting-approval";
       session.pendingApproval = {
         approvalId: event.approvalId,
+        category: "shell-command",
+        riskLevel: "high",
         reason: "Executor requested approval during the run.",
+        requestedAction: "Runtime executor approval request.",
         stage: "runtime",
       };
+      appStore.createApproval({
+        id: event.approvalId,
+        runId: session.runId,
+        workspaceId: session.workspaceId,
+        executorChoice: session.executorChoice,
+        category: session.pendingApproval.category,
+        riskLevel: session.pendingApproval.riskLevel,
+        reason: session.pendingApproval.reason,
+        requestedAction: session.pendingApproval.requestedAction,
+        status: "pending",
+      });
       appStore.updateRunStatus(session.runId, "awaiting-approval");
       break;
     case "run.completed":
@@ -1030,16 +1107,6 @@ function isTerminalRunStatus(status) {
   return status === "completed" || status === "failed" || status === "interrupted";
 }
 
-function normalizeApprovalDecision(value) {
-  switch (value) {
-    case "grant":
-    case "reject":
-      return value;
-    default:
-      throw new Error("Unsupported approval decision.");
-  }
-}
-
 async function readJsonBody(request) {
   let body = "";
 
@@ -1202,6 +1269,7 @@ class SqliteAppStore {
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         path TEXT,
+        trust_level TEXT NOT NULL DEFAULT 'strict',
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -1255,8 +1323,25 @@ class SqliteAppStore {
         message TEXT NOT NULL,
         created_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS approvals (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        workspace_id TEXT,
+        executor_choice TEXT NOT NULL,
+        category TEXT NOT NULL,
+        risk_level TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        requested_action TEXT NOT NULL,
+        status TEXT NOT NULL,
+        decision TEXT,
+        created_at TEXT NOT NULL,
+        resolved_at TEXT,
+        note TEXT
+      );
     `);
     this.addColumnIfMissing("threads", "workspace_id", "TEXT");
+    this.addColumnIfMissing("workspaces", "trust_level", "TEXT NOT NULL DEFAULT 'strict'");
+    this.addColumnIfMissing("approvals", "executor_choice", "TEXT NOT NULL DEFAULT 'mock'");
   }
 
   addColumnIfMissing(table, column, type) {
@@ -1291,9 +1376,9 @@ class SqliteAppStore {
     const id = randomUUID();
     const timestamp = nowIso();
     this.db.prepare(`
-      INSERT INTO workspaces (id, name, path, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(id, input.name, input.path ?? null, timestamp, timestamp);
+      INSERT INTO workspaces (id, name, path, trust_level, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(id, input.name, input.path ?? null, input.trustLevel ?? "strict", timestamp, timestamp);
     this.setSetting("activeWorkspaceId", id);
     return this.getWorkspace(id);
   }
@@ -1309,9 +1394,9 @@ class SqliteAppStore {
     if (!current) throw new Error("Workspace not found.");
     this.db.prepare(`
       UPDATE workspaces
-      SET name = ?, path = COALESCE(?, path), updated_at = ?
+      SET name = ?, path = COALESCE(?, path), trust_level = ?, updated_at = ?
       WHERE id = ?
-    `).run(input.name ?? current.name, input.path ?? null, nowIso(), id);
+    `).run(input.name ?? current.name, input.path ?? null, input.trustLevel ?? current.trustLevel ?? "strict", nowIso(), id);
     this.setSetting("activeWorkspaceId", id);
     return this.getWorkspace(id);
   }
@@ -1618,6 +1703,54 @@ class SqliteAppStore {
     `).run(randomUUID(), input.runId, input.type, input.message, createdAt);
   }
 
+  createApproval(input) {
+    const createdAt = input.createdAt ?? nowIso();
+    this.db.prepare(`
+      INSERT INTO approvals (
+        id, run_id, workspace_id, executor_choice, category, risk_level, reason,
+        requested_action, status, decision, created_at, resolved_at, note
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.id,
+      input.runId,
+      input.workspaceId ?? null,
+      input.executorChoice,
+      input.category,
+      input.riskLevel,
+      input.reason,
+      input.requestedAction,
+      input.status,
+      input.decision ?? null,
+      createdAt,
+      input.resolvedAt ?? null,
+      input.note ?? null,
+    );
+    return this.getApproval(input.id);
+  }
+
+  resolveApproval(id, input) {
+    const resolvedAt = input.resolvedAt ?? nowIso();
+    this.db.prepare(`
+      UPDATE approvals
+      SET status = ?, decision = ?, resolved_at = ?, note = ?
+      WHERE id = ?
+    `).run(input.status, input.decision ?? null, resolvedAt, input.note ?? null, id);
+    return this.getApproval(id);
+  }
+
+  getApproval(id) {
+    const row = this.db.prepare("SELECT * FROM approvals WHERE id = ?").get(id);
+    return row ? approvalRowToSummary(row) : undefined;
+  }
+
+  listApprovals(workspaceId) {
+    const rows = workspaceId
+      ? this.db.prepare("SELECT * FROM approvals WHERE workspace_id = ? ORDER BY created_at DESC").all(workspaceId)
+      : this.db.prepare("SELECT * FROM approvals ORDER BY created_at DESC").all();
+    return { approvals: rows.map(approvalRowToSummary) };
+  }
+
   recordRunFromDemo(request, state) {
     const runId = state.summary?.runId ?? randomUUID();
     const timestamp = nowIso();
@@ -1689,6 +1822,7 @@ function workspaceRowToSummary(row) {
     id: row.id,
     name: row.name,
     ...(row.path ? { path: row.path } : {}),
+    trustLevel: row.trust_level ?? "strict",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -1730,6 +1864,24 @@ function runEventRowToSummary(row) {
     type: row.type,
     message: row.message,
     createdAt: row.created_at,
+  };
+}
+
+function approvalRowToSummary(row) {
+  return {
+    approvalId: row.id,
+    runId: row.run_id,
+    ...(row.workspace_id ? { workspaceId: row.workspace_id } : {}),
+    executorChoice: row.executor_choice,
+    category: row.category,
+    riskLevel: row.risk_level,
+    reason: row.reason,
+    requestedAction: row.requested_action,
+    status: row.status,
+    ...(row.decision ? { decision: row.decision } : {}),
+    requestedAt: row.created_at,
+    ...(row.resolved_at ? { resolvedAt: row.resolved_at } : {}),
+    ...(row.note ? { note: row.note } : {}),
   };
 }
 
@@ -2073,7 +2225,7 @@ function createDeferred() {
 }
 
 function promptNeedsApproval(prompt) {
-  return /\b(approve|approval|write|modify|edit|delete)\b/i.test(prompt);
+  return /\b(runtime approval|pause for approval)\b/i.test(prompt);
 }
 
 function createInterruptedEvent(id, occurredAt, spaceId, runId, message) {

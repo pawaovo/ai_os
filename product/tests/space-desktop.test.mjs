@@ -139,20 +139,28 @@ test("createInitialSpaceDemoState exposes the visible local demo shell", () => {
   assert.equal(state.events[0].type, "space.ready");
 });
 
-test("space desktop V0.4 page exposes executor workflow controls", async () => {
+test("space desktop V0.5 page exposes approval and trust controls", async () => {
   const html = await readFile(resolve(productRoot, "apps/space-desktop/public/index.html"), "utf8");
   const styles = await readFile(resolve(productRoot, "apps/space-desktop/public/styles.css"), "utf8");
 
   assert.doesNotMatch(html, /data-layout="v0\.3-workbench"/);
-  assert.match(html, /data-layout="v0\.4-executor-workbench"/);
+  assert.doesNotMatch(html, /data-layout="v0\.4-executor-workbench"/);
+  assert.match(html, /data-layout="v0\.5-approval-trust-workbench"/);
   assert.match(html, /id="workspace-select"/);
+  assert.match(html, /id="workspace-trust-level"/);
   assert.match(html, /id="active-workspace-label"/);
   assert.match(html, /id="executor-status-list"/);
   assert.match(html, /id="executor-timeout-input"/);
   assert.match(html, /id="run-cancel-button"/);
   assert.match(html, /id="approval-panel"/);
+  assert.match(html, /id="approval-category"/);
+  assert.match(html, /id="approval-risk-level"/);
+  assert.match(html, /id="approval-requested-action"/);
+  assert.match(html, /id="approval-decision"/);
+  assert.match(html, /id="approval-resolved-at"/);
   assert.match(html, /id="approval-grant-button"/);
   assert.match(html, /id="approval-reject-button"/);
+  assert.match(html, /id="approval-history-list"/);
   assert.match(html, /id="run-history-list"/);
   assert.match(html, /id="artifact-select"/);
   assert.match(html, /id="run-artifact-preview"/);
@@ -161,6 +169,7 @@ test("space desktop V0.4 page exposes executor workflow controls", async () => {
   assert.match(styles, /\.center-stage/);
   assert.match(styles, /\.right-rail/);
   assert.match(styles, /awaiting-approval/);
+  assert.match(styles, /approval-detail-grid/);
 });
 
 test("createRunningSpaceDemoState shows an in-progress mission before completion", () => {
@@ -477,8 +486,8 @@ test("space desktop dev server persists providers, threads, and messages without
   }
 });
 
-test("space desktop V0.4 run workflow supports doctor, approval, cancel, and artifacts", async () => {
-  const storageDir = await mkdtemp(`${tmpdir()}/ai-os-v04-`);
+test("space desktop V0.5 run workflow records approval history and trust decisions", async () => {
+  const storageDir = await mkdtemp(`${tmpdir()}/ai-os-v05-`);
   const appPort = await getAvailablePort();
   const appServer = startSpaceDesktopServer({
     port: appPort,
@@ -503,7 +512,7 @@ test("space desktop V0.4 run workflow supports doctor, approval, cancel, and art
     assert.equal(executors.executors[0].available, true);
 
     await postJson(`http://127.0.0.1:${appPort}/api/workspaces`, {
-      name: "V0.4 Workspace",
+      name: "V0.5 Workspace",
       path: storageDir,
     });
 
@@ -512,11 +521,13 @@ test("space desktop V0.4 run workflow supports doctor, approval, cancel, and art
       executorChoice: "mock",
       timeoutMs: 5000,
     });
-    assert.equal(approvingRun.run.status, "running");
+    assert.equal(approvingRun.run.status, "awaiting-approval");
 
     const pending = await waitForLiveRun(appPort, approvingRun.live.runId, (live) => Boolean(live.pendingApproval));
     assert.equal(pending.status, "awaiting-approval");
-    assert.match(pending.pendingApproval.reason, /Executor requested approval|approval/i);
+    assert.equal(pending.pendingApproval.category, "file-write");
+    assert.equal(pending.pendingApproval.riskLevel, "medium");
+    assert.match(pending.pendingApproval.reason, /File mutation/);
 
     await postJson(`http://127.0.0.1:${appPort}/api/runs/${approvingRun.live.runId}/approval`, {
       decision: "grant",
@@ -528,6 +539,13 @@ test("space desktop V0.4 run workflow supports doctor, approval, cancel, and art
     const persistedEvents = await getJson(`http://127.0.0.1:${appPort}/api/runs/${approvingRun.live.runId}/events`);
     assert.equal(persistedEvents.events.some((event) => event.type === "approval.granted"), true);
     assert.equal(persistedEvents.events.some((event) => event.type === "run.completed"), true);
+    const approvalHistory = await getJson(`http://127.0.0.1:${appPort}/api/approvals`);
+    const grantedApproval = approvalHistory.approvals.find((approval) => approval.runId === approvingRun.live.runId);
+    assert.equal(grantedApproval.category, "file-write");
+    assert.equal(grantedApproval.riskLevel, "medium");
+    assert.equal(grantedApproval.status, "granted");
+    assert.equal(grantedApproval.decision, "grant");
+    assert.equal(typeof grantedApproval.resolvedAt, "string");
 
     const artifacts = await getJson(`http://127.0.0.1:${appPort}/api/artifacts`);
     assert.equal(artifacts.artifacts.some((artifact) => artifact.runId === approvingRun.live.runId && artifact.kind === "diff"), true);
@@ -542,6 +560,50 @@ test("space desktop V0.4 run workflow supports doctor, approval, cancel, and art
     const cancelled = await postJson(`http://127.0.0.1:${appPort}/api/runs/${cancelRun.live.runId}/cancel`, {});
     assert.equal(cancelled.live.status, "interrupted");
     assert.equal(cancelled.live.events.some((event) => event.type === "run.interrupted"), true);
+
+    const shellRun = await postJson(`http://127.0.0.1:${appPort}/api/runs/start`, {
+      goal: "run npm install command",
+      executorChoice: "mock",
+      timeoutMs: 5000,
+    });
+    const shellPending = await waitForLiveRun(appPort, shellRun.live.runId, (live) => Boolean(live.pendingApproval));
+    assert.equal(shellPending.pendingApproval.category, "shell-command");
+    await postJson(`http://127.0.0.1:${appPort}/api/runs/${shellRun.live.runId}/approval`, {
+      decision: "reject",
+    });
+    const shellFailed = await waitForLiveRun(appPort, shellRun.live.runId, (live) => live.status === "failed");
+    assert.equal(shellFailed.events.some((event) => event.type === "approval.rejected"), true);
+    const rejectedHistory = await getJson(`http://127.0.0.1:${appPort}/api/approvals`);
+    const rejectedApproval = rejectedHistory.approvals.find((approval) => approval.runId === shellRun.live.runId);
+    assert.equal(rejectedApproval.status, "rejected");
+    assert.equal(rejectedApproval.decision, "reject");
+
+    const networkRun = await postJson(`http://127.0.0.1:${appPort}/api/runs/start`, {
+      goal: "download and upload a report",
+      executorChoice: "mock",
+      timeoutMs: 5000,
+    });
+    const networkPending = await waitForLiveRun(appPort, networkRun.live.runId, (live) => Boolean(live.pendingApproval));
+    assert.equal(networkPending.pendingApproval.category, "network");
+
+    await patchJson(`http://127.0.0.1:${appPort}/api/workspaces/${approvingRun.run.workspaceId}`, {
+      name: "V0.5 Workspace",
+      path: storageDir,
+      trustLevel: "trusted-local-writes",
+    });
+    const autoRun = await postJson(`http://127.0.0.1:${appPort}/api/runs/start`, {
+      goal: "edit a trusted local note",
+      executorChoice: "mock",
+      timeoutMs: 5000,
+    });
+    assert.equal(autoRun.live.pendingApproval, undefined);
+    const autoCompleted = await waitForLiveRun(appPort, autoRun.live.runId, (live) => live.status === "completed");
+    assert.equal(autoCompleted.events.some((event) => event.type === "approval.granted"), true);
+    const autoHistory = await getJson(`http://127.0.0.1:${appPort}/api/approvals`);
+    const autoApproval = autoHistory.approvals.find((approval) => approval.runId === autoRun.live.runId);
+    assert.equal(autoApproval.status, "granted");
+    assert.equal(autoApproval.decision, "grant");
+    assert.match(autoApproval.note, /Auto-granted/);
   } finally {
     await appServer.stop();
     await rm(storageDir, { recursive: true, force: true });

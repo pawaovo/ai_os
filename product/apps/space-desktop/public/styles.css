@@ -457,6 +457,45 @@ button:disabled {
     var(--panel);
 }
 
+.approval-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(6rem, 0.36fr) 1fr;
+  gap: 0.45rem 0.75rem;
+  margin-top: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 0.85rem;
+  background: rgba(255, 253, 244, 0.62);
+}
+
+.approval-detail-grid span {
+  color: var(--muted);
+  font-family: "Menlo", "Monaco", monospace;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.approval-detail-grid strong {
+  overflow-wrap: anywhere;
+}
+
+.approval-detail-grid strong[data-risk-level="high"],
+.source-badge[data-source="high"] {
+  color: var(--ember);
+}
+
+.approval-detail-grid strong[data-risk-level="medium"],
+.source-badge[data-source="medium"] {
+  color: var(--ochre);
+}
+
+.approval-detail-grid strong[data-risk-level="low"],
+.source-badge[data-source="low"] {
+  color: var(--moss);
+}
+
 .artifact-preview {
   overflow: auto;
   min-height: 11rem;

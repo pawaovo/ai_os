@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@ai-os/companion-core": "0.0.0",
+    "@ai-os/approval-core": "0.0.0",
     "@ai-os/control-plane": "0.0.0",
     "@ai-os/conversation-core": "0.0.0",
     "@ai-os/conversation-runtime": "0.0.0",

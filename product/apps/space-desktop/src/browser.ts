@@ -4,6 +4,7 @@ import {
   type SpaceDemoState,
 } from "./demo-runtime.js";
 import type { ChatUiMessage } from "./server-runtime.js";
+import type { ApprovalRecord, WorkspaceTrustLevel } from "@ai-os/approval-core";
 
 type ProviderProtocol = "openai-compatible" | "anthropic-compatible";
 
@@ -20,6 +21,7 @@ interface WorkspaceSummary {
   id: string;
   name: string;
   path?: string;
+  trustLevel: WorkspaceTrustLevel;
   createdAt: string;
   updatedAt: string;
 }
@@ -84,6 +86,11 @@ interface LiveRunState {
   pendingApproval?: {
     approvalId: string;
     reason: string;
+    category?: string;
+    riskLevel?: string;
+    requestedAction?: string;
+    decision?: string;
+    resolvedAt?: string;
   };
   completedAt?: string;
   timeoutMs?: number;
@@ -96,6 +103,7 @@ const state = {
   artifacts: [] as ArtifactSummary[],
   runs: [] as RunSummary[],
   runEvents: [] as RunEventSummary[],
+  approvals: [] as ApprovalRecord[],
   executorStatuses: [] as ExecutorStatusSummary[],
   liveRun: undefined as LiveRunState | undefined,
   runPoller: undefined as number | undefined,
@@ -119,6 +127,7 @@ const elements = {
   workspaceSelect: getElement("workspace-select", HTMLSelectElement),
   workspaceName: getElement("workspace-name", HTMLInputElement),
   workspacePath: getElement("workspace-path", HTMLInputElement),
+  workspaceTrustLevel: getElement("workspace-trust-level", HTMLSelectElement),
   workspaceSaveButton: getElement("workspace-save-button", HTMLButtonElement),
   workspaceUpdateButton: getElement("workspace-update-button", HTMLButtonElement),
   workspaceDeleteButton: getElement("workspace-delete-button", HTMLButtonElement),
@@ -161,6 +170,11 @@ const elements = {
   missionMeta: getElement("mission-meta", HTMLElement),
   approvalPanel: getElement("approval-panel", HTMLElement),
   approvalStatus: getElement("approval-status", HTMLElement),
+  approvalCategory: getElement("approval-category", HTMLElement),
+  approvalRiskLevel: getElement("approval-risk-level", HTMLElement),
+  approvalRequestedAction: getElement("approval-requested-action", HTMLElement),
+  approvalDecision: getElement("approval-decision", HTMLElement),
+  approvalResolvedAt: getElement("approval-resolved-at", HTMLElement),
   approvalReason: getElement("approval-reason", HTMLElement),
   approvalGrantButton: getElement("approval-grant-button", HTMLButtonElement),
   approvalRejectButton: getElement("approval-reject-button", HTMLButtonElement),
@@ -169,6 +183,8 @@ const elements = {
   runHistoryList: getElement("run-history-list", HTMLElement),
   runHistoryHelp: getElement("run-history-help", HTMLElement),
   runEventHistory: getElement("run-event-history", HTMLElement),
+  approvalHistoryList: getElement("approval-history-list", HTMLElement),
+  approvalHistoryHelp: getElement("approval-history-help", HTMLElement),
   artifactForm: getElement("artifact-form", HTMLFormElement),
   artifactSelect: getElement("artifact-select", HTMLSelectElement),
   artifactOpenButton: getElement("artifact-open-button", HTMLButtonElement),
@@ -307,6 +323,7 @@ async function initializeAppState(): Promise<void> {
   await loadThreads();
   await loadArtifacts();
   await loadRuns();
+  await loadApprovals();
 }
 
 async function loadExecutors(): Promise<void> {
@@ -370,6 +387,7 @@ async function createWorkspaceFromForm(): Promise<void> {
       body: JSON.stringify({
         name,
         path: optionalFormValue(elements.workspacePath.value),
+        trustLevel: elements.workspaceTrustLevel.value,
       }),
     });
     state.activeWorkspaceId = payload.workspace.id;
@@ -420,6 +438,7 @@ async function updateSelectedWorkspace(): Promise<void> {
         body: JSON.stringify({
           name: optionalFormValue(elements.workspaceName.value),
           path: optionalFormValue(elements.workspacePath.value),
+          trustLevel: elements.workspaceTrustLevel.value,
         }),
       },
     );
@@ -462,6 +481,7 @@ async function refreshWorkspaceScopedData(): Promise<void> {
   await loadThreads();
   await loadArtifacts();
   await loadRuns();
+  await loadApprovals();
 }
 
 function renderWorkspaces(): void {
@@ -479,7 +499,7 @@ function renderWorkspaces(): void {
     elements.activeWorkspaceLabel.textContent = activeWorkspace.name;
     elements.activeWorkspaceLabel.dataset.phase = "completed";
     elements.workspaceHelp.textContent =
-      `${activeWorkspace.name}${activeWorkspace.path ? ` at ${activeWorkspace.path}` : ""}`;
+      `${activeWorkspace.name}${activeWorkspace.path ? ` at ${activeWorkspace.path}` : ""} / trust: ${activeWorkspace.trustLevel}`;
     return;
   }
 
@@ -493,6 +513,7 @@ function renderWorkspaces(): void {
 function fillWorkspaceForm(workspace: WorkspaceSummary): void {
   elements.workspaceName.value = workspace.name;
   elements.workspacePath.value = workspace.path ?? "";
+  elements.workspaceTrustLevel.value = workspace.trustLevel;
 }
 
 function getActiveWorkspace(): WorkspaceSummary | undefined {
@@ -900,6 +921,7 @@ async function runDemoFromForm(): Promise<void> {
     state.liveRun = payload.live;
     renderCurrentRunView();
     await loadRuns();
+    await loadApprovals();
     startRunPolling(payload.run.id);
   } catch (error) {
     elements.runSummary.textContent = errorToMessage(error, "Failed to start executor run.");
@@ -925,6 +947,7 @@ async function cancelActiveRun(): Promise<void> {
     state.liveRun = payload.live;
     renderCurrentRunView();
     await loadRuns();
+    await loadApprovals();
   } catch (error) {
     elements.runSummary.textContent = errorToMessage(error, "Failed to cancel run.");
   }
@@ -953,6 +976,7 @@ async function resolveActiveApproval(decision: "grant" | "reject"): Promise<void
       startRunPolling(payload.live.runId);
     }
     await loadRuns();
+    await loadApprovals();
   } catch (error) {
     elements.approvalReason.textContent = errorToMessage(error, "Failed to resolve approval.");
   } finally {
@@ -986,6 +1010,7 @@ async function pollLiveRun(runId: string): Promise<void> {
       stopRunPolling();
       await loadRuns();
       await loadArtifacts();
+      await loadApprovals();
       state.liveRun = createPersistedRunView(payload.live.runId) ?? payload.live;
       renderCurrentRunView();
     }
@@ -1138,6 +1163,38 @@ async function loadRuns(): Promise<void> {
   }
 }
 
+async function loadApprovals(): Promise<void> {
+  try {
+    const payload = await apiJson<{ approvals: ApprovalRecord[] }>("/api/approvals");
+    state.approvals = payload.approvals;
+    renderApprovalHistory();
+  } catch (error) {
+    elements.approvalHistoryHelp.textContent = errorToMessage(error, "Failed to load approval history.");
+    renderApprovalHistory();
+  }
+}
+
+function renderApprovalHistory(): void {
+  if (state.approvals.length === 0) {
+    elements.approvalHistoryList.replaceChildren(createListItem("No approval decisions in this workspace yet."));
+    elements.approvalHistoryHelp.textContent = "Risk decisions will appear after executor tasks request approval.";
+    return;
+  }
+
+  elements.approvalHistoryList.replaceChildren(
+    ...state.approvals.map((approval) => createActionListItem({
+      id: approval.approvalId,
+      idName: "approvalId",
+      title: `${approval.category} / ${approval.riskLevel}`,
+      meta: `${approval.status}${approval.decision ? `:${approval.decision}` : ""} / ${approval.resolvedAt ? formatDate(approval.resolvedAt) : "pending"} / ${approval.requestedAction}`,
+      pressed: state.liveRun?.pendingApproval?.approvalId === approval.approvalId,
+      source: approval.status,
+    })),
+  );
+
+  elements.approvalHistoryHelp.textContent = `${state.approvals.length} approval record${state.approvals.length === 1 ? "" : "s"} in this workspace.`;
+}
+
 async function openRun(runId: string): Promise<void> {
   if (!runId) return;
 
@@ -1255,6 +1312,12 @@ function renderCurrentRunView(): void {
 function renderApprovalPanel(approval: LiveRunState["pendingApproval"]): void {
   elements.approvalPanel.dataset.active = approval ? "true" : "false";
   elements.approvalStatus.textContent = approval ? "pending" : "no request";
+  elements.approvalCategory.textContent = approval?.category ?? "none";
+  elements.approvalRiskLevel.textContent = approval?.riskLevel ?? "none";
+  elements.approvalRiskLevel.dataset.riskLevel = approval?.riskLevel ?? "";
+  elements.approvalRequestedAction.textContent = approval?.requestedAction ?? "none";
+  elements.approvalDecision.textContent = approval?.decision ?? (approval ? "pending" : "none");
+  elements.approvalResolvedAt.textContent = approval?.resolvedAt ? formatDate(approval.resolvedAt) : "not resolved";
   elements.approvalReason.textContent = approval?.reason ?? "Runs that require approval will pause here.";
   elements.approvalGrantButton.disabled = !approval;
   elements.approvalRejectButton.disabled = !approval;
@@ -1330,7 +1393,7 @@ function createEventListItem(typeText: string, messageText: string): HTMLLIEleme
 
 function createActionListItem(input: {
   id: string;
-  idName: "artifactId" | "runId";
+  idName: "artifactId" | "runId" | "approvalId";
   title: string;
   meta: string;
   pressed: boolean;

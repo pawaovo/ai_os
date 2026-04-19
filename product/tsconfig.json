@@ -7,6 +7,7 @@
     { "path": "./packages/conversation/conversation-core" },
     { "path": "./packages/conversation/conversation-runtime" },
     { "path": "./packages/companion/companion-core" },
+    { "path": "./packages/control/approval-core" },
     { "path": "./packages/control/control-plane" },
     { "path": "./packages/workspace/workspace-core" },
     { "path": "./packages/workspace/artifact-core" },
