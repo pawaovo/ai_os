@@ -196,8 +196,20 @@ h3 {
   background: var(--ember);
 }
 
+.status-pill[data-phase="awaiting-approval"] {
+  background: var(--ochre);
+}
+
+.status-pill[data-phase="interrupted"] {
+  background: var(--muted);
+}
+
 .status-pill[data-phase="idle"] {
   background: var(--ochre);
+}
+
+.status-pill[data-phase="queued"] {
+  background: var(--muted);
 }
 
 .stack-form,
@@ -418,6 +430,31 @@ button:disabled {
 
 .source-badge[data-source="manual"] {
   background: var(--ochre);
+}
+
+.source-badge[data-source="running"],
+.source-badge[data-source="awaiting-approval"] {
+  background: var(--pool);
+}
+
+.source-badge[data-source="completed"] {
+  background: var(--moss);
+}
+
+.source-badge[data-source="failed"],
+.source-badge[data-source="interrupted"] {
+  background: var(--ember);
+}
+
+.approval-panel[data-active="false"] {
+  opacity: 0.72;
+}
+
+.approval-panel[data-active="true"] {
+  border-color: rgba(183, 123, 45, 0.42);
+  background:
+    linear-gradient(135deg, rgba(255, 247, 221, 0.92), rgba(255, 252, 240, 0.82)),
+    var(--panel);
 }
 
 .artifact-preview {

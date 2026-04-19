@@ -139,13 +139,20 @@ test("createInitialSpaceDemoState exposes the visible local demo shell", () => {
   assert.equal(state.events[0].type, "space.ready");
 });
 
-test("space desktop V0.3 page exposes a structured workspace workbench", async () => {
+test("space desktop V0.4 page exposes executor workflow controls", async () => {
   const html = await readFile(resolve(productRoot, "apps/space-desktop/public/index.html"), "utf8");
   const styles = await readFile(resolve(productRoot, "apps/space-desktop/public/styles.css"), "utf8");
 
-  assert.match(html, /data-layout="v0\.3-workbench"/);
+  assert.doesNotMatch(html, /data-layout="v0\.3-workbench"/);
+  assert.match(html, /data-layout="v0\.4-executor-workbench"/);
   assert.match(html, /id="workspace-select"/);
   assert.match(html, /id="active-workspace-label"/);
+  assert.match(html, /id="executor-status-list"/);
+  assert.match(html, /id="executor-timeout-input"/);
+  assert.match(html, /id="run-cancel-button"/);
+  assert.match(html, /id="approval-panel"/);
+  assert.match(html, /id="approval-grant-button"/);
+  assert.match(html, /id="approval-reject-button"/);
   assert.match(html, /id="run-history-list"/);
   assert.match(html, /id="artifact-select"/);
   assert.match(html, /id="run-artifact-preview"/);
@@ -153,6 +160,7 @@ test("space desktop V0.3 page exposes a structured workspace workbench", async (
   assert.match(styles, /\.left-rail/);
   assert.match(styles, /\.center-stage/);
   assert.match(styles, /\.right-rail/);
+  assert.match(styles, /awaiting-approval/);
 });
 
 test("createRunningSpaceDemoState shows an in-progress mission before completion", () => {
@@ -469,6 +477,77 @@ test("space desktop dev server persists providers, threads, and messages without
   }
 });
 
+test("space desktop V0.4 run workflow supports doctor, approval, cancel, and artifacts", async () => {
+  const storageDir = await mkdtemp(`${tmpdir()}/ai-os-v04-`);
+  const appPort = await getAvailablePort();
+  const appServer = startSpaceDesktopServer({
+    port: appPort,
+    storageDir,
+  });
+
+  try {
+    await waitForHttp(`http://127.0.0.1:${appPort}/`);
+
+    const missingWorkspace = await postJsonAllowFailure(`http://127.0.0.1:${appPort}/api/runs/start`, {
+      goal: "try without workspace",
+      executorChoice: "mock",
+    });
+    assert.equal(missingWorkspace.ok, false);
+    assert.match(missingWorkspace.payload.error, /Select a workspace/);
+
+    const executors = await getJson(`http://127.0.0.1:${appPort}/api/executors`);
+    assert.deepEqual(
+      executors.executors.map((executor) => executor.choice),
+      ["mock", "codex", "claude-code"],
+    );
+    assert.equal(executors.executors[0].available, true);
+
+    await postJson(`http://127.0.0.1:${appPort}/api/workspaces`, {
+      name: "V0.4 Workspace",
+      path: storageDir,
+    });
+
+    const approvingRun = await postJson(`http://127.0.0.1:${appPort}/api/runs/start`, {
+      goal: "write a mock approval workflow report",
+      executorChoice: "mock",
+      timeoutMs: 5000,
+    });
+    assert.equal(approvingRun.run.status, "running");
+
+    const pending = await waitForLiveRun(appPort, approvingRun.live.runId, (live) => Boolean(live.pendingApproval));
+    assert.equal(pending.status, "awaiting-approval");
+    assert.match(pending.pendingApproval.reason, /Executor requested approval|approval/i);
+
+    await postJson(`http://127.0.0.1:${appPort}/api/runs/${approvingRun.live.runId}/approval`, {
+      decision: "grant",
+    });
+    const completed = await waitForLiveRun(appPort, approvingRun.live.runId, (live) => live.status === "completed");
+    assert.equal(completed.artifacts.some((artifact) => artifact.kind === "diff"), true);
+    assert.equal(completed.events.some((event) => event.type === "approval.granted"), true);
+
+    const persistedEvents = await getJson(`http://127.0.0.1:${appPort}/api/runs/${approvingRun.live.runId}/events`);
+    assert.equal(persistedEvents.events.some((event) => event.type === "approval.granted"), true);
+    assert.equal(persistedEvents.events.some((event) => event.type === "run.completed"), true);
+
+    const artifacts = await getJson(`http://127.0.0.1:${appPort}/api/artifacts`);
+    assert.equal(artifacts.artifacts.some((artifact) => artifact.runId === approvingRun.live.runId && artifact.kind === "diff"), true);
+    assert.equal(artifacts.artifacts.some((artifact) => artifact.runId === approvingRun.live.runId && artifact.kind === "report"), true);
+
+    const cancelRun = await postJson(`http://127.0.0.1:${appPort}/api/runs/start`, {
+      goal: "write a second mock approval workflow report",
+      executorChoice: "mock",
+      timeoutMs: 5000,
+    });
+    await waitForLiveRun(appPort, cancelRun.live.runId, (live) => Boolean(live.pendingApproval));
+    const cancelled = await postJson(`http://127.0.0.1:${appPort}/api/runs/${cancelRun.live.runId}/cancel`, {});
+    assert.equal(cancelled.live.status, "interrupted");
+    assert.equal(cancelled.live.events.some((event) => event.type === "run.interrupted"), true);
+  } finally {
+    await appServer.stop();
+    await rm(storageDir, { recursive: true, force: true });
+  }
+});
+
 test("runSpaceDemoRequest executes the mock path through the server runtime", async () => {
   const response = await runSpaceDemoRequest(
     {
@@ -716,6 +795,20 @@ async function waitForHttp(url) {
   }
 
   throw lastError ?? new Error(`Timed out waiting for ${url}`);
+}
+
+async function waitForLiveRun(port, runId, predicate) {
+  const startedAt = Date.now();
+  let lastLive;
+
+  while (Date.now() - startedAt < 5000) {
+    const payload = await getJson(`http://127.0.0.1:${port}/api/runs/${runId}/live`);
+    lastLive = payload.live;
+    if (predicate(lastLive)) return lastLive;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  throw new Error(`Timed out waiting for live run ${runId}: ${JSON.stringify(lastLive)}`);
 }
 
 async function getJson(url) {

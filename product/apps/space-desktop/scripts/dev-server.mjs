@@ -15,15 +15,20 @@ const productRoot = resolve(appRoot, "../..");
 const publicRoot = join(appRoot, "public");
 const port = Number.parseInt(process.env.PORT ?? "5173", 10);
 const executorTimeoutMs = Number.parseInt(process.env.AI_SPACE_EXECUTOR_TIMEOUT_MS ?? "60000", 10);
+const codexCommand = process.env.AI_SPACE_CODEX_COMMAND;
+const claudeCommand = process.env.AI_SPACE_CLAUDE_COMMAND;
 const storageRoot = resolve(process.env.AI_SPACE_STORAGE_DIR ?? join(homedir(), ".ai_os", "space-demo"));
+const SPACE_RUNTIME_SPACE_ID = "space-local-runtime";
 
 if (process.env.AI_SPACE_SKIP_BUILD !== "1") {
   buildProduct();
 }
 
 const {
+  createCodeExecutorForChoice,
   createProviderListResponse,
   createProviderSettingsResponse,
+  getExecutorRuntimeStatus,
   parseChatSendRequest,
   parseProviderSettingsInput,
   parseSpaceDemoRunRequest,
@@ -31,11 +36,17 @@ const {
   runProviderDoctor,
   runSpaceDemoRequest,
 } = await import(pathToImportUrl(join(appRoot, "dist/server-runtime.js")));
+const {
+  ControlPlane,
+  createRunSnapshot,
+  reduceRunSnapshot,
+} = await import(pathToImportUrl(join(productRoot, "packages/control/control-plane/dist/index.js")));
 
 await mkdir(storageRoot, { recursive: true });
 
 let processRunner;
 let appStore;
+const runSessions = new Map();
 
 async function handleRequest(request, response) {
   const requestUrl = new URL(request.url ?? "/", "http://localhost");
@@ -91,8 +102,33 @@ async function handleRequest(request, response) {
     return;
   }
 
+  if (request.method === "POST" && pathname === "/api/runs/start") {
+    await handleStartRun(request, response);
+    return;
+  }
+
+  if (request.method === "GET" && isRunLivePath(pathname)) {
+    await handleRunLive(response, runIdFromPath(pathname));
+    return;
+  }
+
+  if (request.method === "POST" && isRunCancelPath(pathname)) {
+    await handleCancelRun(response, runIdFromPath(pathname));
+    return;
+  }
+
+  if (request.method === "POST" && isRunApprovalPath(pathname)) {
+    await handleRunApproval(request, response, runIdFromPath(pathname));
+    return;
+  }
+
   if (request.method === "GET" && isRunEventsPath(pathname)) {
     await handleRunEvents(response, runIdFromPath(pathname));
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/executors") {
+    await handleExecutorDoctor(response);
     return;
   }
 
@@ -289,6 +325,64 @@ async function handleRunEvents(response, runId) {
   }
 
   writeJson(response, 200, { events: appStore.listRunEvents(runId) });
+}
+
+async function handleExecutorDoctor(response) {
+  writeJson(response, 200, {
+    executors: await listExecutorStatuses(),
+  });
+}
+
+async function handleStartRun(request, response) {
+  try {
+    const body = await readJsonBody(request);
+    const runRequest = parseSpaceDemoRunRequest(body);
+    const session = await createRunSession({
+      goal: runRequest.goal,
+      executorChoice: runRequest.executorChoice,
+      timeoutMs: readOptionalPositiveNumber(body.timeoutMs),
+    });
+
+    writeJson(response, 202, {
+      run: appStore.getRun(session.runId),
+      live: serializeRunSession(session),
+    });
+  } catch (error) {
+    writeJson(response, 400, { error: sanitizeErrorMessage(error) });
+  }
+}
+
+async function handleRunLive(response, runId) {
+  const session = runSessions.get(runId);
+
+  if (!session) {
+    writeJson(response, 404, { error: "Run session not active." });
+    return;
+  }
+
+  writeJson(response, 200, { live: serializeRunSession(session) });
+}
+
+async function handleCancelRun(response, runId) {
+  try {
+    const session = requireRunSession(runId);
+    await cancelRunSession(session);
+    writeJson(response, 200, { live: serializeRunSession(session) });
+  } catch (error) {
+    writeJson(response, 400, { error: sanitizeErrorMessage(error) });
+  }
+}
+
+async function handleRunApproval(request, response, runId) {
+  try {
+    const session = requireRunSession(runId);
+    const body = await readJsonBody(request);
+    const decision = readRequiredString(body.decision, "decision");
+    await resolveRunApproval(session, decision);
+    writeJson(response, 200, { live: serializeRunSession(session) });
+  } catch (error) {
+    writeJson(response, 400, { error: sanitizeErrorMessage(error) });
+  }
 }
 
 async function handleListProviders(response) {
@@ -495,6 +589,457 @@ async function handleRunRequest(request, response) {
   }
 }
 
+async function listExecutorStatuses() {
+  const runtime = createExecutorRuntime();
+  const statuses = [];
+
+  for (const choice of ["mock", "codex", "claude-code"]) {
+    const status = await getExecutorRuntimeStatus(choice, runtime);
+    statuses.push({
+      choice,
+      available: status.available,
+      message: status.message ?? (status.available ? "Ready." : "Unavailable."),
+    });
+  }
+
+  return statuses;
+}
+
+function createExecutorRuntime() {
+  return {
+    runner: processRunner,
+    ...(codexCommand ? { codexCommand } : {}),
+    ...(claudeCommand ? { claudeCommand } : {}),
+  };
+}
+
+async function createRunSession(input) {
+  const workspace = await requireRunnableWorkspace();
+  const ids = createWorkflowIds();
+  const clock = createWorkflowClock();
+  const runId = ids.runId();
+  const missionId = ids.missionId();
+  const session = {
+    runId,
+    missionId,
+    goal: input.goal,
+    executorChoice: input.executorChoice,
+    workspaceId: workspace.id,
+    workspacePath: workspace.path,
+    threadId: appStore.getSetting("activeThreadId"),
+    timeoutMs: input.timeoutMs,
+    status: "queued",
+    events: [],
+    stream: [],
+    artifacts: [],
+    artifactContents: {},
+    pendingApproval: undefined,
+    completedAt: undefined,
+    latestMessage: undefined,
+    ids,
+    clock,
+    executor: undefined,
+    promise: undefined,
+  };
+
+  runSessions.set(runId, session);
+  session.pendingApproval = createPreRunApproval(session);
+  appStore.createRunRecord({
+    id: runId,
+    goal: session.goal,
+    executorChoice: session.executorChoice,
+    status: session.pendingApproval ? "awaiting-approval" : "running",
+    workspaceId: session.workspaceId,
+    threadId: session.threadId,
+    startedAt: clock.now(),
+  });
+  session.status = session.pendingApproval ? "awaiting-approval" : "running";
+
+  if (session.pendingApproval) {
+    appendLiveEvent(session, {
+      type: "approval.requested",
+      message: session.pendingApproval.reason,
+      approvalId: session.pendingApproval.approvalId,
+    });
+  } else {
+    session.promise = runSessionWork(session);
+  }
+
+  return session;
+}
+
+function createPreRunApproval(session) {
+  if (session.executorChoice === "mock") return undefined;
+
+  return {
+    approvalId: `approval-${randomUUID()}`,
+    reason: `Approve ${session.executorChoice} to inspect and operate inside ${session.workspacePath}.`,
+    stage: "pre-run",
+  };
+}
+
+async function resolveRunApproval(session, decision) {
+  if (!session.pendingApproval) {
+    throw new Error("Run does not have a pending approval.");
+  }
+
+  const approvalDecision = normalizeApprovalDecision(decision);
+  const approval = session.pendingApproval;
+
+  appendLiveEvent(session, {
+    type: approvalDecision === "grant" ? "approval.granted" : "approval.rejected",
+    message: approvalDecision === "grant" ? "Approval granted." : "Approval rejected.",
+    approvalId: approval.approvalId,
+  });
+
+  if (approval.stage === "pre-run") {
+    session.pendingApproval = undefined;
+
+    if (approvalDecision === "reject") {
+      finalizeSession(session, "failed", "Approval rejected before run start.");
+      return;
+    }
+
+    session.status = "running";
+    appStore.updateRunStatus(session.runId, "running");
+    session.promise = runSessionWork(session);
+    return;
+  }
+
+  if (!session.executor) {
+    throw new Error("Run executor is unavailable.");
+  }
+
+  session.pendingApproval = undefined;
+  await session.executor.submitApproval(session.runId, {
+    approvalId: approval.approvalId,
+    decision: approvalDecision,
+  });
+}
+
+async function cancelRunSession(session) {
+  if (isTerminalRunStatus(session.status)) return;
+
+  if (session.pendingApproval) {
+    session.pendingApproval = undefined;
+    await session.executor?.interruptRun(session.runId);
+    finalizeSession(session, "interrupted", "Run interrupted while waiting for approval.");
+    return;
+  }
+
+  if (!session.executor) {
+    session.pendingApproval = undefined;
+    finalizeSession(session, "interrupted", "Run interrupted before execution started.");
+    return;
+  }
+
+  await session.executor.interruptRun(session.runId);
+}
+
+async function runSessionWork(session) {
+  try {
+    const executor = createExecutorForSession(session);
+    const controlPlane = new ControlPlane(
+      { missionId: () => session.missionId },
+      session.clock,
+    );
+    session.executor = executor;
+
+    const started = await controlPlane.startMissionRun({
+      spaceId: SPACE_RUNTIME_SPACE_ID,
+      threadId: session.threadId ?? `thread-run-${session.runId}`,
+      workspaceId: session.workspaceId,
+      goal: session.goal,
+      executor,
+      context: {
+        cwd: session.workspacePath,
+        ...(session.timeoutMs !== undefined ? { timeoutMs: session.timeoutMs } : {}),
+      },
+    });
+    let snapshot = createRunSnapshot(started.run);
+
+    for await (const event of started.events) {
+      snapshot = reduceRunSnapshot(snapshot, event);
+      appendKernelEvent(session, event);
+    }
+
+    const collectedArtifacts = await executor.collectArtifacts(started.run.id);
+    const artifacts = await persistSessionArtifacts(session, collectedArtifacts);
+    session.artifacts = artifacts;
+    session.artifactContents = Object.fromEntries(
+      artifacts.map((artifact) => [artifact.id, artifact.content ?? ""]),
+    );
+
+    if (!isTerminalRunStatus(session.status)) {
+      finalizeSession(
+        session,
+        mapSnapshotStatus(snapshot.status),
+        session.latestMessage ?? "Run completed.",
+      );
+    }
+  } catch (error) {
+    if (!isTerminalRunStatus(session.status)) {
+      finalizeSession(session, "failed", sanitizeErrorMessage(error));
+    }
+  }
+}
+
+function createExecutorForSession(session) {
+  if (session.executorChoice === "mock") {
+    return new MockWorkflowExecutor({
+      ids: session.ids,
+      clock: session.clock,
+    });
+  }
+
+  return createCodeExecutorForChoice(session.executorChoice, createExecutorRuntime(), {
+    ids: session.ids,
+    clock: session.clock,
+  });
+}
+
+function appendKernelEvent(session, event) {
+  if (isTerminalRunStatus(session.status)) return;
+
+  switch (event.type) {
+    case "run.stream":
+      session.stream.push(event.chunk);
+      session.latestMessage = event.chunk;
+      break;
+    case "approval.requested":
+      session.status = "awaiting-approval";
+      session.pendingApproval = {
+        approvalId: event.approvalId,
+        reason: "Executor requested approval during the run.",
+        stage: "runtime",
+      };
+      appStore.updateRunStatus(session.runId, "awaiting-approval");
+      break;
+    case "run.completed":
+      session.latestMessage = event.message ?? session.latestMessage ?? "Run completed.";
+      break;
+    case "run.failed":
+    case "run.interrupted":
+      session.latestMessage = event.message ?? event.type;
+      break;
+  }
+
+  appendLiveEvent(session, {
+    type: event.type,
+    message: summarizeKernelEvent(event),
+    ...(event.type === "approval.requested" ? { approvalId: event.approvalId } : {}),
+  });
+}
+
+function appendLiveEvent(session, event) {
+  const liveEvent = {
+    id: randomUUID(),
+    runId: session.runId,
+    type: event.type,
+    message: event.message,
+    createdAt: session.clock.now(),
+    ...(event.approvalId ? { approvalId: event.approvalId } : {}),
+  };
+
+  session.events.push(liveEvent);
+  appStore.addRunEvent({
+    runId: session.runId,
+    type: event.type,
+    message: event.message,
+    createdAt: liveEvent.createdAt,
+  });
+}
+
+async function persistSessionArtifacts(session, collectedArtifacts) {
+  const persisted = [];
+  const artifacts = [...collectedArtifacts];
+
+  if (artifacts.length === 0) {
+    artifacts.push(createTranscriptArtifact(session));
+  }
+
+  const diffArtifact = createWorkspaceDiffArtifact(session);
+  if (diffArtifact) {
+    artifacts.push(diffArtifact);
+  }
+
+  for (const artifact of artifacts) {
+    const saved = appStore.createArtifact({
+      title: artifact.title,
+      kind: artifact.kind,
+      content: artifact.content ?? "",
+      path: artifact.path,
+      workspaceId: session.workspaceId,
+      threadId: session.threadId,
+      runId: session.runId,
+      source: "run",
+    });
+    persisted.push(saved);
+    appendLiveEvent(session, {
+      type: "artifact.created",
+      message: `Saved artifact: ${saved.title}`,
+    });
+  }
+
+  return persisted;
+}
+
+function createTranscriptArtifact(session) {
+  return {
+    id: session.ids.artifactId(),
+    kind: "markdown",
+    title: "Executor Transcript",
+    content: [
+      "# Executor Transcript",
+      "",
+      `Goal: ${session.goal}`,
+      "",
+      "Output:",
+      ...(session.stream.length > 0 ? session.stream.map((line) => `- ${line}`) : ["- No output emitted."]),
+    ].join("\n"),
+  };
+}
+
+function createWorkspaceDiffArtifact(session) {
+  try {
+    const status = execFileSync("git", ["-C", session.workspacePath, "status", "--short"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    const diffStat = execFileSync("git", ["-C", session.workspacePath, "diff", "--stat"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+
+    if (!status && !diffStat) return undefined;
+
+    return {
+      id: session.ids.artifactId(),
+      kind: "diff",
+      title: "Workspace Diff Summary",
+      content: [
+        "# Workspace Diff Summary",
+        "",
+        diffStat ? "## Diff Stat" : "",
+        diffStat,
+        status ? "## Git Status" : "",
+        status,
+      ].filter(Boolean).join("\n\n"),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function finalizeSession(session, status, message) {
+  session.status = status;
+  session.completedAt = session.clock.now();
+  if (message) {
+    session.latestMessage = message;
+  }
+  if (!isTerminalRunStatus(status)) return;
+
+  const lastEventType = session.events.at(-1)?.type;
+  if (status === "failed" && lastEventType !== "run.failed") {
+    appendLiveEvent(session, { type: "run.failed", message: message ?? "Run failed." });
+  } else if (status === "interrupted" && lastEventType !== "run.interrupted") {
+    appendLiveEvent(session, { type: "run.interrupted", message: message ?? "Run interrupted." });
+  }
+  appStore.updateRunStatus(session.runId, status, session.completedAt);
+}
+
+function serializeRunSession(session) {
+  return {
+    runId: session.runId,
+    goal: session.goal,
+    executorChoice: session.executorChoice,
+    status: session.status,
+    stream: [...session.stream],
+    events: [...session.events],
+    artifacts: [...session.artifacts],
+    artifactContents: { ...session.artifactContents },
+    ...(session.pendingApproval ? { pendingApproval: { ...session.pendingApproval } } : {}),
+    ...(session.completedAt ? { completedAt: session.completedAt } : {}),
+    ...(session.timeoutMs !== undefined ? { timeoutMs: session.timeoutMs } : {}),
+  };
+}
+
+function requireRunSession(runId) {
+  const session = runSessions.get(runId);
+  if (!session) throw new Error("Run session not found.");
+  return session;
+}
+
+async function requireRunnableWorkspace() {
+  const workspaceId = appStore.getSetting("activeWorkspaceId");
+  if (!workspaceId) throw new Error("Select a workspace before running an executor task.");
+
+  const workspace = appStore.getWorkspace(workspaceId);
+  if (!workspace) throw new Error("Active workspace was not found.");
+  if (!workspace.path) throw new Error("Selected workspace does not have a local path.");
+
+  const details = await stat(workspace.path).catch(() => undefined);
+  if (!details?.isDirectory()) {
+    throw new Error("Selected workspace path does not exist or is not a directory.");
+  }
+
+  return workspace;
+}
+
+function summarizeKernelEvent(event) {
+  switch (event.type) {
+    case "run.started":
+      return `Run ${event.runId} started.`;
+    case "run.stream":
+      return event.chunk;
+    case "approval.requested":
+      return `Approval ${event.approvalId} requested.`;
+    case "approval.granted":
+    case "approval.rejected":
+      return `Approval ${event.approvalId} resolved.`;
+    case "artifact.created":
+      return `Artifact ${event.artifactId} created.`;
+    case "run.completed":
+      return event.message ?? "Run completed.";
+    case "run.failed":
+    case "run.interrupted":
+      return event.message ?? event.type;
+    case "mission.created":
+      return `Mission ${event.missionId} created.`;
+    case "executor.status_changed":
+      return event.message ?? `Executor available: ${event.available}`;
+  }
+}
+
+function mapSnapshotStatus(status) {
+  switch (status) {
+    case "awaiting-approval":
+      return "awaiting-approval";
+    case "completed":
+      return "completed";
+    case "failed":
+      return "failed";
+    case "interrupted":
+      return "interrupted";
+    case "running":
+      return "running";
+  }
+}
+
+function isTerminalRunStatus(status) {
+  return status === "completed" || status === "failed" || status === "interrupted";
+}
+
+function normalizeApprovalDecision(value) {
+  switch (value) {
+    case "grant":
+    case "reject":
+      return value;
+    default:
+      throw new Error("Unsupported approval decision.");
+  }
+}
+
 async function readJsonBody(request) {
   let body = "";
 
@@ -574,6 +1119,18 @@ function isRunEventsPath(pathname) {
   return /^\/api\/runs\/[^/]+\/events$/.test(pathname);
 }
 
+function isRunLivePath(pathname) {
+  return /^\/api\/runs\/[^/]+\/live$/.test(pathname);
+}
+
+function isRunCancelPath(pathname) {
+  return /^\/api\/runs\/[^/]+\/cancel$/.test(pathname);
+}
+
+function isRunApprovalPath(pathname) {
+  return /^\/api\/runs\/[^/]+\/approval$/.test(pathname);
+}
+
 function runIdFromPath(pathname) {
   return decodeURIComponent(pathname.split("/")[3] ?? "");
 }
@@ -597,6 +1154,14 @@ function readRequiredString(value, field) {
 
 function readOptionalString(value) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function readOptionalPositiveNumber(value) {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    throw new Error("timeoutMs must be a positive number.");
+  }
+  return value;
 }
 
 function titleFromMessage(currentTitle, message) {
@@ -1019,6 +1584,40 @@ class SqliteAppStore {
     this.db.prepare("DELETE FROM artifacts WHERE id = ?").run(id);
   }
 
+  createRunRecord(input) {
+    this.db.prepare(`
+      INSERT INTO runs (id, goal, executor_choice, status, workspace_id, thread_id, started_at, completed_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.id,
+      input.goal,
+      input.executorChoice,
+      input.status,
+      input.workspaceId ?? null,
+      input.threadId ?? null,
+      input.startedAt ?? nowIso(),
+      input.completedAt ?? null,
+    );
+    return this.getRun(input.id);
+  }
+
+  updateRunStatus(id, status, completedAt) {
+    this.db.prepare(`
+      UPDATE runs
+      SET status = ?, completed_at = ?, started_at = COALESCE(started_at, ?)
+      WHERE id = ?
+    `).run(status, completedAt ?? null, nowIso(), id);
+    return this.getRun(id);
+  }
+
+  addRunEvent(input) {
+    const createdAt = input.createdAt ?? nowIso();
+    this.db.prepare(`
+      INSERT INTO run_events (id, run_id, type, message, created_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(randomUUID(), input.runId, input.type, input.message, createdAt);
+  }
+
   recordRunFromDemo(request, state) {
     const runId = state.summary?.runId ?? randomUUID();
     const timestamp = nowIso();
@@ -1224,6 +1823,276 @@ class FileSecretStore {
   }
 }
 
+class MockWorkflowExecutor {
+  constructor(options) {
+    this.options = options;
+    this.id = "executor-live-mock";
+    this.kind = "codex";
+    this.artifactsByRun = new Map();
+    this.runControls = new Map();
+  }
+
+  async getRuntimeStatus() {
+    return {
+      executorId: this.id,
+      type: "code",
+      available: true,
+      message: "Deterministic workflow mock executor.",
+    };
+  }
+
+  async startRun(task) {
+    const now = this.options.clock.now();
+    const run = {
+      id: this.options.ids.runId(),
+      createdAt: now,
+      updatedAt: now,
+      missionId: task.missionId,
+      workspaceId: task.workspaceId,
+      executorId: this.id,
+      status: "running",
+      artifactIds: [],
+    };
+    const artifacts = createMockWorkflowArtifacts({
+      ids: this.options.ids,
+      clock: this.options.clock,
+      goal: task.prompt,
+      runId: run.id,
+      spaceId: task.spaceId,
+      workspacePath: typeof task.context?.cwd === "string" ? task.context.cwd : undefined,
+    });
+    const control = {
+      aborted: false,
+      approval: undefined,
+    };
+
+    this.artifactsByRun.set(run.id, artifacts);
+    this.runControls.set(run.id, control);
+
+    return {
+      run,
+      events: this.streamRunEvents(run, task, control, artifacts),
+    };
+  }
+
+  async submitApproval(runId, decision) {
+    const control = this.runControls.get(runId);
+    if (!control?.approval) return;
+    control.approval.resolve(decision.decision);
+  }
+
+  async interruptRun(runId) {
+    const control = this.runControls.get(runId);
+    if (!control) return;
+    control.aborted = true;
+    control.approval?.resolve("reject");
+  }
+
+  async collectArtifacts(runId) {
+    return this.artifactsByRun.get(runId) ?? [];
+  }
+
+  async *streamRunEvents(run, task, control, artifacts) {
+    const eventAt = () => this.options.clock.now();
+    const nextEventId = () => this.options.ids.eventId();
+    const requiresApproval = promptNeedsApproval(task.prompt);
+
+    yield {
+      id: nextEventId(),
+      type: "run.started",
+      occurredAt: eventAt(),
+      spaceId: task.spaceId,
+      missionId: task.missionId,
+      runId: run.id,
+      executorId: this.id,
+    };
+    await delay(120);
+    if (control.aborted) {
+      yield createInterruptedEvent(nextEventId(), eventAt(), task.spaceId, run.id, "Mock run interrupted.");
+      return;
+    }
+
+    yield {
+      id: nextEventId(),
+      type: "run.stream",
+      occurredAt: eventAt(),
+      spaceId: task.spaceId,
+      runId: run.id,
+      chunk: `Mock executor attached to ${typeof task.context?.cwd === "string" ? task.context.cwd : "workspace"}.`,
+    };
+    await delay(120);
+
+    if (requiresApproval) {
+      const approvalId = `approval-${randomUUID()}`;
+      const approval = createDeferred();
+      control.approval = { approvalId, ...approval };
+      yield {
+        id: nextEventId(),
+        type: "approval.requested",
+        occurredAt: eventAt(),
+        spaceId: task.spaceId,
+        runId: run.id,
+        approvalId,
+      };
+      const decision = await approval.promise;
+      control.approval = undefined;
+
+      if (control.aborted) {
+        yield createInterruptedEvent(nextEventId(), eventAt(), task.spaceId, run.id, "Mock run interrupted.");
+        return;
+      }
+
+      if (decision === "reject") {
+        yield {
+          id: nextEventId(),
+          type: "run.failed",
+          occurredAt: eventAt(),
+          spaceId: task.spaceId,
+          runId: run.id,
+          message: "Approval rejected.",
+        };
+        return;
+      }
+
+      yield {
+        id: nextEventId(),
+        type: "run.stream",
+        occurredAt: eventAt(),
+        spaceId: task.spaceId,
+        runId: run.id,
+        chunk: "Approval granted. Continuing mock workflow.",
+      };
+      await delay(120);
+    }
+
+    if (control.aborted) {
+      yield createInterruptedEvent(nextEventId(), eventAt(), task.spaceId, run.id, "Mock run interrupted.");
+      return;
+    }
+
+    yield {
+      id: nextEventId(),
+      type: "run.stream",
+      occurredAt: eventAt(),
+      spaceId: task.spaceId,
+      runId: run.id,
+      chunk: "Mock executor prepared artifact previews.",
+    };
+    await delay(120);
+
+    for (const artifact of artifacts) {
+      yield {
+        id: nextEventId(),
+        type: "artifact.created",
+        occurredAt: eventAt(),
+        spaceId: task.spaceId,
+        runId: run.id,
+        artifactId: artifact.id,
+      };
+    }
+
+    yield {
+      id: nextEventId(),
+      type: "run.completed",
+      occurredAt: eventAt(),
+      spaceId: task.spaceId,
+      runId: run.id,
+      message: "Mock workflow completed.",
+    };
+  }
+}
+
+function createMockWorkflowArtifacts(input) {
+  const now = input.clock.now();
+  const workspacePath = input.workspacePath ?? "(no workspace path)";
+
+  return [
+    {
+      id: input.ids.artifactId(),
+      createdAt: now,
+      updatedAt: now,
+      spaceId: input.spaceId,
+      runId: input.runId,
+      kind: "report",
+      title: "Mock Run Report",
+      content: [
+        "# Mock Run Report",
+        "",
+        `Goal: ${input.goal}`,
+        `Workspace: ${workspacePath}`,
+        "",
+        "- Workspace context loaded.",
+        "- Approval flow supported when requested.",
+        "- Artifact previews generated.",
+      ].join("\n"),
+    },
+    {
+      id: input.ids.artifactId(),
+      createdAt: now,
+      updatedAt: now,
+      spaceId: input.spaceId,
+      runId: input.runId,
+      kind: "diff",
+      title: "Mock Workspace Diff",
+      content: [
+        "diff --git a/mock.txt b/mock.txt",
+        "--- a/mock.txt",
+        "+++ b/mock.txt",
+        "@@ -0,0 +1,2 @@",
+        `+Goal: ${input.goal}`,
+        `+Workspace: ${workspacePath}`,
+      ].join("\n"),
+    },
+  ];
+}
+
+function createWorkflowIds() {
+  const runId = `run-live-${randomUUID()}`;
+  const missionId = `mission-live-${randomUUID()}`;
+
+  return {
+    missionId: () => missionId,
+    runId: () => runId,
+    artifactId: () => `artifact-live-${randomUUID()}`,
+    eventId: () => `event-live-${randomUUID()}`,
+  };
+}
+
+function createWorkflowClock() {
+  return {
+    now: () => nowIso(),
+  };
+}
+
+function createDeferred() {
+  let resolve;
+  const promise = new Promise((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
+function promptNeedsApproval(prompt) {
+  return /\b(approve|approval|write|modify|edit|delete)\b/i.test(prompt);
+}
+
+function createInterruptedEvent(id, occurredAt, spaceId, runId, message) {
+  return {
+    id,
+    type: "run.interrupted",
+    occurredAt,
+    spaceId,
+    runId,
+    message,
+  };
+}
+
+function delay(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 class NodeProcessRunner {
   constructor(defaultCwd, timeoutMs) {
     this.defaultCwd = defaultCwd;
@@ -1245,18 +2114,30 @@ class NodeProcessRunner {
       stdio: ["pipe", "pipe", "pipe"],
     });
     let timedOut = false;
+    let interrupted = command.signal?.aborted === true;
     let lastStdoutLine = "";
+    const timeoutMs = command.timeoutMs ?? this.timeoutMs;
+    const interrupt = () => {
+      interrupted = true;
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill("SIGTERM");
+      }
+    };
     const timeout = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
-    }, this.timeoutMs);
+      interrupt();
+    }, timeoutMs);
     const spawnError = new Promise((_, reject) => child.once("error", reject));
     let stderr = "";
+    const abortListener = () => {
+      interrupt();
+    };
 
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk) => {
       stderr += chunk;
     });
+    command.signal?.addEventListener("abort", abortListener, { once: true });
     child.stdin.end(command.input ?? "");
 
     const lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
@@ -1265,12 +2146,22 @@ class NodeProcessRunner {
       yield line;
     }
 
-    const [code] = await Promise.race([once(child, "close"), spawnError]).finally(() => clearTimeout(timeout));
+    const [code] = await Promise.race([once(child, "close"), spawnError]).finally(() => {
+      clearTimeout(timeout);
+      command.signal?.removeEventListener("abort", abortListener);
+    });
     if (timedOut) {
-      throw new Error(`${command.command} exceeded ${this.timeoutMs}ms demo timeout.${summarizeProcessOutput(lastStdoutLine)}`);
+      throw new Error(`${command.command} exceeded ${timeoutMs}ms demo timeout.${summarizeProcessOutput(lastStdoutLine)}`);
     }
+    if (interrupted) throw createAbortError(`${command.command} interrupted.`);
     if (code !== 0) throw new Error(stderr.trim() || `${command.command} exited with code ${code}`);
   }
+}
+
+function createAbortError(message) {
+  const error = new Error(message);
+  error.name = "AbortError";
+  return error;
 }
 
 function summarizeProcessOutput(line) {

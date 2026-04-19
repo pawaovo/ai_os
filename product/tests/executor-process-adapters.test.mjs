@@ -72,7 +72,9 @@ test("CodexProcessExecutor streams normalized kernel events from process lines",
   for await (const event of result.events) events.push(event);
 
   assert.equal(result.run.id, "run-test");
-  assert.deepEqual(runner.calls.run[0], {
+  const { signal: codexSignal, ...codexCommand } = runner.calls.run[0];
+  assert.equal(codexSignal instanceof AbortSignal, true);
+  assert.deepEqual(codexCommand, {
     command: "codex",
     args: ["exec", "--json", "Analyze the project"],
     cwd: "/tmp/project",
@@ -125,7 +127,9 @@ test("ClaudeCodeProcessExecutor streams normalized kernel events from process li
   for await (const event of result.events) events.push(event);
 
   assert.equal(result.run.id, "run-test");
-  assert.deepEqual(runner.calls.run[0], {
+  const { signal: claudeSignal, ...claudeCommand } = runner.calls.run[0];
+  assert.equal(claudeSignal instanceof AbortSignal, true);
+  assert.deepEqual(claudeCommand, {
     command: "claude",
     args: [
       "-p",

@@ -64,6 +64,8 @@ export interface ExecutorProcessCommand {
   args: string[];
   cwd?: string;
   input?: string;
+  timeoutMs?: number;
+  signal?: AbortSignal;
 }
 
 export interface ExecutorProcessRunner {

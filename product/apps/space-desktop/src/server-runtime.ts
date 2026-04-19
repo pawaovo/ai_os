@@ -45,6 +45,16 @@ export interface SpaceDemoRunResponse {
   state: SpaceDemoState;
 }
 
+export interface ServerExecutorFactoryIds {
+  runId(): RunId;
+  eventId(): string;
+  artifactId(): ArtifactId;
+}
+
+export interface ServerExecutorFactoryClock {
+  now(): IsoDateTime;
+}
+
 export interface StoredProviderConfig {
   id?: string;
   name: string;
@@ -152,7 +162,7 @@ export async function runSpaceDemoRequest(
       return { state: result.state };
     }
 
-    const executor = createProcessExecutor(request.executorChoice, runtime);
+    const executor = createCodeExecutorForChoice(request.executorChoice, runtime);
     const status = await executor.getRuntimeStatus();
 
     if (!status.available) {
@@ -175,6 +185,22 @@ export async function runSpaceDemoRequest(
       }),
     };
   }
+}
+
+export async function getExecutorRuntimeStatus(
+  executorChoice: SpaceDemoExecutorChoice,
+  runtime: SpaceDemoServerRuntime,
+) {
+  if (executorChoice === "mock") {
+    return {
+      executorId: "executor-demo-mock" as ExecutorId,
+      type: "code" as const,
+      available: true,
+      message: "Deterministic local demo executor.",
+    };
+  }
+
+  return createCodeExecutorForChoice(executorChoice, runtime).getRuntimeStatus();
 }
 
 export function parseProviderSettingsInput(
@@ -347,12 +373,16 @@ export async function runChatSendRequest(input: {
   };
 }
 
-function createProcessExecutor(
+export function createCodeExecutorForChoice(
   executorChoice: Exclude<SpaceDemoExecutorChoice, "mock">,
   runtime: SpaceDemoServerRuntime,
+  options: {
+    ids?: ServerExecutorFactoryIds;
+    clock?: ServerExecutorFactoryClock;
+  } = {},
 ): CodeExecutor {
-  const ids = createServerDemoIds();
-  const clock = createServerDemoClock();
+  const ids = options.ids ?? createServerDemoIds();
+  const clock = options.clock ?? createServerDemoClock();
 
   if (executorChoice === "codex") {
     return CodexProcessExecutor.create({
@@ -415,7 +445,7 @@ function parseProviderProtocol(value: unknown): ProviderProtocol {
   }
 }
 
-function parseExecutorChoice(value: unknown): SpaceDemoExecutorChoice {
+export function parseExecutorChoice(value: unknown): SpaceDemoExecutorChoice {
   switch (value) {
     case "codex":
     case "claude-code":

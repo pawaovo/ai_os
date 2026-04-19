@@ -1,6 +1,5 @@
 import {
   createInitialSpaceDemoState,
-  createRunningSpaceDemoState,
   type SpaceDemoExecutorChoice,
   type SpaceDemoState,
 } from "./demo-runtime.js";
@@ -64,6 +63,30 @@ interface RunEventSummary {
   type: string;
   message: string;
   createdAt: string;
+  approvalId?: string;
+}
+
+interface ExecutorStatusSummary {
+  choice: SpaceDemoExecutorChoice;
+  available: boolean;
+  message: string;
+}
+
+interface LiveRunState {
+  runId: string;
+  goal: string;
+  executorChoice: SpaceDemoExecutorChoice;
+  status: string;
+  stream: string[];
+  events: RunEventSummary[];
+  artifacts: ArtifactSummary[];
+  artifactContents: Record<string, string>;
+  pendingApproval?: {
+    approvalId: string;
+    reason: string;
+  };
+  completedAt?: string;
+  timeoutMs?: number;
 }
 
 const state = {
@@ -73,6 +96,9 @@ const state = {
   artifacts: [] as ArtifactSummary[],
   runs: [] as RunSummary[],
   runEvents: [] as RunEventSummary[],
+  executorStatuses: [] as ExecutorStatusSummary[],
+  liveRun: undefined as LiveRunState | undefined,
+  runPoller: undefined as number | undefined,
   activeThreadId: undefined as string | undefined,
   activeProviderId: undefined as string | undefined,
   activeWorkspaceId: undefined as string | undefined,
@@ -123,7 +149,9 @@ const elements = {
   form: getElement("goal-form", HTMLFormElement),
   input: getElement("goal-input", HTMLTextAreaElement),
   executor: getElement("executor-select", HTMLSelectElement),
+  executorTimeoutInput: getElement("executor-timeout-input", HTMLInputElement),
   runButton: getElement("run-button", HTMLButtonElement),
+  runCancelButton: getElement("run-cancel-button", HTMLButtonElement),
   statusPill: getElement("status-pill", HTMLElement),
   transcript: getElement("transcript", HTMLElement),
   eventLog: getElement("event-log", HTMLElement),
@@ -131,6 +159,13 @@ const elements = {
   runArtifactPreview: getElement("run-artifact-preview", HTMLElement),
   runSummary: getElement("run-summary", HTMLElement),
   missionMeta: getElement("mission-meta", HTMLElement),
+  approvalPanel: getElement("approval-panel", HTMLElement),
+  approvalStatus: getElement("approval-status", HTMLElement),
+  approvalReason: getElement("approval-reason", HTMLElement),
+  approvalGrantButton: getElement("approval-grant-button", HTMLButtonElement),
+  approvalRejectButton: getElement("approval-reject-button", HTMLButtonElement),
+  executorStatusList: getElement("executor-status-list", HTMLElement),
+  executorStatusHelp: getElement("executor-status-help", HTMLElement),
   runHistoryList: getElement("run-history-list", HTMLElement),
   runHistoryHelp: getElement("run-history-help", HTMLElement),
   runEventHistory: getElement("run-event-history", HTMLElement),
@@ -216,6 +251,22 @@ elements.form.addEventListener("submit", (event) => {
   void runDemoFromForm();
 });
 
+elements.executor.addEventListener("change", () => {
+  renderExecutorStatuses();
+});
+
+elements.runCancelButton.addEventListener("click", () => {
+  void cancelActiveRun();
+});
+
+elements.approvalGrantButton.addEventListener("click", () => {
+  void resolveActiveApproval("grant");
+});
+
+elements.approvalRejectButton.addEventListener("click", () => {
+  void resolveActiveApproval("reject");
+});
+
 elements.runHistoryList.addEventListener("click", (event) => {
   const target = event.target instanceof HTMLElement ? event.target.closest<HTMLButtonElement>("button[data-run-id]") : null;
   if (target?.dataset.runId) void openRun(target.dataset.runId);
@@ -247,14 +298,44 @@ elements.artifactList.addEventListener("click", (event) => {
 
 void initializeAppState();
 renderChatMessages();
-render(state.current);
+renderCurrentRunView();
 
 async function initializeAppState(): Promise<void> {
   await loadWorkspaces();
+  await loadExecutors();
   await loadProviders();
   await loadThreads();
   await loadArtifacts();
   await loadRuns();
+}
+
+async function loadExecutors(): Promise<void> {
+  try {
+    const payload = await apiJson<{ executors: ExecutorStatusSummary[] }>("/api/executors");
+    state.executorStatuses = payload.executors;
+    renderExecutorStatuses();
+  } catch (error) {
+    elements.executorStatusHelp.textContent = errorToMessage(error, "Failed to load executor status.");
+    renderExecutorStatuses();
+  }
+}
+
+function renderExecutorStatuses(): void {
+  if (state.executorStatuses.length === 0) {
+    elements.executorStatusList.replaceChildren(createListItem("Executor doctor has not run yet."));
+    return;
+  }
+
+  elements.executorStatusList.replaceChildren(
+    ...state.executorStatuses.map((status) => createActionListItem({
+      id: status.choice,
+      idName: "runId",
+      title: status.choice,
+      meta: status.message,
+      pressed: status.choice === elements.executor.value,
+      source: status.available ? "completed" : "failed",
+    })),
+  );
 }
 
 async function loadWorkspaces(): Promise<void> {
@@ -793,55 +874,124 @@ async function sendChatFromForm(): Promise<void> {
 async function runDemoFromForm(): Promise<void> {
   const goal = elements.input.value.trim();
   const executorChoice = toExecutorChoice(elements.executor.value);
+  const timeoutMs = readTimeoutMs();
 
   if (!goal) {
-    render({
-      ...state.current,
-      phase: "failed",
-      error: "Enter a goal before starting the demo run.",
-    });
+    elements.runSummary.textContent = "Enter a goal before starting the run.";
     return;
   }
 
-  state.current = createRunningSpaceDemoState({ goal, executorChoice });
-  render(state.current);
-
   elements.runButton.disabled = true;
+  elements.runCancelButton.disabled = false;
 
   try {
-    state.current = await runDemoOnServer({ goal, executorChoice });
-    state.activeRunId = state.current.summary?.runId;
+    const payload = await apiJson<{ live: LiveRunState; run: RunSummary }>("/api/runs/start", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        goal,
+        executorChoice,
+        ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+      }),
+    });
+    state.activeRunId = payload.run.id;
+    state.liveRun = payload.live;
+    renderCurrentRunView();
+    await loadRuns();
+    startRunPolling(payload.run.id);
   } catch (error) {
-    state.current = {
-      ...state.current,
-      phase: "failed",
-      error: errorToMessage(error, "Demo run failed."),
-    };
+    elements.runSummary.textContent = errorToMessage(error, "Failed to start executor run.");
+    elements.statusPill.textContent = "failed";
+    elements.statusPill.dataset.phase = "failed";
   } finally {
     elements.runButton.disabled = false;
-    render(state.current);
-    await loadRuns();
-    await loadArtifacts();
   }
 }
 
-async function runDemoOnServer(input: {
-  goal: string;
-  executorChoice: SpaceDemoExecutorChoice;
-}): Promise<SpaceDemoState> {
-  const payload = await apiJson<{ state?: SpaceDemoState; error?: string }>("/api/demo/run", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-    },
-    body: JSON.stringify(input),
-  });
-
-  if (!payload.state) {
-    throw new Error(payload.error ?? "Local demo server failed.");
+async function cancelActiveRun(): Promise<void> {
+  if (!state.activeRunId) {
+    elements.runSummary.textContent = "No active run to cancel.";
+    return;
   }
 
-  return payload.state;
+  elements.runCancelButton.disabled = true;
+  try {
+    const payload = await apiJson<{ live: LiveRunState }>(
+      `/api/runs/${encodeURIComponent(state.activeRunId)}/cancel`,
+      { method: "POST" },
+    );
+    state.liveRun = payload.live;
+    renderCurrentRunView();
+    await loadRuns();
+  } catch (error) {
+    elements.runSummary.textContent = errorToMessage(error, "Failed to cancel run.");
+  }
+}
+
+async function resolveActiveApproval(decision: "grant" | "reject"): Promise<void> {
+  if (!state.activeRunId || !state.liveRun?.pendingApproval) {
+    elements.approvalReason.textContent = "No pending approval request.";
+    return;
+  }
+
+  elements.approvalGrantButton.disabled = true;
+  elements.approvalRejectButton.disabled = true;
+  try {
+    const payload = await apiJson<{ live: LiveRunState }>(
+      `/api/runs/${encodeURIComponent(state.activeRunId)}/approval`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ decision }),
+      },
+    );
+    state.liveRun = payload.live;
+    renderCurrentRunView();
+    if (!isTerminalStatus(payload.live.status)) {
+      startRunPolling(payload.live.runId);
+    }
+    await loadRuns();
+  } catch (error) {
+    elements.approvalReason.textContent = errorToMessage(error, "Failed to resolve approval.");
+  } finally {
+    elements.approvalGrantButton.disabled = false;
+    elements.approvalRejectButton.disabled = false;
+  }
+}
+
+function startRunPolling(runId: string): void {
+  stopRunPolling();
+  state.runPoller = window.setInterval(() => {
+    void pollLiveRun(runId);
+  }, 500);
+  void pollLiveRun(runId);
+}
+
+function stopRunPolling(): void {
+  if (state.runPoller === undefined) return;
+  window.clearInterval(state.runPoller);
+  state.runPoller = undefined;
+}
+
+async function pollLiveRun(runId: string): Promise<void> {
+  try {
+    const payload = await apiJson<{ live: LiveRunState }>(`/api/runs/${encodeURIComponent(runId)}/live`);
+    state.liveRun = payload.live;
+    state.activeRunId = payload.live.runId;
+    renderCurrentRunView();
+
+    if (isTerminalStatus(payload.live.status)) {
+      stopRunPolling();
+      await loadRuns();
+      await loadArtifacts();
+      state.liveRun = createPersistedRunView(payload.live.runId) ?? payload.live;
+      renderCurrentRunView();
+    }
+  } catch {
+    stopRunPolling();
+  }
 }
 
 async function loadArtifacts(): Promise<void> {
@@ -992,10 +1142,26 @@ async function openRun(runId: string): Promise<void> {
   if (!runId) return;
 
   try {
+    const live = await apiJson<{ live: LiveRunState }>(`/api/runs/${encodeURIComponent(runId)}/live`)
+      .catch(() => undefined);
+    if (live?.live) {
+      state.activeRunId = runId;
+      state.liveRun = live.live;
+      state.runEvents = live.live.events;
+      renderRunHistory();
+      renderCurrentRunView();
+      if (!isTerminalStatus(live.live.status)) {
+        startRunPolling(runId);
+      }
+      return;
+    }
+
     const payload = await apiJson<{ events: RunEventSummary[] }>(`/api/runs/${encodeURIComponent(runId)}/events`);
     state.activeRunId = runId;
     state.runEvents = payload.events;
+    state.liveRun = createPersistedRunView(runId);
     renderRunHistory();
+    renderCurrentRunView();
   } catch (error) {
     elements.runHistoryHelp.textContent = errorToMessage(error, "Failed to load run events.");
   }
@@ -1027,6 +1193,71 @@ function renderRunHistory(): void {
   elements.runEventHistory.replaceChildren(
     ...state.runEvents.map((event) => createEventListItem(event.type, event.message)),
   );
+}
+
+function createPersistedRunView(runId: string): LiveRunState | undefined {
+  const run = state.runs.find((item) => item.id === runId);
+  if (!run) return undefined;
+
+  const artifacts = state.artifacts.filter((artifact) => artifact.runId === runId);
+  return {
+    runId,
+    goal: run.goal,
+    executorChoice: toExecutorChoice(run.executorChoice),
+    status: run.status,
+    stream: state.runEvents.filter((event) => event.type === "run.stream").map((event) => event.message),
+    events: [...state.runEvents],
+    artifacts,
+    artifactContents: Object.fromEntries(artifacts.map((artifact) => [artifact.id, artifact.content ?? ""])),
+    ...(run.completedAt ? { completedAt: run.completedAt } : {}),
+  };
+}
+
+function renderCurrentRunView(): void {
+  const liveRun = state.liveRun;
+  if (!liveRun) {
+    render(state.current);
+    renderApprovalPanel(undefined);
+    elements.runCancelButton.disabled = true;
+    return;
+  }
+
+  const latestEvent = liveRun.events.at(-1);
+  const phase = liveRun.status;
+  elements.statusPill.textContent = phase;
+  elements.statusPill.dataset.phase = phase;
+  elements.runSummary.textContent = liveRun.pendingApproval?.reason
+    ?? latestEvent?.message
+    ?? `${liveRun.executorChoice} run is ${liveRun.status}.`;
+  elements.missionMeta.textContent =
+    `Run ${truncate(liveRun.runId, 28)} / Executor ${liveRun.executorChoice}${liveRun.timeoutMs ? ` / Timeout ${liveRun.timeoutMs}ms` : ""}`;
+  elements.transcript.replaceChildren(
+    ...(liveRun.stream.length > 0
+      ? liveRun.stream.map((line) => createListItem(line))
+      : [createListItem("No stream output yet.")]),
+  );
+  elements.eventLog.replaceChildren(
+    ...liveRun.events.map((event) => createEventListItem(event.type, event.message)),
+  );
+  elements.runArtifactList.replaceChildren(
+    ...(liveRun.artifacts.length > 0
+      ? liveRun.artifacts.map((artifact) => createListItem(`${artifact.title} (${artifact.kind})`))
+      : [createListItem("Artifacts will appear when this run produces them.")]),
+  );
+  elements.runArtifactPreview.textContent = liveRun.artifacts.length > 0
+    ? liveRun.artifactContents[liveRun.artifacts[0]?.id ?? ""] ?? "Artifact has no preview content."
+    : "Run artifacts will render here after a task completes.";
+  renderApprovalPanel(liveRun.pendingApproval);
+  elements.runCancelButton.disabled = isTerminalStatus(liveRun.status);
+  elements.runButton.disabled = !isTerminalStatus(liveRun.status) && liveRun.status !== "failed";
+}
+
+function renderApprovalPanel(approval: LiveRunState["pendingApproval"]): void {
+  elements.approvalPanel.dataset.active = approval ? "true" : "false";
+  elements.approvalStatus.textContent = approval ? "pending" : "no request";
+  elements.approvalReason.textContent = approval?.reason ?? "Runs that require approval will pause here.";
+  elements.approvalGrantButton.disabled = !approval;
+  elements.approvalRejectButton.disabled = !approval;
 }
 
 function render(nextState: SpaceDemoState): void {
@@ -1163,6 +1394,15 @@ function toExecutorChoice(value: string): SpaceDemoExecutorChoice {
     default:
       return "mock";
   }
+}
+
+function readTimeoutMs(): number | undefined {
+  const value = Number.parseInt(elements.executorTimeoutInput.value, 10);
+  return Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function isTerminalStatus(status: string): boolean {
+  return status === "completed" || status === "failed" || status === "interrupted";
 }
 
 function renderProviderError(message: string): void {

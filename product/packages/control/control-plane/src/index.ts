@@ -29,6 +29,7 @@ export interface StartMissionRunInput {
   goal: string;
   executor: CodeExecutor;
   prompt?: string;
+  context?: Record<string, unknown>;
 }
 
 export interface MissionRun {
@@ -86,6 +87,7 @@ export class ControlPlane {
       spaceId: input.spaceId,
       workspaceId: input.workspaceId,
       prompt: input.prompt ?? input.goal,
+      ...(input.context ? { context: input.context } : {}),
     };
 
     const result = await input.executor.startRun(task);

@@ -48,6 +48,7 @@ export class ClaudeCodeProcessExecutor implements CodeExecutor {
   readonly kind = "claude-code" as const;
   private readonly command: string;
   private readonly args: string[];
+  private readonly abortControllers = new Map<RunId, AbortController>();
 
   constructor(
     readonly id: ExecutorId,
@@ -111,8 +112,8 @@ export class ClaudeCodeProcessExecutor implements CodeExecutor {
     // Real approval bridging is implemented when Claude Code process protocol is wired.
   }
 
-  async interruptRun(_runId: RunId): Promise<void> {
-    // Real process interruption is implemented when managed process handles exist.
+  async interruptRun(runId: RunId): Promise<void> {
+    this.abortControllers.get(runId)?.abort();
   }
 
   async collectArtifacts(_runId: RunId): Promise<Artifact[]> {
@@ -126,19 +127,47 @@ export class ClaudeCodeProcessExecutor implements CodeExecutor {
       runId: run.id,
       executorId: this.id,
     };
+    const controller = new AbortController();
+    let terminalEventEmitted = false;
+    const timeoutMs = typeof task.context?.timeoutMs === "number" ? task.context.timeoutMs : undefined;
 
-    for await (const line of this.runner.run({
-      command: this.command,
-      args: [...this.args, task.prompt],
-      ...(task.context?.cwd ? { cwd: String(task.context.cwd) } : {}),
-    })) {
-      const native = parseClaudeCodeNativeEvent(line);
-      if (!native) continue;
-      yield mapClaudeCodeEventToKernelEvent(native, {
-        ...contextBase,
-        eventId: this.ids.eventId(),
-        occurredAt: this.clock.now(),
-      });
+    this.abortControllers.set(run.id, controller);
+
+    try {
+      for await (const line of this.runner.run({
+        command: this.command,
+        args: [...this.args, task.prompt],
+        ...(task.context?.cwd ? { cwd: String(task.context.cwd) } : {}),
+        ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+        signal: controller.signal,
+      })) {
+        const native = parseClaudeCodeNativeEvent(line);
+        if (!native) continue;
+        const event = mapClaudeCodeEventToKernelEvent(native, {
+          ...contextBase,
+          eventId: this.ids.eventId(),
+          occurredAt: this.clock.now(),
+        });
+        terminalEventEmitted = isTerminalKernelEvent(event.type);
+        yield event;
+      }
+    } catch (error) {
+      if (isAbortError(error)) {
+        if (!terminalEventEmitted) {
+          yield {
+            id: this.ids.eventId(),
+            type: "run.interrupted",
+            occurredAt: this.clock.now(),
+            spaceId: task.spaceId,
+            runId: run.id,
+            message: "Claude Code run interrupted.",
+          };
+        }
+        return;
+      }
+      throw error;
+    } finally {
+      this.abortControllers.delete(run.id);
     }
   }
 }
@@ -230,6 +259,14 @@ function extractClaudeResultError(value: Record<string, unknown>): string {
   }
 
   return typeof value.subtype === "string" ? value.subtype : "Claude Code process failed";
+}
+
+function isAbortError(error: unknown): error is Error {
+  return error instanceof Error && error.name === "AbortError";
+}
+
+function isTerminalKernelEvent(type: KernelEvent["type"]): boolean {
+  return type === "run.completed" || type === "run.failed" || type === "run.interrupted";
 }
 
 export function mapClaudeCodeEventToKernelEvent(
