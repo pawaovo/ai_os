@@ -3,6 +3,7 @@
   "references": [
     { "path": "./apps/space-desktop" },
     { "path": "./packages/kernel/kernel-objects" },
+    { "path": "./packages/kernel/kernel-memory" },
     { "path": "./packages/kernel/kernel-events" },
     { "path": "./packages/conversation/conversation-core" },
     { "path": "./packages/conversation/conversation-runtime" },

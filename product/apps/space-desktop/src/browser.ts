@@ -5,6 +5,7 @@ import {
 } from "./demo-runtime.js";
 import type { ChatUiMessage } from "./server-runtime.js";
 import type { ApprovalRecord, WorkspaceTrustLevel } from "@ai-os/approval-core";
+import type { MemoryRecord, MemoryScope, MemorySensitivity, RetrievedMemory } from "@ai-os/kernel-memory";
 
 type ProviderProtocol = "openai-compatible" | "anthropic-compatible";
 
@@ -99,6 +100,8 @@ interface AutomationRunSummary {
   completedAt?: string;
 }
 
+interface MemorySummary extends MemoryRecord {}
+
 interface LiveRunState {
   runId: string;
   goal: string;
@@ -117,6 +120,7 @@ interface LiveRunState {
     decision?: string;
     resolvedAt?: string;
   };
+  memoryUsage?: RetrievedMemory[];
   completedAt?: string;
   timeoutMs?: number;
 }
@@ -131,6 +135,8 @@ const state = {
   approvals: [] as ApprovalRecord[],
   automations: [] as AutomationSummary[],
   automationRuns: [] as AutomationRunSummary[],
+  memories: [] as MemorySummary[],
+  memoryUsage: [] as RetrievedMemory[],
   executorStatuses: [] as ExecutorStatusSummary[],
   liveRun: undefined as LiveRunState | undefined,
   runPoller: undefined as number | undefined,
@@ -215,6 +221,16 @@ const elements = {
   runEventHistory: getElement("run-event-history", HTMLElement),
   approvalHistoryList: getElement("approval-history-list", HTMLElement),
   approvalHistoryHelp: getElement("approval-history-help", HTMLElement),
+  memoryForm: getElement("memory-form", HTMLFormElement),
+  memoryTitleInput: getElement("memory-title-input", HTMLInputElement),
+  memoryScope: getElement("memory-scope", HTMLSelectElement),
+  memorySensitivity: getElement("memory-sensitivity", HTMLSelectElement),
+  memoryContent: getElement("memory-content", HTMLTextAreaElement),
+  memorySaveButton: getElement("memory-save-button", HTMLButtonElement),
+  memoryList: getElement("memory-list", HTMLElement),
+  memoryHelp: getElement("memory-help", HTMLElement),
+  memoryUsageList: getElement("memory-usage-list", HTMLElement),
+  memoryUsageHelp: getElement("memory-usage-help", HTMLElement),
   automationForm: getElement("automation-form", HTMLFormElement),
   automationTitleInput: getElement("automation-title-input", HTMLInputElement),
   automationKind: getElement("automation-kind", HTMLSelectElement),
@@ -330,6 +346,18 @@ elements.approvalRejectButton.addEventListener("click", () => {
   void resolveActiveApproval("reject");
 });
 
+elements.memoryForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void createMemoryFromForm();
+});
+
+elements.memoryList.addEventListener("click", (event) => {
+  const target = event.target instanceof HTMLElement
+    ? event.target.closest<HTMLButtonElement>("button[data-memory-id]")
+    : null;
+  if (target?.dataset.memoryId) void deleteMemory(target.dataset.memoryId);
+});
+
 elements.automationForm.addEventListener("submit", (event) => {
   event.preventDefault();
   void createAutomationFromForm();
@@ -391,6 +419,7 @@ async function initializeAppState(): Promise<void> {
   await loadApprovals();
   await loadAutomations();
   await loadAutomationRuns();
+  await loadMemories();
 }
 
 function setActivePage(page: string): void {
@@ -565,6 +594,7 @@ async function refreshWorkspaceScopedData(): Promise<void> {
   await loadApprovals();
   await loadAutomations();
   await loadAutomationRuns();
+  await loadMemories();
 }
 
 function renderWorkspaces(): void {
@@ -935,6 +965,7 @@ async function sendChatFromForm(): Promise<void> {
       error?: string;
       messages?: ChatUiMessage[];
       threadId?: string;
+      memoryUsage?: RetrievedMemory[];
     }>(
       threadId ? `/api/threads/${encodeURIComponent(threadId)}/messages` : "/api/chat/send",
       {
@@ -956,6 +987,8 @@ async function sendChatFromForm(): Promise<void> {
 
     state.chatMessages = payload.messages;
     state.activeThreadId = payload.threadId ?? state.activeThreadId;
+    state.memoryUsage = payload.memoryUsage ?? [];
+    renderMemoryUsage();
     await loadThreads();
     await loadArtifacts();
   } catch (error) {
@@ -1002,6 +1035,7 @@ async function runDemoFromForm(): Promise<void> {
     });
     state.activeRunId = payload.run.id;
     state.liveRun = payload.live;
+    state.memoryUsage = payload.live.memoryUsage ?? [];
     renderCurrentRunView();
     await loadRuns();
     await loadApprovals();
@@ -1028,6 +1062,7 @@ async function cancelActiveRun(): Promise<void> {
       { method: "POST" },
     );
     state.liveRun = payload.live;
+    state.memoryUsage = payload.live.memoryUsage ?? [];
     renderCurrentRunView();
     await loadRuns();
     await loadApprovals();
@@ -1054,6 +1089,7 @@ async function resolveActiveApproval(decision: "grant" | "reject"): Promise<void
       },
     );
     state.liveRun = payload.live;
+    state.memoryUsage = payload.live.memoryUsage ?? [];
     renderCurrentRunView();
     if (!isTerminalStatus(payload.live.status)) {
       startRunPolling(payload.live.runId);
@@ -1087,6 +1123,7 @@ async function pollLiveRun(runId: string): Promise<void> {
     const payload = await apiJson<{ live: LiveRunState }>(`/api/runs/${encodeURIComponent(runId)}/live`);
     state.liveRun = payload.live;
     state.activeRunId = payload.live.runId;
+    state.memoryUsage = payload.live.memoryUsage ?? [];
     renderCurrentRunView();
 
     if (isTerminalStatus(payload.live.status)) {
@@ -1255,6 +1292,104 @@ async function loadApprovals(): Promise<void> {
     elements.approvalHistoryHelp.textContent = errorToMessage(error, "Failed to load approval history.");
     renderApprovalHistory();
   }
+}
+
+async function loadMemories(): Promise<void> {
+  try {
+    const payload = await apiJson<{ memories: MemorySummary[] }>("/api/memories");
+    state.memories = payload.memories;
+    renderMemories();
+    renderMemoryUsage();
+  } catch (error) {
+    elements.memoryHelp.textContent = errorToMessage(error, "Failed to load memories.");
+    renderMemories();
+  }
+}
+
+async function createMemoryFromForm(): Promise<void> {
+  const title = elements.memoryTitleInput.value.trim();
+  const content = elements.memoryContent.value.trim();
+  if (!title || !content) {
+    elements.memoryHelp.textContent = "Memory title and content are required.";
+    return;
+  }
+
+  elements.memorySaveButton.disabled = true;
+  try {
+    await apiJson<{ memory: MemorySummary }>("/api/memories", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        title,
+        content,
+        scope: elements.memoryScope.value as MemoryScope,
+        sensitivity: elements.memorySensitivity.value as MemorySensitivity,
+      }),
+    });
+    elements.memoryHelp.textContent = "Memory saved locally.";
+    await loadMemories();
+  } catch (error) {
+    elements.memoryHelp.textContent = errorToMessage(error, "Failed to save memory.");
+  } finally {
+    elements.memorySaveButton.disabled = false;
+  }
+}
+
+async function deleteMemory(memoryId: string): Promise<void> {
+  try {
+    await apiJson(`/api/memories/${encodeURIComponent(memoryId)}`, { method: "DELETE" });
+    if (state.memoryUsage.some((memory) => memory.memoryId === memoryId)) {
+      state.memoryUsage = state.memoryUsage.filter((memory) => memory.memoryId !== memoryId);
+      renderMemoryUsage();
+    }
+    await loadMemories();
+  } catch (error) {
+    elements.memoryHelp.textContent = errorToMessage(error, "Failed to delete memory.");
+  }
+}
+
+function renderMemories(): void {
+  if (state.memories.length === 0) {
+    elements.memoryList.replaceChildren(createListItem("No local memories saved yet."));
+    return;
+  }
+
+  elements.memoryList.replaceChildren(
+    ...state.memories.map((memory) => {
+      const item = document.createElement("li");
+      const content = document.createElement("div");
+      const button = document.createElement("button");
+
+      content.className = "list-button";
+      content.textContent = `${memory.title} / ${memory.scope} / ${memory.sensitivity}${memory.lastUsedAt ? ` / used ${formatDate(memory.lastUsedAt)}` : ""}`;
+      button.type = "button";
+      button.className = "secondary-button";
+      button.dataset.memoryId = memory.id;
+      button.textContent = "Delete";
+      item.append(content, button);
+      return item;
+    }),
+  );
+}
+
+function renderMemoryUsage(): void {
+  if (state.memoryUsage.length === 0) {
+    elements.memoryUsageList.replaceChildren(createListItem("No memory used in the current chat or run."));
+    elements.memoryUsageHelp.textContent = "When memory is injected into chat or runs, it appears here.";
+    return;
+  }
+
+  elements.memoryUsageList.replaceChildren(
+    ...state.memoryUsage.map((memory) => createActionListItem({
+      id: memory.memoryId,
+      idName: "memoryId",
+      title: `${memory.title} / ${memory.scope}`,
+      meta: `${memory.sensitivity} / score ${memory.score.toFixed(1)} / ${memory.content}`,
+      pressed: false,
+      source: memory.sensitivity,
+    })),
+  );
+  elements.memoryUsageHelp.textContent = `${state.memoryUsage.length} memory item${state.memoryUsage.length === 1 ? "" : "s"} injected into the current context.`;
 }
 
 function renderApprovalHistory(): void {
@@ -1434,6 +1569,7 @@ async function openRun(runId: string): Promise<void> {
     const payload = await apiJson<{ events: RunEventSummary[] }>(`/api/runs/${encodeURIComponent(runId)}/events`);
     state.activeRunId = runId;
     state.runEvents = payload.events;
+    state.memoryUsage = deriveMemoryUsageFromEvents(payload.events);
     state.liveRun = createPersistedRunView(runId);
     renderRunHistory();
     renderCurrentRunView();
@@ -1484,8 +1620,26 @@ function createPersistedRunView(runId: string): LiveRunState | undefined {
     events: [...state.runEvents],
     artifacts,
     artifactContents: Object.fromEntries(artifacts.map((artifact) => [artifact.id, artifact.content ?? ""])),
+    memoryUsage: deriveMemoryUsageFromEvents(state.runEvents),
     ...(run.completedAt ? { completedAt: run.completedAt } : {}),
   };
+}
+
+function deriveMemoryUsageFromEvents(events: RunEventSummary[]): RetrievedMemory[] {
+  const memoryEvent = [...events].reverse().find((event) => event.type === "memory.used");
+  if (!memoryEvent) return [];
+  const titles = memoryEvent.message.replace(/^Memory used:\s*/, "").split(",").map((title) => title.trim()).filter(Boolean);
+  return state.memories
+    .filter((memory) => titles.includes(memory.title))
+    .map((memory) => ({
+      memoryId: memory.id,
+      title: memory.title,
+      content: memory.content,
+      sensitivity: memory.sensitivity,
+      scope: memory.scope,
+      ...(memory.workspaceId ? { workspaceId: memory.workspaceId } : {}),
+      score: 1,
+    }));
 }
 
 function renderCurrentRunView(): void {
@@ -1494,6 +1648,7 @@ function renderCurrentRunView(): void {
     render(state.current);
     renderApprovalPanel(undefined);
     elements.runCancelButton.disabled = true;
+    renderMemoryUsage();
     return;
   }
 
@@ -1523,6 +1678,8 @@ function renderCurrentRunView(): void {
     ? liveRun.artifactContents[liveRun.artifacts[0]?.id ?? ""] ?? "Artifact has no preview content."
     : "Run artifacts will render here after a task completes.";
   renderApprovalPanel(liveRun.pendingApproval);
+  state.memoryUsage = liveRun.memoryUsage ?? [];
+  renderMemoryUsage();
   elements.runCancelButton.disabled = isTerminalStatus(liveRun.status);
   elements.runButton.disabled = !isTerminalStatus(liveRun.status) && liveRun.status !== "failed";
 }
@@ -1611,7 +1768,7 @@ function createEventListItem(typeText: string, messageText: string): HTMLLIEleme
 
 function createActionListItem(input: {
   id: string;
-  idName: "artifactId" | "runId" | "approvalId";
+  idName: "artifactId" | "runId" | "approvalId" | "memoryId";
   title: string;
   meta: string;
   pressed: boolean;

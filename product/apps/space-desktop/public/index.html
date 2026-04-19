@@ -15,15 +15,15 @@
     </script>
   </head>
   <body>
-    <main class="space-workbench app-shell" data-layout="v0.6.1-product-shell">
+    <main class="space-workbench app-shell" data-layout="v0.7-local-memory-workbench">
       <header class="workbench-hero" aria-labelledby="app-title">
         <div>
-          <p class="eyebrow">AI OS / V0.6.1 product shell</p>
+          <p class="eyebrow">AI OS / V0.7 local memory and personal context</p>
           <h1 id="app-title">AI OS Space</h1>
         </div>
         <p class="hero-copy">
-          Work from one focused area at a time. Navigate Space, chat, runs, automation,
-          artifacts, approvals, providers, and settings without scrolling through one long console.
+          Work with persistent local memory so chats and tasks can reuse personal and project context
+          while still showing exactly when memory was used.
         </p>
         <span id="active-workspace-label" class="status-pill" data-phase="idle">no workspace</span>
       </header>
@@ -36,6 +36,7 @@
         <button class="nav-button" type="button" data-page-target="automations">Automations</button>
         <button class="nav-button" type="button" data-page-target="artifacts">Artifacts</button>
         <button class="nav-button" type="button" data-page-target="approvals">Approvals</button>
+        <button class="nav-button" type="button" data-page-target="memory">Memory</button>
         <button class="nav-button" type="button" data-page-target="providers">Providers</button>
         <button class="nav-button" type="button" data-page-target="settings">Settings</button>
       </aside>
@@ -127,6 +128,42 @@
           </form>
           <ul id="automation-list" class="action-list"></ul>
           <p id="automation-help" class="inline-help">Automations run locally and use the active workspace.</p>
+        </section>
+
+        <section class="memory-panel panel page-section" data-pages="memory" aria-labelledby="memory-title">
+          <div class="panel-heading">
+            <p class="eyebrow">Memory</p>
+            <span class="mini-label">local context</span>
+          </div>
+          <h2 id="memory-title">Saved Memories</h2>
+          <form id="memory-form" class="stack-form">
+            <label>
+              Title
+              <input id="memory-title-input" value="Working preference" autocomplete="off" />
+            </label>
+            <label>
+              Scope
+              <select id="memory-scope">
+                <option value="personal" selected>Personal</option>
+                <option value="workspace">Workspace</option>
+              </select>
+            </label>
+            <label>
+              Sensitivity
+              <select id="memory-sensitivity">
+                <option value="low" selected>Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+            <label>
+              Content
+              <textarea id="memory-content" rows="4">Prefer concise plans and local-first defaults.</textarea>
+            </label>
+            <button id="memory-save-button" type="submit">Save Memory</button>
+          </form>
+          <ul id="memory-list" class="action-list"></ul>
+          <p id="memory-help" class="inline-help">Memories stay local and can be deleted at any time.</p>
         </section>
       </aside>
 
@@ -232,12 +269,23 @@
             <li><strong>Executors</strong><span>Check Codex / Claude Code availability from Providers or Runs.</span></li>
             <li><strong>Workspace Trust</strong><span>Change trust mode in the Workspace card.</span></li>
             <li><strong>Automation</strong><span>Create and pause local automations from the Automations page.</span></li>
+            <li><strong>Memory</strong><span>Save personal or workspace context from the Memory page and review usage in chat or runs.</span></li>
             <li><strong>Diagnostics</strong><span>Local server, SQLite, Keychain, and bundled resources are checked by tests and smoke runs.</span></li>
           </ul>
         </section>
       </section>
 
       <aside class="right-rail" aria-label="Provider, run history, and saved artifacts">
+        <section class="memory-usage-panel panel page-section" data-pages="chat runs memory" aria-labelledby="memory-usage-title">
+          <div class="panel-heading">
+            <p class="eyebrow">Memory Usage</p>
+            <span class="mini-label">injection</span>
+          </div>
+          <h2 id="memory-usage-title">Current Context</h2>
+          <ul id="memory-usage-list" class="action-list"></ul>
+          <p id="memory-usage-help" class="inline-help">When memory is injected into chat or runs, it appears here.</p>
+        </section>
+
         <section class="executor-status-panel panel page-section" data-pages="runs providers settings" aria-labelledby="executor-status-title">
           <div class="panel-heading">
             <p class="eyebrow">Executor Doctor</p>

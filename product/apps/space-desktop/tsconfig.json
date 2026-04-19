@@ -15,6 +15,7 @@
     { "path": "../../packages/executors/executor-codex" },
     { "path": "../../packages/executors/executor-protocol" },
     { "path": "../../packages/kernel/kernel-events" },
+    { "path": "../../packages/kernel/kernel-memory" },
     { "path": "../../packages/kernel/kernel-objects" },
     { "path": "../../packages/model-providers/provider-anthropic-compatible" },
     { "path": "../../packages/model-providers/provider-openai-compatible" },

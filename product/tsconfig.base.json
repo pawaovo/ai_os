@@ -15,6 +15,7 @@
     "baseUrl": ".",
     "paths": {
       "@ai-os/kernel-objects": ["packages/kernel/kernel-objects/src/index.ts"],
+      "@ai-os/kernel-memory": ["packages/kernel/kernel-memory/src/index.ts"],
       "@ai-os/kernel-events": ["packages/kernel/kernel-events/src/index.ts"],
       "@ai-os/conversation-core": ["packages/conversation/conversation-core/src/index.ts"],
       "@ai-os/conversation-runtime": ["packages/conversation/conversation-runtime/src/index.ts"],

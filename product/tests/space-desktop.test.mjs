@@ -139,7 +139,7 @@ test("createInitialSpaceDemoState exposes the visible local demo shell", () => {
   assert.equal(state.events[0].type, "space.ready");
 });
 
-test("space desktop V0.6.1 page exposes product shell navigation and settings", async () => {
+test("space desktop V0.7 page exposes local memory controls", async () => {
   const html = await readFile(resolve(productRoot, "apps/space-desktop/public/index.html"), "utf8");
   const styles = await readFile(resolve(productRoot, "apps/space-desktop/public/styles.css"), "utf8");
 
@@ -147,10 +147,18 @@ test("space desktop V0.6.1 page exposes product shell navigation and settings", 
   assert.doesNotMatch(html, /data-layout="v0\.4-executor-workbench"/);
   assert.doesNotMatch(html, /data-layout="v0\.5-approval-trust-workbench"/);
   assert.doesNotMatch(html, /data-layout="v0\.6-automation-workbench"/);
-  assert.match(html, /data-layout="v0\.6\.1-product-shell"/);
+  assert.doesNotMatch(html, /data-layout="v0\.6\.1-product-shell"/);
+  assert.match(html, /data-layout="v0\.7-local-memory-workbench"/);
   assert.match(html, /class="app-nav"/);
+  assert.match(html, /data-page-target="memory"/);
   assert.match(html, /data-page-target="settings"/);
   assert.match(html, /id="settings-title"/);
+  assert.match(html, /id="memory-title"/);
+  assert.match(html, /id="memory-form"/);
+  assert.match(html, /id="memory-scope"/);
+  assert.match(html, /id="memory-sensitivity"/);
+  assert.match(html, /id="memory-list"/);
+  assert.match(html, /id="memory-usage-list"/);
   assert.match(html, /id="workspace-select"/);
   assert.match(html, /id="workspace-trust-level"/);
   assert.match(html, /id="active-workspace-label"/);
@@ -709,6 +717,71 @@ test("space desktop V0.6 automations run locally and respect approvals", async (
   }
 });
 
+test("space desktop V0.7 memories persist and are injected into chat and runs", async () => {
+  const storageDir = await mkdtemp(`${tmpdir()}/ai-os-v07-`);
+  const providerServer = await startMockOpenAiProvider();
+  const appPort = await getAvailablePort();
+  const appServer = startSpaceDesktopServer({
+    port: appPort,
+    storageDir,
+  });
+
+  try {
+    await waitForHttp(`http://127.0.0.1:${appPort}/`);
+
+    await postJson(`http://127.0.0.1:${appPort}/api/providers`, {
+      name: "Memory Provider",
+      protocol: "openai-compatible",
+      baseUrl: `http://127.0.0.1:${providerServer.port}/v1`,
+      apiKey: "sk-memory-secret",
+      modelId: "memory-model",
+    });
+
+    const workspace = await postJson(`http://127.0.0.1:${appPort}/api/workspaces`, {
+      name: "V0.7 Workspace",
+      path: storageDir,
+    });
+
+    const memory = await postJson(`http://127.0.0.1:${appPort}/api/memories`, {
+      title: "Planning preference",
+      content: "Prefer concise plans and local-first defaults.",
+      scope: "workspace",
+      sensitivity: "low",
+    });
+    assert.equal(memory.memory.title, "Planning preference");
+
+    const thread = await postJson(`http://127.0.0.1:${appPort}/api/threads`, {
+      title: "Memory Thread",
+    });
+
+    const chat = await postJson(`http://127.0.0.1:${appPort}/api/threads/${thread.thread.id}/messages`, {
+      message: "Give me a plan using my local-first preference",
+    });
+    assert.equal(chat.memoryUsage.length > 0, true);
+    assert.equal(chat.memoryUsage[0].title, "Planning preference");
+
+    const memoriesAfterChat = await getJson(`http://127.0.0.1:${appPort}/api/memories`);
+    const usedMemory = memoriesAfterChat.memories.find((item) => item.id === memory.memory.id);
+    assert.equal(typeof usedMemory.lastUsedAt, "string");
+
+    const run = await postJson(`http://127.0.0.1:${appPort}/api/runs/start`, {
+      goal: "use my local-first preference to write a report",
+      executorChoice: "mock",
+      timeoutMs: 5000,
+    });
+    assert.equal(run.live.memoryUsage.length > 0, true);
+    assert.equal(run.live.memoryUsage[0].title, "Planning preference");
+
+    await deleteJson(`http://127.0.0.1:${appPort}/api/memories/${memory.memory.id}`);
+    const memoriesAfterDelete = await getJson(`http://127.0.0.1:${appPort}/api/memories`);
+    assert.equal(memoriesAfterDelete.memories.some((item) => item.id === memory.memory.id), false);
+  } finally {
+    await appServer.stop();
+    await providerServer.stop();
+    await rm(storageDir, { recursive: true, force: true });
+  }
+});
+
 test("runSpaceDemoRequest executes the mock path through the server runtime", async () => {
   const response = await runSpaceDemoRequest(
     {
@@ -1034,4 +1107,10 @@ async function patchJsonAllowFailure(url, body) {
     status: response.status,
     payload: await response.json(),
   };
+}
+
+async function deleteJson(url) {
+  const response = await fetch(url, { method: "DELETE" });
+  assert.equal(response.ok, true);
+  return response.json();
 }

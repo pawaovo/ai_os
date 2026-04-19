@@ -1,0 +1,8 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend development guide"}
+{"file": "ai_os/ai_os_docs/04-implementation-roadmap.md", "reason": "V0.7 roadmap"}
+{"file": "product/apps/space-desktop/scripts/dev-server.mjs", "reason": "Server and local persistence"}
+{"file": "product/apps/space-desktop/src/browser.ts", "reason": "Product shell UI"}
+{"file": "product/apps/space-desktop/public/index.html", "reason": "Shell markup"}
+{"file": "product/tests/space-desktop.test.mjs", "reason": "Integration tests"}

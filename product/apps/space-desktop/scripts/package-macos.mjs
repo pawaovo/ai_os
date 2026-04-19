@@ -27,6 +27,7 @@ const workspacePackages = [
   ["packages/executors/executor-codex", "executor-codex"],
   ["packages/executors/executor-protocol", "executor-protocol"],
   ["packages/kernel/kernel-events", "kernel-events"],
+  ["packages/kernel/kernel-memory", "kernel-memory"],
   ["packages/kernel/kernel-objects", "kernel-objects"],
   ["packages/model-providers/provider-anthropic-compatible", "provider-anthropic-compatible"],
   ["packages/model-providers/provider-openai-compatible", "provider-openai-compatible"],
@@ -132,7 +133,7 @@ function createInfoPlist() {
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.6.1</string>
+  <string>0.7.0</string>
   <key>CFBundleVersion</key>
   <string>1</string>
   <key>LSMinimumSystemVersion</key>

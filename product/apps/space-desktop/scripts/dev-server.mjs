@@ -47,6 +47,12 @@ const {
   normalizeApprovalDecision,
   normalizeWorkspaceTrustLevel,
 } = await import(pathToImportUrl(join(productRoot, "packages/control/approval-core/dist/index.js")));
+const {
+  createMemoryUsageSummary,
+  normalizeMemoryScope,
+  normalizeMemorySensitivity,
+  selectRelevantMemories,
+} = await import(pathToImportUrl(join(productRoot, "packages/kernel/kernel-memory/dist/index.js")));
 
 await mkdir(storageRoot, { recursive: true });
 
@@ -106,6 +112,21 @@ async function handleRequest(request, response) {
 
   if (request.method === "GET" && pathname === "/api/approvals") {
     await handleListApprovals(response);
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/memories") {
+    await handleListMemories(response);
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/memories") {
+    await handleCreateMemory(request, response);
+    return;
+  }
+
+  if (request.method === "DELETE" && isMemoryPath(pathname)) {
+    await handleDeleteMemory(response, memoryIdFromPath(pathname));
     return;
   }
 
@@ -357,6 +378,33 @@ async function handleDeleteArtifact(response, artifactId) {
 
 async function handleListApprovals(response) {
   writeJson(response, 200, appStore.listApprovals(appStore.getSetting("activeWorkspaceId")));
+}
+
+async function handleListMemories(response) {
+  writeJson(response, 200, appStore.listMemories(appStore.getSetting("activeWorkspaceId")));
+}
+
+async function handleCreateMemory(request, response) {
+  try {
+    const body = await readJsonBody(request);
+    const memory = appStore.createMemory({
+      title: readRequiredString(body.title, "title"),
+      content: readRequiredString(body.content, "content"),
+      scope: normalizeMemoryScope(body.scope),
+      sensitivity: normalizeMemorySensitivity(body.sensitivity),
+      workspaceId: normalizeMemoryScope(body.scope) === "workspace"
+        ? appStore.getSetting("activeWorkspaceId")
+        : undefined,
+    });
+    writeJson(response, 200, { memory });
+  } catch (error) {
+    writeJson(response, 400, { error: sanitizeErrorMessage(error) });
+  }
+}
+
+async function handleDeleteMemory(response, memoryId) {
+  appStore.deleteMemory(memoryId);
+  writeJson(response, 200, appStore.listMemories(appStore.getSetting("activeWorkspaceId")));
 }
 
 async function handleListAutomations(response) {
@@ -625,6 +673,11 @@ async function handleChatSendWithThread(response, body) {
   }
 
   const history = appStore.listMessages(thread.id).map(({ role, content }) => ({ role, content }));
+  const memoryUsage = appStore.searchMemories(thread.workspaceId, chatRequest.message);
+  const memoryContext = createMemoryUsageSummary(memoryUsage);
+  if (memoryUsage.length > 0) {
+    appStore.markMemoriesUsed(memoryUsage.map((memory) => memory.memoryId));
+  }
   const userMessage = appStore.addMessage({
     threadId: thread.id,
     role: "user",
@@ -636,7 +689,14 @@ async function handleChatSendWithThread(response, body) {
 
   try {
     const payload = await runChatSendRequest({
-      request: { ...chatRequest, threadId: thread.id, providerId: provider.id, history },
+      request: {
+        ...chatRequest,
+        threadId: thread.id,
+        providerId: provider.id,
+        history: memoryContext
+          ? [{ role: "system", content: memoryContext }, ...history]
+          : history,
+      },
       provider,
       fetch: globalThis.fetch,
     });
@@ -663,6 +723,7 @@ async function handleChatSendWithThread(response, body) {
       threadId: thread.id,
       messages: appStore.listMessages(thread.id),
       assistantMessage,
+      memoryUsage,
     });
   } catch (error) {
     appStore.addMessage({
@@ -829,6 +890,7 @@ async function createRunSession(input) {
     trustLevel: normalizeWorkspaceTrustLevel(workspace.trustLevel),
     threadId: appStore.getSetting("activeThreadId"),
     timeoutMs: input.timeoutMs,
+    memoryUsage: appStore.searchMemories(workspace.id, input.goal),
     status: "queued",
     events: [],
     stream: [],
@@ -842,6 +904,14 @@ async function createRunSession(input) {
     executor: undefined,
     promise: undefined,
   };
+
+  if (session.memoryUsage.length > 0) {
+    appStore.markMemoriesUsed(session.memoryUsage.map((memory) => memory.memoryId));
+    appendLiveEvent(session, {
+      type: "memory.used",
+      message: `Memory used: ${session.memoryUsage.map((memory) => memory.title).join(", ")}`,
+    });
+  }
 
   runSessions.set(runId, session);
   const approvalRequirement = assessRunApproval({
@@ -996,10 +1066,11 @@ async function runSessionWork(session) {
       spaceId: SPACE_RUNTIME_SPACE_ID,
       threadId: session.threadId ?? `thread-run-${session.runId}`,
       workspaceId: session.workspaceId,
-      goal: session.goal,
+      goal: buildRunGoalWithMemory(session),
       executor,
       context: {
         cwd: session.workspacePath,
+        memoryContext: createMemoryUsageSummary(session.memoryUsage),
         ...(session.timeoutMs !== undefined ? { timeoutMs: session.timeoutMs } : {}),
       },
     });
@@ -1043,6 +1114,13 @@ function createExecutorForSession(session) {
     ids: session.ids,
     clock: session.clock,
   });
+}
+
+function buildRunGoalWithMemory(session) {
+  const memoryContext = createMemoryUsageSummary(session.memoryUsage);
+  return memoryContext
+    ? `${session.goal}\n\n${memoryContext}`
+    : session.goal;
 }
 
 function appendKernelEvent(session, event) {
@@ -1219,6 +1297,7 @@ function serializeRunSession(session) {
     events: [...session.events],
     artifacts: [...session.artifacts],
     artifactContents: { ...session.artifactContents },
+    memoryUsage: [...session.memoryUsage],
     ...(session.pendingApproval ? { pendingApproval: { ...session.pendingApproval } } : {}),
     ...(session.completedAt ? { completedAt: session.completedAt } : {}),
     ...(session.timeoutMs !== undefined ? { timeoutMs: session.timeoutMs } : {}),
@@ -1394,6 +1473,14 @@ function automationIdFromPath(pathname) {
   return decodeURIComponent(pathname.split("/")[3] ?? "");
 }
 
+function isMemoryPath(pathname) {
+  return /^\/api\/memories\/[^/]+$/.test(pathname);
+}
+
+function memoryIdFromPath(pathname) {
+  return decodeURIComponent(pathname.split("/")[3] ?? "");
+}
+
 function isThreadPath(pathname) {
   return /^\/api\/threads\/[^/]+$/.test(pathname);
 }
@@ -1564,6 +1651,17 @@ class SqliteAppStore {
         resolved_at TEXT,
         note TEXT
       );
+      CREATE TABLE IF NOT EXISTS memories (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        scope TEXT NOT NULL,
+        sensitivity TEXT NOT NULL,
+        workspace_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        last_used_at TEXT
+      );
       CREATE TABLE IF NOT EXISTS automations (
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL,
@@ -1655,6 +1753,7 @@ class SqliteAppStore {
     this.db.prepare("UPDATE threads SET workspace_id = NULL WHERE workspace_id = ?").run(id);
     this.db.prepare("UPDATE artifacts SET workspace_id = NULL WHERE workspace_id = ?").run(id);
     this.db.prepare("UPDATE runs SET workspace_id = NULL WHERE workspace_id = ?").run(id);
+    this.db.prepare("DELETE FROM memories WHERE workspace_id = ?").run(id);
     if (this.getSetting("activeWorkspaceId") === id) {
       this.db.prepare("DELETE FROM app_settings WHERE key = 'activeWorkspaceId'").run();
     }
@@ -2000,6 +2099,60 @@ class SqliteAppStore {
     return { approvals: rows.map(approvalRowToSummary) };
   }
 
+  createMemory(input) {
+    const id = randomUUID();
+    const timestamp = nowIso();
+    this.db.prepare(`
+      INSERT INTO memories (id, title, content, scope, sensitivity, workspace_id, created_at, updated_at, last_used_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      input.title,
+      input.content,
+      input.scope,
+      input.sensitivity,
+      input.workspaceId ?? null,
+      timestamp,
+      timestamp,
+      null,
+    );
+    return this.getMemory(id);
+  }
+
+  deleteMemory(id) {
+    this.db.prepare("DELETE FROM memories WHERE id = ?").run(id);
+  }
+
+  getMemory(id) {
+    const row = this.db.prepare("SELECT * FROM memories WHERE id = ?").get(id);
+    return row ? memoryRowToSummary(row) : undefined;
+  }
+
+  listMemories(workspaceId) {
+    const rows = workspaceId
+      ? this.db.prepare(`
+        SELECT * FROM memories
+        WHERE scope = 'personal' OR workspace_id = ?
+        ORDER BY COALESCE(last_used_at, updated_at) DESC
+      `).all(workspaceId)
+      : this.db.prepare("SELECT * FROM memories ORDER BY COALESCE(last_used_at, updated_at) DESC").all();
+    return { memories: rows.map(memoryRowToSummary) };
+  }
+
+  searchMemories(workspaceId, query) {
+    const memories = this.listMemories(workspaceId).memories;
+    return selectRelevantMemories(memories, query, { limit: 3 });
+  }
+
+  markMemoriesUsed(ids) {
+    if (ids.length === 0) return;
+    const timestamp = nowIso();
+    const statement = this.db.prepare("UPDATE memories SET last_used_at = ?, updated_at = ? WHERE id = ?");
+    for (const id of ids) {
+      statement.run(timestamp, timestamp, id);
+    }
+  }
+
   createAutomation(input) {
     const id = randomUUID();
     const timestamp = nowIso();
@@ -2263,6 +2416,20 @@ function approvalRowToSummary(row) {
     requestedAt: row.created_at,
     ...(row.resolved_at ? { resolvedAt: row.resolved_at } : {}),
     ...(row.note ? { note: row.note } : {}),
+  };
+}
+
+function memoryRowToSummary(row) {
+  return {
+    id: row.id,
+    title: row.title,
+    content: row.content,
+    scope: row.scope,
+    sensitivity: row.sensitivity,
+    ...(row.workspace_id ? { workspaceId: row.workspace_id } : {}),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    ...(row.last_used_at ? { lastUsedAt: row.last_used_at } : {}),
   };
 }
 
