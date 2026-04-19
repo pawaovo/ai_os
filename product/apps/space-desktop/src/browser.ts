@@ -74,6 +74,31 @@ interface ExecutorStatusSummary {
   message: string;
 }
 
+interface AutomationSummary {
+  id: string;
+  title: string;
+  kind: "one-off" | "scheduled" | "heartbeat";
+  prompt: string;
+  status: "active" | "paused";
+  workspaceId?: string;
+  intervalMs?: number;
+  nextRunAt?: string;
+  lastRunAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface AutomationRunSummary {
+  id: string;
+  automationId: string;
+  workspaceId?: string;
+  status: string;
+  result?: string;
+  artifactId?: string;
+  startedAt: string;
+  completedAt?: string;
+}
+
 interface LiveRunState {
   runId: string;
   goal: string;
@@ -104,6 +129,8 @@ const state = {
   runs: [] as RunSummary[],
   runEvents: [] as RunEventSummary[],
   approvals: [] as ApprovalRecord[],
+  automations: [] as AutomationSummary[],
+  automationRuns: [] as AutomationRunSummary[],
   executorStatuses: [] as ExecutorStatusSummary[],
   liveRun: undefined as LiveRunState | undefined,
   runPoller: undefined as number | undefined,
@@ -185,6 +212,17 @@ const elements = {
   runEventHistory: getElement("run-event-history", HTMLElement),
   approvalHistoryList: getElement("approval-history-list", HTMLElement),
   approvalHistoryHelp: getElement("approval-history-help", HTMLElement),
+  automationForm: getElement("automation-form", HTMLFormElement),
+  automationTitleInput: getElement("automation-title-input", HTMLInputElement),
+  automationKind: getElement("automation-kind", HTMLSelectElement),
+  automationIntervalInput: getElement("automation-interval-input", HTMLInputElement),
+  automationPrompt: getElement("automation-prompt", HTMLTextAreaElement),
+  automationSaveButton: getElement("automation-save-button", HTMLButtonElement),
+  automationTickButton: getElement("automation-tick-button", HTMLButtonElement),
+  automationList: getElement("automation-list", HTMLElement),
+  automationHelp: getElement("automation-help", HTMLElement),
+  automationRunList: getElement("automation-run-list", HTMLElement),
+  automationRunHelp: getElement("automation-run-help", HTMLElement),
   artifactForm: getElement("artifact-form", HTMLFormElement),
   artifactSelect: getElement("artifact-select", HTMLSelectElement),
   artifactOpenButton: getElement("artifact-open-button", HTMLButtonElement),
@@ -283,6 +321,23 @@ elements.approvalRejectButton.addEventListener("click", () => {
   void resolveActiveApproval("reject");
 });
 
+elements.automationForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void createAutomationFromForm();
+});
+
+elements.automationTickButton.addEventListener("click", () => {
+  void runAutomationTick();
+});
+
+elements.automationList.addEventListener("click", (event) => {
+  const target = event.target instanceof HTMLElement
+    ? event.target.closest<HTMLButtonElement>("button[data-automation-action]")
+    : null;
+  if (!target?.dataset.automationId || !target.dataset.automationAction) return;
+  void handleAutomationAction(target.dataset.automationId, target.dataset.automationAction);
+});
+
 elements.runHistoryList.addEventListener("click", (event) => {
   const target = event.target instanceof HTMLElement ? event.target.closest<HTMLButtonElement>("button[data-run-id]") : null;
   if (target?.dataset.runId) void openRun(target.dataset.runId);
@@ -324,6 +379,8 @@ async function initializeAppState(): Promise<void> {
   await loadArtifacts();
   await loadRuns();
   await loadApprovals();
+  await loadAutomations();
+  await loadAutomationRuns();
 }
 
 async function loadExecutors(): Promise<void> {
@@ -482,6 +539,8 @@ async function refreshWorkspaceScopedData(): Promise<void> {
   await loadArtifacts();
   await loadRuns();
   await loadApprovals();
+  await loadAutomations();
+  await loadAutomationRuns();
 }
 
 function renderWorkspaces(): void {
@@ -1195,6 +1254,141 @@ function renderApprovalHistory(): void {
   elements.approvalHistoryHelp.textContent = `${state.approvals.length} approval record${state.approvals.length === 1 ? "" : "s"} in this workspace.`;
 }
 
+async function loadAutomations(): Promise<void> {
+  try {
+    const payload = await apiJson<{ automations: AutomationSummary[] }>("/api/automations");
+    state.automations = payload.automations;
+    renderAutomations();
+  } catch (error) {
+    elements.automationHelp.textContent = errorToMessage(error, "Failed to load automations.");
+    renderAutomations();
+  }
+}
+
+async function loadAutomationRuns(): Promise<void> {
+  try {
+    const payload = await apiJson<{ runs: AutomationRunSummary[] }>("/api/automation-runs");
+    state.automationRuns = payload.runs;
+    renderAutomationRuns();
+  } catch (error) {
+    elements.automationRunHelp.textContent = errorToMessage(error, "Failed to load automation runs.");
+    renderAutomationRuns();
+  }
+}
+
+async function createAutomationFromForm(): Promise<void> {
+  const title = elements.automationTitleInput.value.trim();
+  const prompt = elements.automationPrompt.value.trim();
+  if (!title || !prompt) {
+    elements.automationHelp.textContent = "Automation title and prompt are required.";
+    return;
+  }
+
+  elements.automationSaveButton.disabled = true;
+  try {
+    await apiJson<{ automation: AutomationSummary }>("/api/automations", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        title,
+        prompt,
+        kind: elements.automationKind.value,
+        intervalMs: readAutomationIntervalMs(),
+      }),
+    });
+    elements.automationHelp.textContent = "Automation created. It will run locally when due.";
+    await loadAutomations();
+  } catch (error) {
+    elements.automationHelp.textContent = errorToMessage(error, "Failed to create automation.");
+  } finally {
+    elements.automationSaveButton.disabled = false;
+  }
+}
+
+async function runAutomationTick(): Promise<void> {
+  elements.automationTickButton.disabled = true;
+  try {
+    const payload = await apiJson<{ runs: AutomationRunSummary[] }>("/api/automations/tick", { method: "POST" });
+    elements.automationHelp.textContent = `Ran ${payload.runs.length} due automation${payload.runs.length === 1 ? "" : "s"}.`;
+    await loadAutomations();
+    await loadAutomationRuns();
+    await loadApprovals();
+    await loadArtifacts();
+  } catch (error) {
+    elements.automationHelp.textContent = errorToMessage(error, "Failed to run due automations.");
+  } finally {
+    elements.automationTickButton.disabled = false;
+  }
+}
+
+async function handleAutomationAction(automationId: string, action: string): Promise<void> {
+  try {
+    if (action === "delete") {
+      await apiJson(`/api/automations/${encodeURIComponent(automationId)}`, { method: "DELETE" });
+    } else {
+      await apiJson(`/api/automations/${encodeURIComponent(automationId)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ status: action === "pause" ? "paused" : "active" }),
+      });
+    }
+    await loadAutomations();
+  } catch (error) {
+    elements.automationHelp.textContent = errorToMessage(error, "Failed to update automation.");
+  }
+}
+
+function renderAutomations(): void {
+  if (state.automations.length === 0) {
+    elements.automationList.replaceChildren(createListItem("No automations in this workspace yet."));
+    return;
+  }
+
+  elements.automationList.replaceChildren(
+    ...state.automations.map((automation) => {
+      const item = document.createElement("li");
+      const title = document.createElement("div");
+      const pauseButton = document.createElement("button");
+      const deleteButton = document.createElement("button");
+
+      title.className = "list-button";
+      title.textContent = `${automation.title} / ${automation.kind} / ${automation.status} / next ${automation.nextRunAt ? formatDate(automation.nextRunAt) : "none"}`;
+      pauseButton.type = "button";
+      pauseButton.className = "secondary-button";
+      pauseButton.dataset.automationId = automation.id;
+      pauseButton.dataset.automationAction = automation.status === "active" ? "pause" : "resume";
+      pauseButton.textContent = automation.status === "active" ? "Pause" : "Resume";
+      deleteButton.type = "button";
+      deleteButton.className = "secondary-button";
+      deleteButton.dataset.automationId = automation.id;
+      deleteButton.dataset.automationAction = "delete";
+      deleteButton.textContent = "Delete";
+      item.append(title, pauseButton, deleteButton);
+      return item;
+    }),
+  );
+}
+
+function renderAutomationRuns(): void {
+  if (state.automationRuns.length === 0) {
+    elements.automationRunList.replaceChildren(createListItem("No automation runs yet."));
+    elements.automationRunHelp.textContent = "Run due automations to create local proactive results.";
+    return;
+  }
+
+  elements.automationRunList.replaceChildren(
+    ...state.automationRuns.map((run) => createActionListItem({
+      id: run.id,
+      idName: "runId",
+      title: run.status,
+      meta: `${run.result ?? "No result yet"} / ${formatDate(run.startedAt)}`,
+      pressed: false,
+      source: run.status,
+    })),
+  );
+  elements.automationRunHelp.textContent = `${state.automationRuns.length} automation run${state.automationRuns.length === 1 ? "" : "s"} recorded.`;
+}
+
 async function openRun(runId: string): Promise<void> {
   if (!runId) return;
 
@@ -1461,6 +1655,11 @@ function toExecutorChoice(value: string): SpaceDemoExecutorChoice {
 
 function readTimeoutMs(): number | undefined {
   const value = Number.parseInt(elements.executorTimeoutInput.value, 10);
+  return Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function readAutomationIntervalMs(): number | undefined {
+  const value = Number.parseInt(elements.automationIntervalInput.value, 10);
   return Number.isFinite(value) && value > 0 ? value : undefined;
 }
 

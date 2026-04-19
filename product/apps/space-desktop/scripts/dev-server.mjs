@@ -15,6 +15,7 @@ const productRoot = resolve(appRoot, "../..");
 const publicRoot = join(appRoot, "public");
 const port = Number.parseInt(process.env.PORT ?? "5173", 10);
 const executorTimeoutMs = Number.parseInt(process.env.AI_SPACE_EXECUTOR_TIMEOUT_MS ?? "60000", 10);
+const automationTickMs = Number.parseInt(process.env.AI_SPACE_AUTOMATION_TICK_MS ?? "1000", 10);
 const codexCommand = process.env.AI_SPACE_CODEX_COMMAND;
 const claudeCommand = process.env.AI_SPACE_CLAUDE_COMMAND;
 const storageRoot = resolve(process.env.AI_SPACE_STORAGE_DIR ?? join(homedir(), ".ai_os", "space-demo"));
@@ -52,6 +53,7 @@ await mkdir(storageRoot, { recursive: true });
 let processRunner;
 let appStore;
 const runSessions = new Map();
+let automationInterval;
 
 async function handleRequest(request, response) {
   const requestUrl = new URL(request.url ?? "/", "http://localhost");
@@ -104,6 +106,36 @@ async function handleRequest(request, response) {
 
   if (request.method === "GET" && pathname === "/api/approvals") {
     await handleListApprovals(response);
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/automations") {
+    await handleListAutomations(response);
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/automations") {
+    await handleCreateAutomation(request, response);
+    return;
+  }
+
+  if (request.method === "PATCH" && isAutomationPath(pathname)) {
+    await handleUpdateAutomation(request, response, automationIdFromPath(pathname));
+    return;
+  }
+
+  if (request.method === "DELETE" && isAutomationPath(pathname)) {
+    await handleDeleteAutomation(response, automationIdFromPath(pathname));
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/automations/tick") {
+    await handleAutomationTick(response);
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/automation-runs") {
+    await handleListAutomationRuns(response);
     return;
   }
 
@@ -325,6 +357,58 @@ async function handleDeleteArtifact(response, artifactId) {
 
 async function handleListApprovals(response) {
   writeJson(response, 200, appStore.listApprovals(appStore.getSetting("activeWorkspaceId")));
+}
+
+async function handleListAutomations(response) {
+  writeJson(response, 200, appStore.listAutomations(appStore.getSetting("activeWorkspaceId")));
+}
+
+async function handleCreateAutomation(request, response) {
+  try {
+    const body = await readJsonBody(request);
+    const automation = appStore.createAutomation({
+      title: readRequiredString(body.title, "title"),
+      kind: readAutomationKind(body.kind),
+      prompt: readRequiredString(body.prompt, "prompt"),
+      intervalMs: readOptionalPositiveNumber(body.intervalMs) ?? defaultAutomationIntervalMs(body.kind),
+      workspaceId: appStore.getSetting("activeWorkspaceId"),
+      nextRunAt: readOptionalDateString(body.nextRunAt) ?? nowIso(),
+    });
+
+    writeJson(response, 200, { automation });
+  } catch (error) {
+    writeJson(response, 400, { error: sanitizeErrorMessage(error) });
+  }
+}
+
+async function handleUpdateAutomation(request, response, automationId) {
+  try {
+    const body = await readJsonBody(request);
+    const automation = appStore.updateAutomation(automationId, {
+      title: readOptionalString(body.title),
+      prompt: readOptionalString(body.prompt),
+      status: readOptionalAutomationStatus(body.status),
+      intervalMs: readOptionalPositiveNumber(body.intervalMs),
+      nextRunAt: readOptionalDateString(body.nextRunAt),
+    });
+    writeJson(response, 200, { automation });
+  } catch (error) {
+    writeJson(response, 400, { error: sanitizeErrorMessage(error) });
+  }
+}
+
+async function handleDeleteAutomation(response, automationId) {
+  appStore.deleteAutomation(automationId);
+  writeJson(response, 200, appStore.listAutomations(appStore.getSetting("activeWorkspaceId")));
+}
+
+async function handleAutomationTick(response) {
+  const runs = await runDueAutomations();
+  writeJson(response, 200, { runs });
+}
+
+async function handleListAutomationRuns(response) {
+  writeJson(response, 200, appStore.listAutomationRuns(appStore.getSetting("activeWorkspaceId")));
 }
 
 async function handleListRuns(response) {
@@ -603,6 +687,106 @@ async function handleRunRequest(request, response) {
   } catch (error) {
     writeJson(response, 400, { error: sanitizeErrorMessage(error) });
   }
+}
+
+async function runDueAutomations() {
+  const due = appStore.listDueAutomations(nowIso());
+  const runs = [];
+
+  for (const automation of due) {
+    runs.push(await runAutomation(automation));
+  }
+
+  return runs;
+}
+
+async function runAutomation(automation) {
+  const run = appStore.createAutomationRun({
+    automationId: automation.id,
+    workspaceId: automation.workspaceId,
+    status: "running",
+    startedAt: nowIso(),
+  });
+  const workspace = automation.workspaceId ? appStore.getWorkspace(automation.workspaceId) : undefined;
+  const requirement = assessRunApproval({
+    goal: automation.prompt,
+    executorChoice: "mock",
+    workspacePath: workspace?.path,
+    trustLevel: normalizeWorkspaceTrustLevel(workspace?.trustLevel),
+  });
+
+  if (requirement && !requirement.autoDecision) {
+    appStore.createApproval({
+      id: `approval-${randomUUID()}`,
+      runId: run.id,
+      workspaceId: automation.workspaceId,
+      executorChoice: "automation",
+      category: requirement.category,
+      riskLevel: requirement.riskLevel,
+      reason: `Automation requires approval: ${requirement.reason}`,
+      requestedAction: requirement.requestedAction,
+      status: "pending",
+    });
+    const waiting = appStore.updateAutomationRun(run.id, {
+      status: "waiting-approval",
+      result: `Waiting for approval: ${requirement.category} / ${requirement.riskLevel}`,
+      completedAt: nowIso(),
+    });
+    appStore.scheduleNextAutomation(automation, "waiting-approval");
+    return waiting;
+  }
+
+  if (requirement?.autoDecision === "grant") {
+    const approvalId = `approval-${randomUUID()}`;
+    appStore.createApproval({
+      id: approvalId,
+      runId: run.id,
+      workspaceId: automation.workspaceId,
+      executorChoice: "automation",
+      category: requirement.category,
+      riskLevel: requirement.riskLevel,
+      reason: `Automation auto-approved: ${requirement.reason}`,
+      requestedAction: requirement.requestedAction,
+      status: "pending",
+    });
+    appStore.resolveApproval(approvalId, {
+      status: "granted",
+      decision: "grant",
+      note: "Auto-granted automation by trusted local workspace rule.",
+    });
+  }
+
+  const result = createAutomationResult(automation);
+  const artifact = appStore.createArtifact({
+    title: `Automation result: ${automation.title}`,
+    kind: "report",
+    content: result,
+    workspaceId: automation.workspaceId,
+    source: "automation",
+  });
+  const completed = appStore.updateAutomationRun(run.id, {
+    status: "completed",
+    result,
+    artifactId: artifact.id,
+    completedAt: nowIso(),
+  });
+
+  appStore.scheduleNextAutomation(automation, "completed");
+  return completed;
+}
+
+function createAutomationResult(automation) {
+  return [
+    `# ${automation.title}`,
+    "",
+    `Kind: ${automation.kind}`,
+    `Prompt: ${automation.prompt}`,
+    "",
+    "Result:",
+    automation.kind === "heartbeat"
+      ? "Heartbeat follow-up is ready for review."
+      : "Local automation ran and recorded this result.",
+  ].join("\n");
 }
 
 async function listExecutorStatuses() {
@@ -1202,6 +1386,14 @@ function runIdFromPath(pathname) {
   return decodeURIComponent(pathname.split("/")[3] ?? "");
 }
 
+function isAutomationPath(pathname) {
+  return /^\/api\/automations\/[^/]+$/.test(pathname);
+}
+
+function automationIdFromPath(pathname) {
+  return decodeURIComponent(pathname.split("/")[3] ?? "");
+}
+
 function isThreadPath(pathname) {
   return /^\/api\/threads\/[^/]+$/.test(pathname);
 }
@@ -1229,6 +1421,40 @@ function readOptionalPositiveNumber(value) {
     throw new Error("timeoutMs must be a positive number.");
   }
   return value;
+}
+
+function readOptionalDateString(value) {
+  if (typeof value !== "string" || value.trim().length === 0) return undefined;
+  const trimmed = value.trim();
+  const date = new Date(trimmed);
+  if (Number.isNaN(date.getTime())) throw new Error("Date value must be parseable.");
+  return date.toISOString();
+}
+
+function readAutomationKind(value) {
+  switch (value) {
+    case "one-off":
+    case "scheduled":
+    case "heartbeat":
+      return value;
+    default:
+      throw new Error("Unsupported automation kind.");
+  }
+}
+
+function readOptionalAutomationStatus(value) {
+  if (value === undefined) return undefined;
+  switch (value) {
+    case "active":
+    case "paused":
+      return value;
+    default:
+      throw new Error("Unsupported automation status.");
+  }
+}
+
+function defaultAutomationIntervalMs(kind) {
+  return kind === "heartbeat" ? 30_000 : 60_000;
 }
 
 function titleFromMessage(currentTitle, message) {
@@ -1337,6 +1563,29 @@ class SqliteAppStore {
         created_at TEXT NOT NULL,
         resolved_at TEXT,
         note TEXT
+      );
+      CREATE TABLE IF NOT EXISTS automations (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        prompt TEXT NOT NULL,
+        status TEXT NOT NULL,
+        workspace_id TEXT,
+        interval_ms INTEGER,
+        next_run_at TEXT,
+        last_run_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS automation_runs (
+        id TEXT PRIMARY KEY,
+        automation_id TEXT NOT NULL,
+        workspace_id TEXT,
+        status TEXT NOT NULL,
+        result TEXT,
+        artifact_id TEXT,
+        started_at TEXT NOT NULL,
+        completed_at TEXT
       );
     `);
     this.addColumnIfMissing("threads", "workspace_id", "TEXT");
@@ -1751,6 +2000,138 @@ class SqliteAppStore {
     return { approvals: rows.map(approvalRowToSummary) };
   }
 
+  createAutomation(input) {
+    const id = randomUUID();
+    const timestamp = nowIso();
+    this.db.prepare(`
+      INSERT INTO automations (
+        id, title, kind, prompt, status, workspace_id, interval_ms, next_run_at, last_run_at, created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      input.title,
+      input.kind,
+      input.prompt,
+      "active",
+      input.workspaceId ?? null,
+      input.intervalMs ?? null,
+      input.nextRunAt ?? timestamp,
+      null,
+      timestamp,
+      timestamp,
+    );
+    return this.getAutomation(id);
+  }
+
+  updateAutomation(id, input) {
+    const current = this.getAutomation(id);
+    if (!current) throw new Error("Automation not found.");
+    this.db.prepare(`
+      UPDATE automations
+      SET title = ?, prompt = ?, status = ?, interval_ms = ?, next_run_at = COALESCE(?, next_run_at), updated_at = ?
+      WHERE id = ?
+    `).run(
+      input.title ?? current.title,
+      input.prompt ?? current.prompt,
+      input.status ?? current.status,
+      input.intervalMs ?? current.intervalMs ?? null,
+      input.nextRunAt ?? null,
+      nowIso(),
+      id,
+    );
+    return this.getAutomation(id);
+  }
+
+  deleteAutomation(id) {
+    this.db.prepare("DELETE FROM automations WHERE id = ?").run(id);
+  }
+
+  getAutomation(id) {
+    const row = this.db.prepare("SELECT * FROM automations WHERE id = ?").get(id);
+    return row ? automationRowToSummary(row) : undefined;
+  }
+
+  listAutomations(workspaceId) {
+    const rows = workspaceId
+      ? this.db.prepare("SELECT * FROM automations WHERE workspace_id = ? ORDER BY updated_at DESC").all(workspaceId)
+      : this.db.prepare("SELECT * FROM automations ORDER BY updated_at DESC").all();
+    return { automations: rows.map(automationRowToSummary) };
+  }
+
+  listDueAutomations(now) {
+    return this.db.prepare(`
+      SELECT * FROM automations
+      WHERE status = 'active'
+        AND next_run_at IS NOT NULL
+        AND next_run_at <= ?
+      ORDER BY next_run_at ASC
+      LIMIT 10
+    `).all(now).map(automationRowToSummary);
+  }
+
+  scheduleNextAutomation(automation, runStatus) {
+    const timestamp = nowIso();
+    let nextRunAt = null;
+    let status = automation.status;
+
+    if (automation.kind === "one-off") {
+      status = "paused";
+    } else if (runStatus === "waiting-approval") {
+      status = "paused";
+    } else {
+      nextRunAt = new Date(Date.now() + (automation.intervalMs ?? defaultAutomationIntervalMs(automation.kind))).toISOString();
+    }
+
+    this.db.prepare(`
+      UPDATE automations
+      SET status = ?, next_run_at = ?, last_run_at = ?, updated_at = ?
+      WHERE id = ?
+    `).run(status, nextRunAt, timestamp, timestamp, automation.id);
+    return this.getAutomation(automation.id);
+  }
+
+  createAutomationRun(input) {
+    const id = randomUUID();
+    this.db.prepare(`
+      INSERT INTO automation_runs (
+        id, automation_id, workspace_id, status, result, artifact_id, started_at, completed_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      input.automationId,
+      input.workspaceId ?? null,
+      input.status,
+      input.result ?? null,
+      input.artifactId ?? null,
+      input.startedAt ?? nowIso(),
+      input.completedAt ?? null,
+    );
+    return this.getAutomationRun(id);
+  }
+
+  updateAutomationRun(id, input) {
+    this.db.prepare(`
+      UPDATE automation_runs
+      SET status = ?, result = COALESCE(?, result), artifact_id = COALESCE(?, artifact_id), completed_at = COALESCE(?, completed_at)
+      WHERE id = ?
+    `).run(input.status, input.result ?? null, input.artifactId ?? null, input.completedAt ?? null, id);
+    return this.getAutomationRun(id);
+  }
+
+  getAutomationRun(id) {
+    const row = this.db.prepare("SELECT * FROM automation_runs WHERE id = ?").get(id);
+    return row ? automationRunRowToSummary(row) : undefined;
+  }
+
+  listAutomationRuns(workspaceId) {
+    const rows = workspaceId
+      ? this.db.prepare("SELECT * FROM automation_runs WHERE workspace_id = ? ORDER BY started_at DESC").all(workspaceId)
+      : this.db.prepare("SELECT * FROM automation_runs ORDER BY started_at DESC").all();
+    return { runs: rows.map(automationRunRowToSummary) };
+  }
+
   recordRunFromDemo(request, state) {
     const runId = state.summary?.runId ?? randomUUID();
     const timestamp = nowIso();
@@ -1882,6 +2263,35 @@ function approvalRowToSummary(row) {
     requestedAt: row.created_at,
     ...(row.resolved_at ? { resolvedAt: row.resolved_at } : {}),
     ...(row.note ? { note: row.note } : {}),
+  };
+}
+
+function automationRowToSummary(row) {
+  return {
+    id: row.id,
+    title: row.title,
+    kind: row.kind,
+    prompt: row.prompt,
+    status: row.status,
+    ...(row.workspace_id ? { workspaceId: row.workspace_id } : {}),
+    ...(row.interval_ms !== null && row.interval_ms !== undefined ? { intervalMs: Number(row.interval_ms) } : {}),
+    ...(row.next_run_at ? { nextRunAt: row.next_run_at } : {}),
+    ...(row.last_run_at ? { lastRunAt: row.last_run_at } : {}),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function automationRunRowToSummary(row) {
+  return {
+    id: row.id,
+    automationId: row.automation_id,
+    ...(row.workspace_id ? { workspaceId: row.workspace_id } : {}),
+    status: row.status,
+    ...(row.result ? { result: row.result } : {}),
+    ...(row.artifact_id ? { artifactId: row.artifact_id } : {}),
+    startedAt: row.started_at,
+    ...(row.completed_at ? { completedAt: row.completed_at } : {}),
   };
 }
 
@@ -2344,6 +2754,11 @@ class NotFoundError extends Error {}
 
 processRunner = new NodeProcessRunner(productRoot, executorTimeoutMs);
 appStore = new SqliteAppStore(join(storageRoot, "app.db"), createSecretStore(storageRoot));
+automationInterval = setInterval(() => {
+  void runDueAutomations().catch((error) => {
+    process.stderr.write(`Automation tick failed: ${sanitizeErrorMessage(error)}\n`);
+  });
+}, automationTickMs);
 
 const server = createServer(async (request, response) => {
   try {
@@ -2353,6 +2768,10 @@ const server = createServer(async (request, response) => {
     response.writeHead(status, { "content-type": "text/plain; charset=utf-8" });
     response.end(status === 404 ? "Not found" : sanitizeErrorMessage(error));
   }
+});
+
+server.on("close", () => {
+  if (automationInterval) clearInterval(automationInterval);
 });
 
 server.listen(port, "127.0.0.1", () => {

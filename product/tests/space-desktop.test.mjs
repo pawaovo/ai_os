@@ -139,13 +139,14 @@ test("createInitialSpaceDemoState exposes the visible local demo shell", () => {
   assert.equal(state.events[0].type, "space.ready");
 });
 
-test("space desktop V0.5 page exposes approval and trust controls", async () => {
+test("space desktop V0.6 page exposes automation controls", async () => {
   const html = await readFile(resolve(productRoot, "apps/space-desktop/public/index.html"), "utf8");
   const styles = await readFile(resolve(productRoot, "apps/space-desktop/public/styles.css"), "utf8");
 
   assert.doesNotMatch(html, /data-layout="v0\.3-workbench"/);
   assert.doesNotMatch(html, /data-layout="v0\.4-executor-workbench"/);
-  assert.match(html, /data-layout="v0\.5-approval-trust-workbench"/);
+  assert.doesNotMatch(html, /data-layout="v0\.5-approval-trust-workbench"/);
+  assert.match(html, /data-layout="v0\.6-automation-workbench"/);
   assert.match(html, /id="workspace-select"/);
   assert.match(html, /id="workspace-trust-level"/);
   assert.match(html, /id="active-workspace-label"/);
@@ -161,6 +162,11 @@ test("space desktop V0.5 page exposes approval and trust controls", async () => 
   assert.match(html, /id="approval-grant-button"/);
   assert.match(html, /id="approval-reject-button"/);
   assert.match(html, /id="approval-history-list"/);
+  assert.match(html, /id="automation-form"/);
+  assert.match(html, /id="automation-kind"/);
+  assert.match(html, /id="automation-tick-button"/);
+  assert.match(html, /id="automation-list"/);
+  assert.match(html, /id="automation-run-list"/);
   assert.match(html, /id="run-history-list"/);
   assert.match(html, /id="artifact-select"/);
   assert.match(html, /id="run-artifact-preview"/);
@@ -604,6 +610,92 @@ test("space desktop V0.5 run workflow records approval history and trust decisio
     assert.equal(autoApproval.status, "granted");
     assert.equal(autoApproval.decision, "grant");
     assert.match(autoApproval.note, /Auto-granted/);
+  } finally {
+    await appServer.stop();
+    await rm(storageDir, { recursive: true, force: true });
+  }
+});
+
+test("space desktop V0.6 automations run locally and respect approvals", async () => {
+  const storageDir = await mkdtemp(`${tmpdir()}/ai-os-v06-`);
+  const appPort = await getAvailablePort();
+  const appServer = startSpaceDesktopServer({
+    port: appPort,
+    storageDir,
+  });
+
+  try {
+    await waitForHttp(`http://127.0.0.1:${appPort}/`);
+
+    const workspace = await postJson(`http://127.0.0.1:${appPort}/api/workspaces`, {
+      name: "V0.6 Workspace",
+      path: storageDir,
+    });
+
+    const reminder = await postJson(`http://127.0.0.1:${appPort}/api/automations`, {
+      title: "Review reminder",
+      kind: "one-off",
+      prompt: "remind me to review this workspace",
+      intervalMs: 1000,
+    });
+    assert.equal(reminder.automation.kind, "one-off");
+
+    const heartbeat = await postJson(`http://127.0.0.1:${appPort}/api/automations`, {
+      title: "Heartbeat check",
+      kind: "heartbeat",
+      prompt: "heartbeat check workspace status",
+      intervalMs: 1000,
+    });
+    assert.equal(heartbeat.automation.kind, "heartbeat");
+
+    const tick = await postJson(`http://127.0.0.1:${appPort}/api/automations/tick`, {});
+    assert.equal(tick.runs.length >= 2, true);
+    const automationRuns = await getJson(`http://127.0.0.1:${appPort}/api/automation-runs`);
+    assert.equal(automationRuns.runs.some((run) => run.status === "completed"), true);
+    assert.equal(automationRuns.runs.some((run) => run.automationId === reminder.automation.id), true);
+
+    const artifacts = await getJson(`http://127.0.0.1:${appPort}/api/artifacts`);
+    assert.equal(artifacts.artifacts.some((artifact) => artifact.source === "automation"), true);
+
+    const paused = await patchJson(`http://127.0.0.1:${appPort}/api/automations/${heartbeat.automation.id}`, {
+      status: "paused",
+    });
+    assert.equal(paused.automation.status, "paused");
+    const resumed = await patchJson(`http://127.0.0.1:${appPort}/api/automations/${heartbeat.automation.id}`, {
+      status: "active",
+    });
+    assert.equal(resumed.automation.status, "active");
+
+    await postJson(`http://127.0.0.1:${appPort}/api/automations`, {
+      title: "Risky automation",
+      kind: "scheduled",
+      prompt: "run npm install command",
+      intervalMs: 1000,
+    });
+    const riskyTick = await postJson(`http://127.0.0.1:${appPort}/api/automations/tick`, {});
+    assert.equal(riskyTick.runs.some((run) => run.status === "waiting-approval"), true);
+    const approvals = await getJson(`http://127.0.0.1:${appPort}/api/approvals`);
+    assert.equal(approvals.approvals.some((approval) => approval.executorChoice === "automation" && approval.category === "shell-command"), true);
+
+    await patchJson(`http://127.0.0.1:${appPort}/api/workspaces/${workspace.workspace.id}`, {
+      name: "V0.6 Workspace",
+      path: storageDir,
+      trustLevel: "trusted-local-writes",
+    });
+    await postJson(`http://127.0.0.1:${appPort}/api/automations`, {
+      title: "Trusted automation",
+      kind: "scheduled",
+      prompt: "edit a local automation note",
+      intervalMs: 1000,
+    });
+    const trustedTick = await postJson(`http://127.0.0.1:${appPort}/api/automations/tick`, {});
+    assert.equal(trustedTick.runs.some((run) => run.status === "completed"), true);
+    const trustedApprovals = await getJson(`http://127.0.0.1:${appPort}/api/approvals`);
+    assert.equal(trustedApprovals.approvals.some((approval) => approval.executorChoice === "automation" && /Auto-granted automation/.test(approval.note ?? "")), true);
+
+    await fetch(`http://127.0.0.1:${appPort}/api/automations/${heartbeat.automation.id}`, { method: "DELETE" });
+    const automations = await getJson(`http://127.0.0.1:${appPort}/api/automations`);
+    assert.equal(automations.automations.some((automation) => automation.id === heartbeat.automation.id), false);
   } finally {
     await appServer.stop();
     await rm(storageDir, { recursive: true, force: true });

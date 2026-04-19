@@ -15,15 +15,15 @@
     </script>
   </head>
   <body>
-    <main class="space-workbench" data-layout="v0.5-approval-trust-workbench">
+    <main class="space-workbench" data-layout="v0.6-automation-workbench">
       <header class="workbench-hero" aria-labelledby="app-title">
         <div>
-          <p class="eyebrow">AI OS / V0.5 approval and trust</p>
-          <h1 id="app-title">Trust Workbench</h1>
+          <p class="eyebrow">AI OS / V0.6 automation and proactive assistant</p>
+          <h1 id="app-title">Automation Workbench</h1>
         </div>
         <p class="hero-copy">
-          Inspect risky actions before they run, tune local workspace trust, record decisions,
-          and keep executor activity auditable.
+          Create local reminders, scheduled tasks, and heartbeat follow-ups while risky
+          automation actions continue through approval and trust controls.
         </p>
         <span id="active-workspace-label" class="status-pill" data-phase="idle">no workspace</span>
       </header>
@@ -79,6 +79,42 @@
             </div>
             <p id="thread-help" class="inline-help">Threads are scoped to the selected workspace.</p>
           </div>
+        </section>
+
+        <section class="automation-panel panel" aria-labelledby="automation-title">
+          <div class="panel-heading">
+            <p class="eyebrow">Automation</p>
+            <span class="mini-label">local scheduler</span>
+          </div>
+          <h2 id="automation-title">Proactive Tasks</h2>
+          <form id="automation-form" class="stack-form">
+            <label>
+              Title
+              <input id="automation-title-input" value="Workspace Follow-up" autocomplete="off" />
+            </label>
+            <label>
+              Kind
+              <select id="automation-kind">
+                <option value="one-off" selected>One-off reminder</option>
+                <option value="scheduled">Scheduled interval</option>
+                <option value="heartbeat">Heartbeat follow-up</option>
+              </select>
+            </label>
+            <label>
+              Interval (ms)
+              <input id="automation-interval-input" type="number" min="1000" step="1000" value="60000" />
+            </label>
+            <label>
+              Prompt
+              <textarea id="automation-prompt" rows="4">Remind me to review this workspace.</textarea>
+            </label>
+            <div class="button-grid">
+              <button id="automation-save-button" type="submit">Create Automation</button>
+              <button id="automation-tick-button" type="button" class="secondary-button">Run Due Now</button>
+            </div>
+          </form>
+          <ul id="automation-list" class="action-list"></ul>
+          <p id="automation-help" class="inline-help">Automations run locally and use the active workspace.</p>
         </section>
       </aside>
 
@@ -254,6 +290,16 @@
           <h2 id="approval-history-title">Trust Decisions</h2>
           <ul id="approval-history-list" class="action-list"></ul>
           <p id="approval-history-help" class="inline-help">Risk decisions in the active workspace appear here.</p>
+        </section>
+
+        <section class="automation-history-panel panel" aria-labelledby="automation-history-title">
+          <div class="panel-heading">
+            <p class="eyebrow">Automation Runs</p>
+            <span class="mini-label">proactive</span>
+          </div>
+          <h2 id="automation-history-title">Run History</h2>
+          <ul id="automation-run-list" class="action-list"></ul>
+          <p id="automation-run-help" class="inline-help">Scheduled and heartbeat results appear here.</p>
         </section>
 
         <section class="artifact-panel panel" aria-labelledby="artifact-title">
