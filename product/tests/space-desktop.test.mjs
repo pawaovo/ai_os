@@ -336,9 +336,17 @@ test("space desktop dev server persists providers, threads, and messages without
     assert.equal(provider.configured, true);
     assert.equal(provider.provider.apiKey, undefined);
 
+    const workspace = await postJson(`http://127.0.0.1:${appPort}/api/workspaces`, {
+      name: "Persistent Workspace",
+      path: "/tmp/ai-os-workspace",
+    });
+    assert.equal(workspace.workspace.name, "Persistent Workspace");
+
     const thread = await postJson(`http://127.0.0.1:${appPort}/api/threads`, {
       title: "Persistent Thread",
     });
+    assert.equal(thread.thread.workspaceId, workspace.workspace.id);
+
     await postJson(`http://127.0.0.1:${appPort}/api/threads/${thread.thread.id}/messages`, {
       message: "hello persistent server",
     });
@@ -349,6 +357,20 @@ test("space desktop dev server persists providers, threads, and messages without
 
     assert.equal(failedChat.ok, false);
     assert.equal(typeof failedChat.payload.error, "string");
+
+    const manualArtifact = await postJson(`http://127.0.0.1:${appPort}/api/artifacts`, {
+      title: "Manual Artifact",
+      content: "# Manual artifact",
+      workspaceId: workspace.workspace.id,
+      threadId: thread.thread.id,
+      source: "manual",
+    });
+    assert.equal(manualArtifact.artifact.title, "Manual Artifact");
+
+    await postJson(`http://127.0.0.1:${appPort}/api/demo/run`, {
+      goal: "persist run history",
+      executorChoice: "mock",
+    });
 
     await appServer.stop();
     restartedServer = startSpaceDesktopServer({
@@ -363,8 +385,14 @@ test("space desktop dev server persists providers, threads, and messages without
     assert.equal(providers.providers[0].name, "Persistent Mock Provider");
     assert.equal(providers.providers[0].apiKey, undefined);
 
+    const workspaces = await getJson(`http://127.0.0.1:${appPort}/api/workspaces`);
+    assert.equal(workspaces.workspaces.length, 1);
+    assert.equal(workspaces.workspaces[0].name, "Persistent Workspace");
+    assert.equal(workspaces.activeWorkspaceId, workspace.workspace.id);
+
     const messages = await getJson(`http://127.0.0.1:${appPort}/api/threads/${thread.thread.id}/messages`);
     assert.equal(messages.thread.title, "Persistent Thread");
+    assert.equal(messages.thread.workspaceId, workspace.workspace.id);
     assert.deepEqual(
       messages.messages.map((message) => `${message.role}:${message.content}`),
       [
@@ -374,6 +402,20 @@ test("space desktop dev server persists providers, threads, and messages without
         "system:OpenAI-compatible chat request failed with HTTP 500.",
       ],
     );
+
+    const artifacts = await getJson(`http://127.0.0.1:${appPort}/api/artifacts`);
+    assert.equal(artifacts.artifacts.some((artifact) => artifact.title === "Manual Artifact"), true);
+    assert.equal(artifacts.artifacts.some((artifact) => artifact.source === "chat"), true);
+    assert.equal(artifacts.artifacts.some((artifact) => artifact.source === "run"), true);
+
+    const artifactDetail = await getJson(`http://127.0.0.1:${appPort}/api/artifacts/${manualArtifact.artifact.id}`);
+    assert.equal(artifactDetail.artifact.content, "# Manual artifact");
+
+    const runs = await getJson(`http://127.0.0.1:${appPort}/api/runs`);
+    assert.equal(runs.runs.length, 1);
+    assert.equal(runs.runs[0].goal, "persist run history");
+    const runEvents = await getJson(`http://127.0.0.1:${appPort}/api/runs/${runs.runs[0].id}/events`);
+    assert.equal(runEvents.events.length > 0, true);
 
     const dbBytes = await readFile(`${storageDir}/app.db`);
     assert.equal(dbBytes.includes(Buffer.from("sk-persistent-secret")), false);

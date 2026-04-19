@@ -41,6 +41,61 @@ async function handleRequest(request, response) {
   const requestUrl = new URL(request.url ?? "/", "http://localhost");
   const pathname = requestUrl.pathname;
 
+  if (request.method === "GET" && pathname === "/api/workspaces") {
+    await handleListWorkspaces(response);
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/workspaces") {
+    await handleCreateWorkspace(request, response);
+    return;
+  }
+
+  if (request.method === "PATCH" && isWorkspacePath(pathname)) {
+    await handleUpdateWorkspace(request, response, workspaceIdFromPath(pathname));
+    return;
+  }
+
+  if (request.method === "DELETE" && isWorkspacePath(pathname)) {
+    await handleDeleteWorkspace(response, workspaceIdFromPath(pathname));
+    return;
+  }
+
+  if (request.method === "PATCH" && pathname === "/api/settings/workspace-selection") {
+    await handleWorkspaceSelection(request, response);
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/artifacts") {
+    await handleListArtifacts(response);
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/artifacts") {
+    await handleCreateArtifact(request, response);
+    return;
+  }
+
+  if (request.method === "GET" && isArtifactPath(pathname)) {
+    await handleGetArtifact(response, artifactIdFromPath(pathname));
+    return;
+  }
+
+  if (request.method === "DELETE" && isArtifactPath(pathname)) {
+    await handleDeleteArtifact(response, artifactIdFromPath(pathname));
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/runs") {
+    await handleListRuns(response);
+    return;
+  }
+
+  if (request.method === "GET" && isRunEventsPath(pathname)) {
+    await handleRunEvents(response, runIdFromPath(pathname));
+    return;
+  }
+
   if (request.method === "GET" && pathname === "/api/providers") {
     await handleListProviders(response);
     return;
@@ -143,6 +198,79 @@ function buildProduct() {
   });
 }
 
+async function handleListWorkspaces(response) {
+  writeJson(response, 200, appStore.listWorkspaces());
+}
+
+async function handleCreateWorkspace(request, response) {
+  const body = await readJsonBody(request);
+  const workspace = appStore.createWorkspace({
+    name: readRequiredString(body.name, "name"),
+    path: readOptionalString(body.path),
+  });
+
+  writeJson(response, 200, { workspace });
+}
+
+async function handleUpdateWorkspace(request, response, workspaceId) {
+  const body = await readJsonBody(request);
+  const workspace = appStore.updateWorkspace(workspaceId, {
+    name: readOptionalString(body.name),
+    path: readOptionalString(body.path),
+  });
+
+  writeJson(response, 200, { workspace });
+}
+
+async function handleDeleteWorkspace(response, workspaceId) {
+  appStore.deleteWorkspace(workspaceId);
+  writeJson(response, 200, appStore.listWorkspaces());
+}
+
+async function handleWorkspaceSelection(request, response) {
+  const body = await readJsonBody(request);
+  const workspaceId = readRequiredString(body.workspaceId, "workspaceId");
+  appStore.setSetting("activeWorkspaceId", workspaceId);
+  writeJson(response, 200, { activeWorkspaceId: workspaceId });
+}
+
+async function handleListArtifacts(response) {
+  writeJson(response, 200, appStore.listArtifacts(appStore.getSetting("activeWorkspaceId")));
+}
+
+async function handleCreateArtifact(request, response) {
+  const body = await readJsonBody(request);
+  const artifact = appStore.createArtifact({
+    title: readRequiredString(body.title, "title"),
+    kind: readOptionalString(body.kind) ?? "markdown",
+    content: readOptionalString(body.content) ?? "",
+    path: readOptionalString(body.path),
+    workspaceId: readOptionalString(body.workspaceId) ?? appStore.getSetting("activeWorkspaceId"),
+    threadId: readOptionalString(body.threadId) ?? appStore.getSetting("activeThreadId"),
+    runId: readOptionalString(body.runId),
+    source: readOptionalString(body.source) ?? "manual",
+  });
+
+  writeJson(response, 200, { artifact });
+}
+
+async function handleGetArtifact(response, artifactId) {
+  writeJson(response, 200, { artifact: appStore.getArtifact(artifactId) });
+}
+
+async function handleDeleteArtifact(response, artifactId) {
+  appStore.deleteArtifact(artifactId);
+  writeJson(response, 200, appStore.listArtifacts(appStore.getSetting("activeWorkspaceId")));
+}
+
+async function handleListRuns(response) {
+  writeJson(response, 200, appStore.listRuns(appStore.getSetting("activeWorkspaceId")));
+}
+
+async function handleRunEvents(response, runId) {
+  writeJson(response, 200, { events: appStore.listRunEvents(runId) });
+}
+
 async function handleListProviders(response) {
   writeJson(
     response,
@@ -225,6 +353,7 @@ async function handleCreateThread(request, response) {
     title: readOptionalString(body.title) ?? "New Thread",
     providerId: readOptionalString(body.providerId) ?? activeProvider?.id,
     modelId: readOptionalString(body.modelId) ?? activeProvider?.modelId,
+    workspaceId: readOptionalString(body.workspaceId) ?? appStore.getSetting("activeWorkspaceId"),
   });
 
   writeJson(response, 200, { thread, messages: [] });
@@ -237,6 +366,7 @@ async function handleUpdateThread(request, response, threadId) {
       title: readOptionalString(body.title),
       providerId: readOptionalString(body.providerId),
       modelId: readOptionalString(body.modelId),
+      workspaceId: readOptionalString(body.workspaceId),
     }),
   });
 }
@@ -304,6 +434,14 @@ async function handleChatSendWithThread(response, body) {
       modelId: provider.modelId,
       status: "completed",
     });
+    appStore.createArtifact({
+      title: `Chat response: ${userMessage.content.slice(0, 40)}`,
+      kind: "markdown",
+      content: payload.assistantMessage,
+      workspaceId: thread.workspaceId ?? appStore.getSetting("activeWorkspaceId"),
+      threadId: thread.id,
+      source: "chat",
+    });
 
     appStore.touchThread(thread.id, titleFromMessage(thread.title, userMessage.content));
     writeJson(response, 200, {
@@ -329,7 +467,9 @@ async function handleChatSendWithThread(response, body) {
 async function handleRunRequest(request, response) {
   try {
     const runRequest = parseSpaceDemoRunRequest(await readJsonBody(request));
-    writeJson(response, 200, await runSpaceDemoRequest(runRequest, { runner: processRunner }));
+    const payload = await runSpaceDemoRequest(runRequest, { runner: processRunner });
+    appStore.recordRunFromDemo(runRequest, payload.state);
+    writeJson(response, 200, payload);
   } catch (error) {
     writeJson(response, 400, { error: sanitizeErrorMessage(error) });
   }
@@ -394,6 +534,30 @@ function providerIdFromPath(pathname) {
   return decodeURIComponent(pathname.split("/")[3] ?? "");
 }
 
+function isWorkspacePath(pathname) {
+  return /^\/api\/workspaces\/[^/]+$/.test(pathname);
+}
+
+function workspaceIdFromPath(pathname) {
+  return decodeURIComponent(pathname.split("/")[3] ?? "");
+}
+
+function isArtifactPath(pathname) {
+  return /^\/api\/artifacts\/[^/]+$/.test(pathname);
+}
+
+function artifactIdFromPath(pathname) {
+  return decodeURIComponent(pathname.split("/")[3] ?? "");
+}
+
+function isRunEventsPath(pathname) {
+  return /^\/api\/runs\/[^/]+\/events$/.test(pathname);
+}
+
+function runIdFromPath(pathname) {
+  return decodeURIComponent(pathname.split("/")[3] ?? "");
+}
+
 function isThreadPath(pathname) {
   return /^\/api\/threads\/[^/]+$/.test(pathname);
 }
@@ -449,11 +613,19 @@ class SqliteAppStore {
         updated_at TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT);
+      CREATE TABLE IF NOT EXISTS workspaces (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        path TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS threads (
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL,
         provider_id TEXT,
         model_id TEXT,
+        workspace_id TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -468,7 +640,44 @@ class SqliteAppStore {
         error TEXT,
         created_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS artifacts (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        content TEXT,
+        path TEXT,
+        workspace_id TEXT,
+        thread_id TEXT,
+        run_id TEXT,
+        source TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS runs (
+        id TEXT PRIMARY KEY,
+        goal TEXT NOT NULL,
+        executor_choice TEXT NOT NULL,
+        status TEXT NOT NULL,
+        workspace_id TEXT,
+        thread_id TEXT,
+        started_at TEXT NOT NULL,
+        completed_at TEXT
+      );
+      CREATE TABLE IF NOT EXISTS run_events (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        type TEXT NOT NULL,
+        message TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
     `);
+    this.addColumnIfMissing("threads", "workspace_id", "TEXT");
+  }
+
+  addColumnIfMissing(table, column, type) {
+    const columns = this.db.prepare(`PRAGMA table_info(${table})`).all();
+    if (columns.some((entry) => entry.name === column)) return;
+    this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
   }
 
   getSetting(key) {
@@ -481,6 +690,51 @@ class SqliteAppStore {
       VALUES (?, ?)
       ON CONFLICT(key) DO UPDATE SET value = excluded.value
     `).run(key, value);
+  }
+
+  listWorkspaces() {
+    const workspaces = this.db.prepare("SELECT * FROM workspaces ORDER BY updated_at DESC").all().map(workspaceRowToSummary);
+    const activeWorkspaceId = this.getSetting("activeWorkspaceId");
+    return { workspaces, ...(activeWorkspaceId ? { activeWorkspaceId } : {}) };
+  }
+
+  createWorkspace(input) {
+    const id = randomUUID();
+    const timestamp = nowIso();
+    this.db.prepare(`
+      INSERT INTO workspaces (id, name, path, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(id, input.name, input.path ?? null, timestamp, timestamp);
+    this.setSetting("activeWorkspaceId", id);
+    return this.getWorkspace(id);
+  }
+
+  getWorkspace(id) {
+    if (!id) return undefined;
+    const row = this.db.prepare("SELECT * FROM workspaces WHERE id = ?").get(id);
+    return row ? workspaceRowToSummary(row) : undefined;
+  }
+
+  updateWorkspace(id, input) {
+    const current = this.getWorkspace(id);
+    if (!current) throw new Error("Workspace not found.");
+    this.db.prepare(`
+      UPDATE workspaces
+      SET name = ?, path = COALESCE(?, path), updated_at = ?
+      WHERE id = ?
+    `).run(input.name ?? current.name, input.path ?? null, nowIso(), id);
+    this.setSetting("activeWorkspaceId", id);
+    return this.getWorkspace(id);
+  }
+
+  deleteWorkspace(id) {
+    this.db.prepare("DELETE FROM workspaces WHERE id = ?").run(id);
+    this.db.prepare("UPDATE threads SET workspace_id = NULL WHERE workspace_id = ?").run(id);
+    this.db.prepare("UPDATE artifacts SET workspace_id = NULL WHERE workspace_id = ?").run(id);
+    this.db.prepare("UPDATE runs SET workspace_id = NULL WHERE workspace_id = ?").run(id);
+    if (this.getSetting("activeWorkspaceId") === id) {
+      this.db.prepare("DELETE FROM app_settings WHERE key = 'activeWorkspaceId'").run();
+    }
   }
 
   async listProviders() {
@@ -568,9 +822,17 @@ class SqliteAppStore {
     const id = randomUUID();
     const timestamp = nowIso();
     this.db.prepare(`
-      INSERT INTO threads (id, title, provider_id, model_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(id, input.title ?? "New Thread", input.providerId ?? null, input.modelId ?? null, timestamp, timestamp);
+      INSERT INTO threads (id, title, provider_id, model_id, workspace_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      input.title ?? "New Thread",
+      input.providerId ?? null,
+      input.modelId ?? null,
+      input.workspaceId ?? this.getSetting("activeWorkspaceId") ?? null,
+      timestamp,
+      timestamp,
+    );
     this.setSetting("activeThreadId", id);
     return this.getThread(id);
   }
@@ -586,7 +848,11 @@ class SqliteAppStore {
       if (activeThread) return activeThread;
     }
     const activeProvider = await this.readActiveProvider();
-    return this.createThread({ providerId: activeProvider?.id, modelId: activeProvider?.modelId });
+    return this.createThread({
+      providerId: activeProvider?.id,
+      modelId: activeProvider?.modelId,
+      workspaceId: this.getSetting("activeWorkspaceId"),
+    });
   }
 
   getThread(id) {
@@ -606,9 +872,21 @@ class SqliteAppStore {
     if (!current) throw new Error("Thread not found.");
     this.db.prepare(`
       UPDATE threads
-      SET title = ?, provider_id = COALESCE(?, provider_id), model_id = COALESCE(?, model_id), updated_at = ?
+      SET
+        title = ?,
+        provider_id = COALESCE(?, provider_id),
+        model_id = COALESCE(?, model_id),
+        workspace_id = COALESCE(?, workspace_id),
+        updated_at = ?
       WHERE id = ?
-    `).run(input.title ?? current.title, input.providerId ?? null, input.modelId ?? null, nowIso(), id);
+    `).run(
+      input.title ?? current.title,
+      input.providerId ?? null,
+      input.modelId ?? null,
+      input.workspaceId ?? null,
+      nowIso(),
+      id,
+    );
     this.setSetting("activeThreadId", id);
     return this.getThread(id);
   }
@@ -648,6 +926,90 @@ class SqliteAppStore {
     );
     return messageRowToUi(this.db.prepare("SELECT * FROM messages WHERE id = ?").get(id));
   }
+
+  createArtifact(input) {
+    const id = randomUUID();
+    const timestamp = nowIso();
+    this.db.prepare(`
+      INSERT INTO artifacts (id, title, kind, content, path, workspace_id, thread_id, run_id, source, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      input.title,
+      input.kind ?? "markdown",
+      input.content ?? "",
+      input.path ?? null,
+      input.workspaceId ?? null,
+      input.threadId ?? null,
+      input.runId ?? null,
+      input.source ?? "manual",
+      timestamp,
+      timestamp,
+    );
+    return this.getArtifact(id);
+  }
+
+  getArtifact(id) {
+    const row = this.db.prepare("SELECT * FROM artifacts WHERE id = ?").get(id);
+    return row ? artifactRowToSummary(row) : undefined;
+  }
+
+  listArtifacts(workspaceId) {
+    const rows = workspaceId
+      ? this.db.prepare("SELECT * FROM artifacts WHERE workspace_id = ? ORDER BY updated_at DESC").all(workspaceId)
+      : this.db.prepare("SELECT * FROM artifacts ORDER BY updated_at DESC").all();
+    return { artifacts: rows.map(artifactRowToSummary) };
+  }
+
+  deleteArtifact(id) {
+    this.db.prepare("DELETE FROM artifacts WHERE id = ?").run(id);
+  }
+
+  recordRunFromDemo(request, state) {
+    const runId = state.summary?.runId ?? randomUUID();
+    const timestamp = nowIso();
+    const workspaceId = this.getSetting("activeWorkspaceId");
+    const threadId = this.getSetting("activeThreadId");
+
+    this.db.prepare(`
+      INSERT INTO runs (id, goal, executor_choice, status, workspace_id, thread_id, started_at, completed_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        status = excluded.status,
+        completed_at = excluded.completed_at
+    `).run(runId, request.goal, request.executorChoice, state.phase, workspaceId ?? null, threadId ?? null, timestamp, timestamp);
+
+    for (const event of state.events) {
+      this.db.prepare(`
+        INSERT INTO run_events (id, run_id, type, message, created_at)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(randomUUID(), runId, event.type, event.message, timestamp);
+    }
+
+    for (const artifact of state.artifacts) {
+      this.createArtifact({
+        title: artifact.title,
+        kind: artifact.kind,
+        content: state.artifactContents[artifact.id] ?? "",
+        path: artifact.path,
+        workspaceId,
+        threadId,
+        runId,
+        source: "run",
+      });
+    }
+  }
+
+  listRuns(workspaceId) {
+    const rows = workspaceId
+      ? this.db.prepare("SELECT * FROM runs WHERE workspace_id = ? ORDER BY started_at DESC").all(workspaceId)
+      : this.db.prepare("SELECT * FROM runs ORDER BY started_at DESC").all();
+    return { runs: rows.map(runRowToSummary) };
+  }
+
+  listRunEvents(runId) {
+    return this.db.prepare("SELECT * FROM run_events WHERE run_id = ? ORDER BY created_at ASC").all(runId).map(runEventRowToSummary);
+  }
 }
 
 function threadRowToSummary(row) {
@@ -658,8 +1020,58 @@ function threadRowToSummary(row) {
     updatedAt: row.updated_at,
     ...(row.provider_id ? { providerId: row.provider_id } : {}),
     ...(row.model_id ? { modelId: row.model_id } : {}),
+    ...(row.workspace_id ? { workspaceId: row.workspace_id } : {}),
     messageCount: Number(row.message_count ?? 0),
     ...(row.last_message_preview ? { lastMessagePreview: String(row.last_message_preview).slice(0, 120) } : {}),
+  };
+}
+
+function workspaceRowToSummary(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    ...(row.path ? { path: row.path } : {}),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function artifactRowToSummary(row) {
+  return {
+    id: row.id,
+    title: row.title,
+    kind: row.kind,
+    content: row.content ?? "",
+    ...(row.path ? { path: row.path } : {}),
+    ...(row.workspace_id ? { workspaceId: row.workspace_id } : {}),
+    ...(row.thread_id ? { threadId: row.thread_id } : {}),
+    ...(row.run_id ? { runId: row.run_id } : {}),
+    source: row.source,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function runRowToSummary(row) {
+  return {
+    id: row.id,
+    goal: row.goal,
+    executorChoice: row.executor_choice,
+    status: row.status,
+    ...(row.workspace_id ? { workspaceId: row.workspace_id } : {}),
+    ...(row.thread_id ? { threadId: row.thread_id } : {}),
+    startedAt: row.started_at,
+    ...(row.completed_at ? { completedAt: row.completed_at } : {}),
+  };
+}
+
+function runEventRowToSummary(row) {
+  return {
+    id: row.id,
+    runId: row.run_id,
+    type: row.type,
+    message: row.message,
+    createdAt: row.created_at,
   };
 }
 
