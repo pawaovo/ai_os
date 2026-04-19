@@ -342,6 +342,13 @@ test("space desktop dev server persists providers, threads, and messages without
     await postJson(`http://127.0.0.1:${appPort}/api/threads/${thread.thread.id}/messages`, {
       message: "hello persistent server",
     });
+    providerServer.mode = "fail-chat";
+    const failedChat = await postJsonAllowFailure(`http://127.0.0.1:${appPort}/api/threads/${thread.thread.id}/messages`, {
+      message: "this should fail with json",
+    });
+
+    assert.equal(failedChat.ok, false);
+    assert.equal(typeof failedChat.payload.error, "string");
 
     await appServer.stop();
     restartedServer = startSpaceDesktopServer({
@@ -360,7 +367,12 @@ test("space desktop dev server persists providers, threads, and messages without
     assert.equal(messages.thread.title, "Persistent Thread");
     assert.deepEqual(
       messages.messages.map((message) => `${message.role}:${message.content}`),
-      ["user:hello persistent server", "assistant:persistent chat ok"],
+      [
+        "user:hello persistent server",
+        "assistant:persistent chat ok",
+        "user:this should fail with json",
+        "system:OpenAI-compatible chat request failed with HTTP 500.",
+      ],
     );
 
     const dbBytes = await readFile(`${storageDir}/app.db`);
@@ -550,9 +562,18 @@ function startSpaceDesktopServer({ port, storageDir }) {
 }
 
 async function startMockOpenAiProvider() {
+  const state = {
+    mode: "ok",
+  };
   const server = createServer((request, response) => {
     if (request.url?.endsWith("/chat/completions")) {
       request.resume();
+      if (state.mode === "fail-chat") {
+        response.writeHead(500, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: "forced failure" }));
+        return;
+      }
+
       response.writeHead(200, { "content-type": "text/event-stream" });
       response.end('data: {"choices":[{"delta":{"content":"persistent chat ok"}}]}\n\n');
       return;
@@ -571,6 +592,12 @@ async function startMockOpenAiProvider() {
 
   return {
     port,
+    get mode() {
+      return state.mode;
+    },
+    set mode(value) {
+      state.mode = value;
+    },
     async stop() {
       await new Promise((resolve) => server.close(resolve));
     },
@@ -627,4 +654,20 @@ async function postJson(url, body) {
 
   assert.equal(response.ok, true);
   return response.json();
+}
+
+async function postJsonAllowFailure(url, body) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return {
+    ok: response.ok,
+    status: response.status,
+    payload: await response.json(),
+  };
 }

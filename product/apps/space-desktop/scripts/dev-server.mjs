@@ -254,7 +254,11 @@ async function handleThreadMessages(response, threadId) {
 }
 
 async function handleThreadChatSend(request, response, threadId) {
-  await handleChatSendWithThread(response, { ...(await readJsonBody(request)), threadId });
+  try {
+    await handleChatSendWithThread(response, { ...(await readJsonBody(request)), threadId });
+  } catch (error) {
+    writeJson(response, 400, { error: sanitizeErrorMessage(error) });
+  }
 }
 
 async function handleChatSend(request, response) {
