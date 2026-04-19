@@ -8,6 +8,12 @@ import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 
 const productRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const expectedHostBuildCommand = process.platform === "win32"
+  ? "cd product && npm run package:win"
+  : "cd product && npm run package:mac";
+const expectedHostOpenCommand = process.platform === "win32"
+  ? "start \"\" \"product\\build\\electron\\win-unpacked\\AI OS.exe\""
+  : `open "${process.arch === "arm64" ? "product/build/electron/mac-arm64/AI OS.app" : "product/build/electron/mac/AI OS.app"}"`;
 
 execFileSync(
   process.execPath,
@@ -142,6 +148,7 @@ test("createInitialSpaceDemoState exposes the visible local demo shell", () => {
 test("space desktop V1.0 page exposes readiness and forge controls", async () => {
   const html = await readFile(resolve(productRoot, "apps/space-desktop/public/index.html"), "utf8");
   const styles = await readFile(resolve(productRoot, "apps/space-desktop/public/styles.css"), "utf8");
+  const productReadme = await readFile(resolve(productRoot, "README.md"), "utf8");
   const readme = await readFile(resolve(productRoot, "apps/space-desktop/README.md"), "utf8");
   const packageJson = JSON.parse(await readFile(resolve(productRoot, "package.json"), "utf8"));
   const packageScript = await readFile(resolve(productRoot, "apps/space-desktop/scripts/package-macos.mjs"), "utf8");
@@ -150,6 +157,7 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   const electronConfig = await readFile(resolve(productRoot, "electron-builder.config.cjs"), "utf8");
   const electronAfterPack = await readFile(resolve(productRoot, "apps/space-desktop/scripts/after-pack-electron.mjs"), "utf8");
   const devServer = await readFile(resolve(productRoot, "apps/space-desktop/scripts/dev-server.mjs"), "utf8");
+  const browserSource = await readFile(resolve(productRoot, "apps/space-desktop/src/browser.ts"), "utf8");
 
   assert.doesNotMatch(html, /data-layout="v0\.3-workbench"/);
   assert.doesNotMatch(html, /data-layout="v0\.4-executor-workbench"/);
@@ -242,11 +250,20 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(styles, /awaiting-approval/);
   assert.match(styles, /approval-detail-grid/);
   assert.match(readme, /V1\.0 Capabilities/);
+  assert.match(readme, /Product Surfaces/);
+  assert.match(readme, /First Successful Trial/);
+  assert.match(readme, /Expected Results/);
   assert.match(readme, /Electron Install Paths/);
   assert.match(readme, /npm run package:mac/);
   assert.match(readme, /npm run package:win/);
+  assert.match(readme, /win-unpacked/);
   assert.match(readme, /product desktop shell is Electron/i);
   assert.match(readme, /not signed or notarized|notarization/);
+  assert.match(productReadme, /Current Product State/);
+  assert.match(productReadme, /Product Surfaces/);
+  assert.match(productReadme, /Expected Results When You Use It/);
+  assert.match(productReadme, /Build The Electron Desktop App/);
+  assert.match(productReadme, /win-unpacked/);
   assert.match(packageScript, /README\.md/);
   assert.equal(packageJson.main, "apps/space-desktop/electron-app/main.cjs");
   assert.equal(packageJson.scripts["package:mac"], "npm run package:electron:mac");
@@ -269,7 +286,11 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(electronConfig, /product\/node_modules\/@ai-os/);
   assert.match(devServer, /ElectronSafeStorageSecretStore/);
   assert.match(devServer, /WindowsProtectedFileSecretStore/);
+  assert.match(devServer, /resolveMacElectronAppPath/);
+  assert.match(devServer, /win-unpacked/);
   assert.match(devServer, /safeStorage/);
+  assert.match(browserSource, /Windows Packaging/);
+  assert.match(browserSource, /windowsCommand/);
   assert.match(electronAfterPack, /package\.json/);
   assert.match(electronAfterPack, /copyFile/);
 });
@@ -1025,6 +1046,10 @@ test("space desktop V1.0 readiness summarizes local setup without leaking secret
     assert.equal(initial.install.signed, false);
     assert.equal(initial.install.notarized, false);
     assert.equal(initial.install.nodeRequired, true);
+    assert.equal(initial.install.buildCommand, expectedHostBuildCommand);
+    assert.equal(initial.install.openCommand, expectedHostOpenCommand);
+    assert.equal(initial.install.windowsCommand, "cd product && npm run package:win");
+    assert.match(initial.install.note, /without the Electron desktop shell/);
     assert.equal(initial.checks.some((check) => check.id === "workspace" && check.status === "action"), true);
     assert.deepEqual(
       initial.checks.map((check) => check.id),
@@ -1076,6 +1101,9 @@ test("space desktop V1.0 readiness summarizes local setup without leaking secret
     assert.equal(ready.counts.memories, 1);
     assert.equal(ready.counts.automations, 1);
     assert.equal(ready.counts.enabledCapabilities >= 3, true);
+    assert.equal(ready.install.buildCommand, expectedHostBuildCommand);
+    assert.equal(ready.install.openCommand, expectedHostOpenCommand);
+    assert.equal(ready.install.windowsCommand, "cd product && npm run package:win");
     assert.equal(ready.checks.some((check) => check.id === "workspace" && check.status === "ready"), true);
     assert.equal(ready.checks.some((check) => check.id === "provider" && check.status === "ready"), true);
     assert.equal(ready.checks.some((check) => check.id === "memory" && check.status === "ready"), true);

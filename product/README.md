@@ -1,18 +1,36 @@
 # AI OS Product Monorepo
 
-This directory is the first real product workspace for AI OS.
+This directory hosts the current AI OS product code.
 
-The repository root above this directory is a preparation workspace that contains product documents and reference projects. Product code should live here and must not depend on files under `reference_projects/`.
+The repository root above this directory is still a preparation workspace with product docs and reference projects. Product runtime code lives here and must not depend on `reference_projects/`.
 
-## V0.1 Goal
+The current product is `AI OS Personal`: a local-first desktop assistant with `AI Space` for day-to-day use and `AI Forge` for turning proven local workflows into reusable capabilities.
 
-V0.1 proves the minimum skeleton of a general personal AI assistant:
+## Current Product State
 
-- Normal chatbot conversations.
-- Custom model providers through user supplied API URL and API key.
-- OpenAI-compatible and Anthropic-compatible provider protocols.
-- Codex and Claude Code as first-class Code Executors.
-- Space, Workspace, Thread, Mission, Run, Event, Approval, and Artifact as shared concepts.
+The current V1.0 product includes:
+
+- Electron desktop shell for macOS and Windows
+- local SQLite-backed product state
+- local secret storage through Electron `safeStorage`, macOS Keychain, or Windows protected files
+- provider-backed chat through OpenAI-compatible and Anthropic-compatible APIs
+- local workspaces, threads, runs, approvals, artifacts, automations, memory, capabilities, and Forge recipes
+- mock, Codex CLI, and Claude Code CLI executor paths
+
+## Product Surfaces
+
+- `Start`: readiness summary and recommended next actions
+- `Space`: workspace selection, trust level, and thread list
+- `Chat`: provider-backed assistant conversation
+- `Runs`: task execution, transcripts, events, approvals, and artifacts
+- `Automations`: proactive local follow-ups
+- `Artifacts`: saved outputs and notes
+- `Approvals`: audit trail and current approval request
+- `Memory`: personal or workspace context records
+- `Capabilities`: installed reusable local abilities and their permissions
+- `Forge`: convert successful runs into reusable capabilities
+- `Providers`: provider setup, doctor, and model loading
+- `Settings`: surface summary, executor status, and install guidance
 
 ## Initial Packages
 
@@ -35,9 +53,9 @@ packages/executors/executor-codex
 packages/executors/executor-claude-code
 ```
 
-`packages/companion/companion-core` is the minimal Companion boundary for V0.1. It accepts a user goal, delegates mission execution to an injected Control Plane facade, and returns a mission/run status summary. Companion code must not call executors directly.
+`packages/companion/companion-core` is the minimal Companion boundary. It accepts a user goal, delegates mission execution to an injected Control Plane facade, and returns a mission or run status summary. Companion code must not call executors directly.
 
-The adapter packages stay thin in V0.1:
+The adapter packages stay intentionally thin:
 
 ```text
 packages/model-providers/provider-openai-compatible
@@ -46,79 +64,109 @@ packages/executors/executor-codex
 packages/executors/executor-claude-code
 ```
 
-Provider adapters support mockable OpenAI-compatible and Anthropic-compatible calls without SDK dependencies. Executor adapters define Codex and Claude Code process-runner paths and normalize supported JSONL/stream-json events into kernel events; approval bridging, managed process lifecycle, and artifact extraction are later hardening work.
+Provider adapters support mockable OpenAI-compatible and Anthropic-compatible calls without SDK dependencies. Executor adapters define Codex and Claude Code process-runner paths and normalize supported JSONL or stream-json events into kernel events.
 
-`apps/space-desktop` currently exposes a minimal TypeScript shell model for the Space desktop surface. It defines the first app-shell sections for chat, run status, and artifact list without introducing a UI framework.
+`apps/space-desktop` now exposes the current Personal AI OS surface and keeps the browser UI intentionally lightweight without introducing a full UI framework.
 
-## Run The V0.1 Space Demo
+## Try The Current Product
 
 ```bash
-npm install
-npm run dev
+cd product
+npm ci
+npm test
+npm run desktop:dev
 ```
 
-Then open:
+Then walk through this first-run path:
 
-```text
-http://localhost:5173
-```
+1. `Start`: confirm readiness loads and see what is still missing.
+2. `Space`: create a workspace and choose strict approval or trusted local writes.
+3. `Providers`: save a provider, run `Doctor`, and load models.
+4. `Chat`: send a real message and confirm the transcript persists.
+5. `Runs`: execute a mock or real executor task and inspect transcript, approvals, and artifacts.
+6. `Memory`: save one local memory record.
+7. `Automations`: create a local reminder or heartbeat task.
+8. `Forge`: convert a completed run into a reusable capability.
 
-The demo is a browser-first local validation surface. It lets you enter a goal and run the V0.1 loop through Companion, Control Plane, normalized executor events, and artifact return.
+## Expected Results When You Use It
 
-Product preview capabilities:
+After a successful end-to-end manual trial, you should expect:
 
-- Configure an OpenAI-compatible or Anthropic-compatible model provider.
-- Save provider name, protocol, API base URL, and model in local SQLite.
-- Save provider API keys in macOS Keychain.
-- Send real chat messages through the configured provider.
-- Keep a multi-message chat transcript in the current app session.
-- Run the executor/artifact demo path from the same app.
+- a locally saved workspace and trust choice
+- saved provider metadata with the secret kept out of browser-visible payloads
+- persistent threads and messages in the local database
+- run history with normalized events and optional approval decisions
+- artifacts created by manual notes, chat, or executor work
+- at least one memory and optional automation stored locally
+- a path from a successful run to a repeatable local capability through Forge
 
-V0.2 provider metadata, thread list, and messages are stored locally under:
+## Local Data And Secrets
+
+Provider metadata, workspaces, threads, messages, runs, approvals, automations, memory, artifacts, capabilities, and Forge recipes are stored locally under the product profile. In the non-Electron browser or server path the default development database is:
 
 ```text
 ~/.ai_os/space-demo/app.db
 ```
 
-Provider API keys are stored separately in macOS Keychain using the provider id as the account key. Test builds may opt into `AI_SPACE_SECRET_BACKEND=file`, but the default app path uses Keychain.
+Provider API keys are stored separately from normal browser-visible state:
+
+- Electron: OS-backed `safeStorage`
+- Non-Electron macOS development: Keychain
+- Non-Electron Windows development: protected local files
+- Test override: `AI_SPACE_SECRET_BACKEND=file`
 
 Executor choices:
 
-- `Mock local executor`: deterministic and safe default for repeatable manual testing.
-- `Codex local CLI`: runs through the local dev server and the `@ai-os/executor-codex` process adapter when `codex` is installed.
-- `Claude Code local CLI`: runs through the local dev server and the `@ai-os/executor-claude-code` process adapter when `claude` is installed.
+- `Mock local executor`: deterministic and safe default for repeatable manual testing
+- `Codex local CLI`: runs through the local dev server and the `@ai-os/executor-codex` process adapter when `codex` is installed
+- `Claude Code local CLI`: runs through the local dev server and the `@ai-os/executor-claude-code` process adapter when `claude` is installed
 
 Real executor calls are bounded by a demo timeout. Override it when needed:
 
 ```bash
-AI_SPACE_EXECUTOR_TIMEOUT_MS=120000 npm run dev
+cd product
+AI_SPACE_EXECUTOR_TIMEOUT_MS=120000 npm run desktop:dev
 ```
 
 ## Build The Electron Desktop App
 
 ```bash
+cd product
 npm run package:mac
-open "build/electron/mac-arm64/AI OS.app"
 ```
 
-The generated macOS Electron app bundle is:
+Packaged Electron app outputs:
 
 ```text
-product/build/electron/mac-arm64/AI OS.app
+Apple Silicon macOS: product/build/electron/mac-arm64/AI OS.app
+Intel macOS:         product/build/electron/mac/AI OS.app
+Windows unpacked:    product\build\electron\win-unpacked\AI OS.exe
 ```
 
-The product desktop shell is Electron. It uses one desktop architecture for macOS and Windows, opens a locked-down Chromium renderer, and starts the local AI OS server inside the Electron main process. The legacy macOS WebKit package path is still available as `npm run package:mac:webkit` for rollback only.
+Open the macOS packaged app with:
+
+```bash
+open "build/electron/mac-arm64/AI OS.app"   # Apple Silicon
+open "build/electron/mac/AI OS.app"         # Intel Mac
+```
+
+The product desktop shell is Electron. It uses one desktop architecture for macOS and Windows, opens a locked-down Chromium renderer, and starts the local AI OS server inside the Electron main process. The legacy macOS WebKit package path remains only as a rollback fallback.
 
 Windows packaging is configured with Electron Builder:
 
 ```bash
+cd product
 npm run package:win
 ```
 
 Run `npm run validate:electron` on any host to statically verify the macOS and Windows Electron packaging configuration. Production distribution still needs signing, notarization on macOS, Windows code signing, and auto-update.
 
-## Non-Goals
+## Current Limits
 
-This V0.2 build does not implement managed executor process lifecycle, signed installer packaging, Forge, Store, cloud runtime, or team permissions.
+- Local builds are unsigned and unnotarized
+- No auto-update yet
+- No cloud sync or hosted runtime
+- No team collaboration or marketplace
+- No hardened managed executor lifecycle beyond the current local process path
 
-The workspace/artifact core packages stay intentionally narrow in V0.1: reference creation and artifact-to-run/space linking only, with no database layer, file synchronization, or preview pipeline.
+The workspace and artifact core packages stay intentionally narrow: reference creation and artifact-to-run or artifact-to-space linking only, with no full file synchronization pipeline yet.

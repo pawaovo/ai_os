@@ -103,7 +103,17 @@ This scenario is cross-layer because one change fans out into package scripts, E
 }
 ```
 
-`mode`, `nodeRequired`, `openCommand`, and `note` are the contract points most likely to drift and must stay aligned with docs and renderer expectations.
+Contract details:
+
+- On macOS hosts:
+  - `buildCommand` must stay `cd product && npm run package:mac`
+  - `openCommand` must use `product/build/electron/mac-arm64/AI OS.app` on Apple Silicon and `product/build/electron/mac/AI OS.app` on Intel
+- On Windows hosts:
+  - `buildCommand` must switch to `cd product && npm run package:win`
+  - `openCommand` must point to `product\build\electron\win-unpacked\AI OS.exe`
+- `windowsCommand` must remain present even on macOS because the UI surfaces it as cross-platform packaging guidance.
+- When running outside Electron, `nodeRequired` must flip back to `true`, but install guidance should still point to the primary Electron product path.
+- `mode`, `nodeRequired`, `buildCommand`, `openCommand`, `windowsCommand`, and `note` are the contract points most likely to drift and must stay aligned with docs and renderer expectations.
 
 ### 4. Validation & Error Matrix
 
@@ -111,6 +121,7 @@ This scenario is cross-layer because one change fans out into package scripts, E
 | --- | --- | --- |
 | Electron scripts missing or `main` points elsewhere | `validate-electron-config.mjs` fails | `npm run validate:electron` |
 | Packaged app resources drift from builder config | package config regression test fails | `node --test tests/*.test.mjs` |
+| Host-specific install path drifts from actual packaging output | readiness and docs show the wrong open path | `npm test` on the host plus manual packaging smoke |
 | Server never reaches readiness | Electron main exits with non-zero after wait loop | packaged smoke run stderr / exit code |
 | `safeStorage` is unavailable in Electron session | provider secret read/write throws explicit error | manual provider save path |
 | External URL navigation occurs | in-app navigation is denied, URL opens externally | manual smoke click path |
@@ -123,6 +134,7 @@ This scenario is cross-layer because one change fans out into package scripts, E
 - `npm test` passes.
 - `npm run validate:electron` passes.
 - `npm run package:mac` produces `product/build/electron/mac-arm64/AI OS.app`.
+- On Intel macOS hosts, the open path switches to `product/build/electron/mac/AI OS.app`.
 - Launching the packaged binary with `AI_SPACE_APP_PORT=<fixed>` responds on `/api/app/readiness`.
 - The packaged app window renders the Start dashboard without a white screen.
 
@@ -149,6 +161,8 @@ This scenario is cross-layer because one change fans out into package scripts, E
   - Assert lockfile/install graph is consistent.
 - `cd product && npm run package:mac`
   - Assert macOS dir packaging succeeds on the host.
+- `cd product && npm run package:win` on Windows hosts
+  - Assert installer and unpacked Windows outputs are created.
 - Packaged smoke:
   - Launch `build/electron/mac-arm64/AI OS.app/Contents/MacOS/AI OS` with fixed `AI_SPACE_APP_PORT` and isolated `AI_SPACE_STORAGE_DIR`.
   - Assert `curl http://127.0.0.1:<port>/api/app/readiness` returns `install.mode = electron-cross-platform`.
@@ -159,11 +173,11 @@ This scenario is cross-layer because one change fans out into package scripts, E
 #### Wrong
 
 - Make Electron the product shell in `package.json`, but leave `/api/app/readiness` and docs describing the legacy WebKit path.
-- Change builder output to `build/desktop` but keep UI/docs/tests pointing at `build/electron/...`.
+- Change builder output to `build/desktop` or a different host path but keep UI, docs, and tests pointing at stale `build/electron/...` paths.
 - Launch the server in Electron without waiting for readiness, causing intermittent white screens.
 
 #### Correct
 
-- Treat package scripts, builder config, readiness payload, docs, UI hints, and regression tests as one contract.
+- Treat package scripts, builder config, readiness payload, docs, UI hints, and regression tests as one contract, including host-specific macOS and Windows install guidance.
 - Gate window load on `/api/app/readiness`.
 - Preserve secure BrowserWindow defaults and explicit external-navigation handling.

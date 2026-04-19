@@ -40,6 +40,7 @@ interface AppReadinessSummary {
     nodeRequired: boolean;
     buildCommand: string;
     openCommand: string;
+    windowsCommand: string;
     note: string;
   };
 }
@@ -49,11 +50,12 @@ interface AppReadinessSummary {
 
 - `browser.ts` is a consumer of `/api/app/readiness`; it must not invent packaging paths locally.
 - Start and Settings must show the same Electron install path the backend emits in `install.openCommand`.
+- Start and Settings must also show the Windows package command emitted by `install.windowsCommand`.
 - The Node Runtime card must render:
   - `"Electron provides the packaged desktop runtime."` when `nodeRequired === false`
   - `"Node must be available on PATH when running the local server outside Electron."` when `nodeRequired === true`
 - `#install-help` must describe the current product shell, not a stale legacy shell.
-- Settings copy in `public/index.html` must match the Electron product path, not the old WebKit output path.
+- Settings copy in `public/index.html` must remain generic enough that host-specific install output can come from readiness JSON instead of a stale hard-coded path.
 
 ### 4. Validation & Error Matrix
 
@@ -61,6 +63,7 @@ interface AppReadinessSummary {
 | --- | --- | --- |
 | `/api/app/readiness` fetch fails | renderer shows load failure message instead of crashing | `renderAppReadiness()` fallback path |
 | Install path changes on backend only | regression test fails because docs/UI strings drift | `space-desktop.test.mjs` |
+| Windows package command exists on backend but is not rendered | install panel hides part of the documented cross-platform story | `space-desktop.test.mjs` source assertion and manual UI smoke |
 | `nodeRequired` toggles but UI copy does not | readiness install card shows wrong runtime expectation | manual smoke in Settings |
 | Start page loads but Settings page is blank | packaged app smoke fails because navigation does not render the page | packaged app UI smoke |
 
@@ -69,6 +72,7 @@ interface AppReadinessSummary {
 #### Good
 
 - Start page shows Electron build/open commands.
+- Install panel also surfaces the Windows packaging command.
 - Settings page still renders after navigation from Start.
 - Local install help text says Electron is the product shell.
 
@@ -80,12 +84,14 @@ interface AppReadinessSummary {
 
 - Leaving `product/build/AI OS.app` in the install card after `package:mac` now points to Electron.
 - Hard-coding build/open text in multiple renderer locations without test coverage.
+- Hiding the Windows packaging command in docs only while the backend already exposes it.
 
 ### 6. Tests Required
 
 - `space-desktop.test.mjs` must assert:
   - Electron install wording in README and HTML.
   - `package:mac` and `package:win` scripts point to Electron commands.
+  - Windows packaging guidance is surfaced by the renderer code.
   - BrowserWindow security flags remain locked down.
 - Packaged app smoke must confirm:
   - Start page renders readiness/install cards.

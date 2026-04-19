@@ -556,19 +556,14 @@ async function createAppReadinessSummary() {
     nextActions: createNextActions(checks),
     install: {
       mode: desktopShell === "electron" ? "electron-cross-platform" : "local-browser-server",
-      appName: "AI OS.app",
+      ...createInstallGuidance(),
       signed: false,
       notarized: false,
       nodeRequired: desktopShell !== "electron",
-      buildCommand: "cd product && npm run package:mac",
-      openCommand: desktopShell === "electron"
-        ? "open \"product/build/electron/mac-arm64/AI OS.app\""
-        : "open \"product/build/AI OS.app\"",
-      windowsCommand: "cd product && npm run package:win",
       storageRoot,
       note: desktopShell === "electron"
         ? "This local V1.0 build uses Electron as the product desktop shell for macOS and Windows."
-        : "This local V1.0 server is running without the Electron desktop shell.",
+        : "This local V1.0 server is running without the Electron desktop shell. Package the Electron app below when you want the primary desktop experience.",
     },
   };
 }
@@ -596,6 +591,28 @@ function createNextActions(checks) {
     "Save useful context in Memory.",
     "Turn a successful run into a Forge recipe and local capability.",
   ];
+}
+
+function createInstallGuidance() {
+  const buildCommand = process.platform === "win32"
+    ? "cd product && npm run package:win"
+    : "cd product && npm run package:mac";
+
+  const openCommand = process.platform === "win32"
+    ? "start \"\" \"product\\build\\electron\\win-unpacked\\AI OS.exe\""
+    : `open "${resolveMacElectronAppPath(process.arch)}"`;
+
+  return {
+    appName: process.platform === "win32" ? "AI OS.exe" : "AI OS.app",
+    buildCommand,
+    openCommand,
+    windowsCommand: "cd product && npm run package:win",
+  };
+}
+
+function resolveMacElectronAppPath(arch) {
+  if (arch === "arm64") return "product/build/electron/mac-arm64/AI OS.app";
+  return "product/build/electron/mac/AI OS.app";
 }
 
 async function handleListWorkspaces(response) {

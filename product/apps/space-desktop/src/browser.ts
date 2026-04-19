@@ -133,6 +133,7 @@ interface AppReadinessSummary {
     nodeRequired: boolean;
     buildCommand: string;
     openCommand: string;
+    windowsCommand: string;
     storageRoot: string;
     note: string;
   };
@@ -670,6 +671,13 @@ function renderAppReadiness(): void {
       title: "Open Command",
       status: "ready",
       detail: readiness.install.openCommand,
+      targetPage: "settings",
+    }),
+    createReadinessListItem({
+      id: "install-windows",
+      title: "Windows Packaging",
+      status: "optional",
+      detail: readiness.install.windowsCommand,
       targetPage: "settings",
     }),
     createReadinessListItem({
