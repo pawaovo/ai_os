@@ -350,3 +350,50 @@ Finished V0.2 UI controls for provider delete, model dropdown with manual fallba
 ### Next Steps
 
 - None - task complete
+
+
+## Session 11: Polish desktop usability and user guidance
+
+**Date**: 2026-04-20
+**Task**: Polish desktop usability and user guidance
+**Branch**: `codex/desktop-usability-polish`
+
+### Summary
+
+(Add summary)
+
+### Main Changes
+
+| Area | Result |
+|------|--------|
+| Install guidance | Made desktop install guidance host-aware instead of hard-coding the Apple Silicon app path everywhere. |
+| Desktop UI | Surfaced the Windows packaging command inside the `Desktop App Path` panel so the cross-platform story is visible in-app. |
+| Docs | Refreshed `product/README.md` and `product/apps/space-desktop/README.md` to describe the current V1.0 product, feature surfaces, first-run flow, and expected results. |
+| Contracts | Updated backend and frontend Trellis code-spec docs so readiness/install guidance stays aligned with host-specific packaging paths. |
+| Verification | Passed `npm ci --ignore-scripts --dry-run`, `npm test`, `npm run validate:electron`, `npm run package:mac`, and a packaged Electron smoke test with `/api/app/readiness` plus manual UI confirmation of the new Windows packaging row. |
+
+**Key files**:
+- `product/apps/space-desktop/scripts/dev-server.mjs`
+- `product/apps/space-desktop/src/browser.ts`
+- `product/apps/space-desktop/README.md`
+- `product/README.md`
+- `product/tests/space-desktop.test.mjs`
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `628fe5704a4dff8ea412ad888123b76fe6ef9249` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

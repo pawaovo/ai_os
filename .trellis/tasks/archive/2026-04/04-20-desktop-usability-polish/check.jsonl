@@ -1,0 +1,4 @@
+{"file": ".claude/commands/trellis/finish-work.md", "reason": "Finish work checklist"}
+{"file": ".claude/commands/trellis/check.md", "reason": "Code quality check spec"}
+{"file": ".trellis/spec/backend/electron-desktop-shell.md", "reason": "Verify readiness/install contract after polish pass."}
+{"file": ".trellis/spec/frontend/desktop-readiness-contract.md", "reason": "Verify UI install guidance matches backend payload."}

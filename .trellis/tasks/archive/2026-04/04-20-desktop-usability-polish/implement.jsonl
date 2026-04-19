@@ -1,0 +1,7 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend development guide"}
+{"file": ".trellis/spec/backend/electron-desktop-shell.md", "reason": "Install/open guidance and readiness payload may change."}
+{"file": ".trellis/spec/frontend/desktop-readiness-contract.md", "reason": "Install cards and user guidance must stay aligned with readiness JSON."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Prefer extending current readiness/install pattern over inventing new UI flow."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Backend readiness payload, frontend install cards, docs, and tests must move together."}
