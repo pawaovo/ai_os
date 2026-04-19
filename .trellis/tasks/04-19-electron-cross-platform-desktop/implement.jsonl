@@ -1,0 +1,8 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend development guide"}
+{"file": "product/package.json", "reason": "Electron dependencies, scripts, and builder config"}
+{"file": "product/apps/space-desktop/scripts/dev-server.mjs", "reason": "Electron main process launches existing local server"}
+{"file": "product/apps/space-desktop/README.md", "reason": "Document Electron macOS and Windows usage"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Desktop shell spans package scripts, app lifecycle, server, docs, tests"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse existing server/browser runtime instead of rewriting UI"}
