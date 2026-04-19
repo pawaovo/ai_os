@@ -94,20 +94,28 @@ Real executor calls are bounded by a demo timeout. Override it when needed:
 AI_SPACE_EXECUTOR_TIMEOUT_MS=120000 npm run dev
 ```
 
-## Build The V0.1 macOS App
+## Build The Electron Desktop App
 
 ```bash
 npm run package:mac
-open "build/AI OS.app"
+open "build/electron/mac-arm64/AI OS.app"
 ```
 
-The generated app bundle is:
+The generated macOS Electron app bundle is:
 
 ```text
-product/build/AI OS.app
+product/build/electron/mac-arm64/AI OS.app
 ```
 
-This V0.1 app opens a native macOS window using WebKit and starts the local Space Demo server internally. It is intentionally not signed, notarized, or packaged as a `.dmg` yet. The V0.1 app expects Node to be available on the local machine, because the bundled desktop shell still uses the local Node server runtime.
+The product desktop shell is Electron. It uses one desktop architecture for macOS and Windows, opens a locked-down Chromium renderer, and starts the local AI OS server inside the Electron main process. The legacy macOS WebKit package path is still available as `npm run package:mac:webkit` for rollback only.
+
+Windows packaging is configured with Electron Builder:
+
+```bash
+npm run package:win
+```
+
+Run `npm run validate:electron` on any host to statically verify the macOS and Windows Electron packaging configuration. Production distribution still needs signing, notarization on macOS, Windows code signing, and auto-update.
 
 ## Non-Goals
 

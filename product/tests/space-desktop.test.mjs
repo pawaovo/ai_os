@@ -143,7 +143,13 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   const html = await readFile(resolve(productRoot, "apps/space-desktop/public/index.html"), "utf8");
   const styles = await readFile(resolve(productRoot, "apps/space-desktop/public/styles.css"), "utf8");
   const readme = await readFile(resolve(productRoot, "apps/space-desktop/README.md"), "utf8");
+  const packageJson = JSON.parse(await readFile(resolve(productRoot, "package.json"), "utf8"));
   const packageScript = await readFile(resolve(productRoot, "apps/space-desktop/scripts/package-macos.mjs"), "utf8");
+  const electronMain = await readFile(resolve(productRoot, "apps/space-desktop/electron-app/main.cjs"), "utf8");
+  const electronAppPackage = JSON.parse(await readFile(resolve(productRoot, "apps/space-desktop/electron-app/package.json"), "utf8"));
+  const electronConfig = await readFile(resolve(productRoot, "electron-builder.config.cjs"), "utf8");
+  const electronAfterPack = await readFile(resolve(productRoot, "apps/space-desktop/scripts/after-pack-electron.mjs"), "utf8");
+  const devServer = await readFile(resolve(productRoot, "apps/space-desktop/scripts/dev-server.mjs"), "utf8");
 
   assert.doesNotMatch(html, /data-layout="v0\.3-workbench"/);
   assert.doesNotMatch(html, /data-layout="v0\.4-executor-workbench"/);
@@ -236,10 +242,46 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(styles, /awaiting-approval/);
   assert.match(styles, /approval-detail-grid/);
   assert.match(readme, /V1\.0 Capabilities/);
-  assert.match(readme, /Local Install Path/);
+  assert.match(readme, /Electron Install Paths/);
   assert.match(readme, /npm run package:mac/);
-  assert.match(readme, /not signed or notarized/);
+  assert.match(readme, /npm run package:win/);
+  assert.match(readme, /product desktop shell is Electron/i);
+  assert.match(readme, /not signed or notarized|notarization/);
   assert.match(packageScript, /README\.md/);
+  assert.equal(packageJson.main, "apps/space-desktop/electron-app/main.cjs");
+  assert.equal(packageJson.scripts["package:mac"], "npm run package:electron:mac");
+  assert.equal(packageJson.scripts["package:mac:webkit"], "node ./apps/space-desktop/scripts/package-macos.mjs");
+  assert.equal(packageJson.scripts["package:win"], "npm run package:electron:win");
+  assert.equal(electronAppPackage.main, "main.cjs");
+  assert.equal(electronAppPackage.version, "1.0.0");
+  assert.match(electronMain, /nodeIntegration:\s*false/);
+  assert.match(electronMain, /contextIsolation:\s*true/);
+  assert.match(electronMain, /sandbox:\s*true/);
+  assert.match(electronMain, /webSecurity:\s*true/);
+  assert.match(electronMain, /AI_SPACE_DESKTOP_SHELL/);
+  assert.match(electronConfig, /appId:\s*"ai\.os\.personal"/);
+  assert.match(electronConfig, /app:\s*"apps\/space-desktop\/electron-app"/);
+  assert.match(electronConfig, /afterPack:\s*"apps\/space-desktop\/scripts\/after-pack-electron\.mjs"/);
+  assert.match(electronConfig, /productName:\s*"AI OS"/);
+  assert.match(electronConfig, /win:\s*{/);
+  assert.match(electronConfig, /target:\s*"nsis"/);
+  assert.match(electronConfig, /target:\s*"portable"/);
+  assert.match(electronConfig, /product\/node_modules\/@ai-os/);
+  assert.match(devServer, /ElectronSafeStorageSecretStore/);
+  assert.match(devServer, /WindowsProtectedFileSecretStore/);
+  assert.match(devServer, /safeStorage/);
+  assert.match(electronAfterPack, /package\.json/);
+  assert.match(electronAfterPack, /copyFile/);
+});
+
+test("electron desktop package configuration is internally valid", () => {
+  const output = execFileSync(
+    process.execPath,
+    ["./apps/space-desktop/scripts/validate-electron-config.mjs"],
+    { cwd: productRoot, encoding: "utf8" },
+  );
+
+  assert.match(output, /Electron config is valid/);
 });
 
 test("createRunningSpaceDemoState shows an in-progress mission before completion", () => {

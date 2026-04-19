@@ -82,6 +82,7 @@ After implementation:
 - [ ] Tested with edge cases (null, empty, invalid)
 - [ ] Verified error handling at each boundary
 - [ ] Checked data survives round-trip
+- [ ] If a command, path, or install mode is surfaced in UI/docs/tests, searched all usage sites before changing it
 
 ---
 

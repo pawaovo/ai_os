@@ -1,0 +1,7 @@
+{
+  "name": "ai-os-desktop",
+  "version": "1.0.0",
+  "description": "Electron desktop shell for AI OS Personal",
+  "author": "AI OS",
+  "main": "main.cjs"
+}

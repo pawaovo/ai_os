@@ -3,18 +3,27 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "main": "apps/space-desktop/electron-app/main.cjs",
   "workspaces": [
     "apps/*",
     "packages/*/*"
   ],
   "scripts": {
     "dev": "node ./apps/space-desktop/scripts/dev-server.mjs",
+    "desktop:dev": "npm run typecheck && electron ./apps/space-desktop/electron-app/main.cjs",
     "build": "npm run typecheck",
-    "package:mac": "node ./apps/space-desktop/scripts/package-macos.mjs",
+    "package:mac": "npm run package:electron:mac",
+    "package:win": "npm run package:electron:win",
+    "package:electron:mac": "npm run typecheck && electron-builder --config electron-builder.config.cjs --mac dir",
+    "package:electron:win": "npm run validate:electron && npm run typecheck && electron-builder --config electron-builder.config.cjs --win",
+    "package:mac:webkit": "node ./apps/space-desktop/scripts/package-macos.mjs",
+    "validate:electron": "node ./apps/space-desktop/scripts/validate-electron-config.mjs",
     "typecheck": "tsc -b",
     "test": "npm run typecheck && node --test tests/*.test.mjs"
   },
   "devDependencies": {
+    "electron": "^41.2.1",
+    "electron-builder": "^26.8.1",
     "typescript": "^5.8.3"
   }
 }

@@ -333,7 +333,7 @@
             <li><strong>Automation</strong><span>Create and pause one-off, scheduled, or heartbeat automations from the Automations page.</span></li>
             <li><strong>Memory</strong><span>Save personal or workspace context from the Memory page and review usage in chat or runs.</span></li>
             <li><strong>Capabilities And Forge</strong><span>Inspect local capabilities, run them, and export Forge recipes as reusable capabilities.</span></li>
-            <li><strong>Local Install</strong><span>Build with <code>cd product && npm run package:mac</code>, then open <code>product/build/AI OS.app</code>.</span></li>
+            <li><strong>Local Install</strong><span>Build the Electron app with <code>cd product && npm run package:mac</code>, then open <code>product/build/electron/mac-arm64/AI OS.app</code>.</span></li>
           </ul>
         </section>
 
@@ -392,7 +392,7 @@
           </div>
           <h2 id="install-title">Desktop App Path</h2>
           <ul id="install-status-list" class="action-list"></ul>
-          <p id="install-help" class="inline-help">The local build is unsigned and uses the bundled WebKit shell plus local Node server.</p>
+          <p id="install-help" class="inline-help">The product desktop build uses Electron for macOS and Windows.</p>
         </section>
 
         <section class="memory-usage-panel panel page-section" data-pages="chat runs memory" aria-labelledby="memory-usage-title">

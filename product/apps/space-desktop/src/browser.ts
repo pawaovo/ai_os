@@ -686,8 +686,8 @@ function renderAppReadiness(): void {
       title: "Node Runtime",
       status: readiness.install.nodeRequired ? "optional" : "ready",
       detail: readiness.install.nodeRequired
-        ? "Node must be available on PATH because the WebKit app starts the local server with node."
-        : "Node is bundled.",
+        ? "Node must be available on PATH when running the local server outside Electron."
+        : "Electron provides the packaged desktop runtime.",
       targetPage: "settings",
     }),
   );

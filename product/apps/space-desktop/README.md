@@ -1,12 +1,26 @@
 # AI OS Space Desktop
 
-Local-first desktop app for the V1.0 Personal AI OS preview.
+Local-first desktop app for AI OS Personal. The product desktop shell is Electron so the same app architecture supports macOS and Windows.
 
-The app uses a lightweight native macOS WebKit shell that starts the local Node server bundled in `AI OS.app`. It is not Electron or Tauri. User data stays local by default:
+Electron is now the primary product path:
 
-- Provider metadata, workspaces, threads, messages, runs, approvals, automations, memory, artifacts, capabilities, and Forge recipes are stored in SQLite at `~/.ai_os/space-demo/app.db` unless `AI_SPACE_STORAGE_DIR` is set.
-- Provider API keys are stored in macOS Keychain by default.
-- Test builds may opt into `AI_SPACE_SECRET_BACKEND=file`; the normal app path uses Keychain.
+- macOS: packaged by `electron-builder` into `product/build/electron/mac-arm64/AI OS.app` on Apple Silicon.
+- Windows: configured by `electron-builder` with NSIS and portable targets through `npm run package:win`.
+- Legacy macOS WebKit packaging remains available as `npm run package:mac:webkit` only as a rollback/development fallback.
+
+## Runtime Architecture
+
+- Electron main process owns desktop lifecycle, single-instance behavior, window creation, local port allocation, and navigation restrictions.
+- Electron renderer loads the existing AI OS browser UI from the local server.
+- The existing local AI OS server is imported inside the Electron main process, so packaged Electron builds do not require a separately installed Node runtime.
+- Renderer security defaults are locked down: `nodeIntegration: false`, `contextIsolation: true`, `sandbox: true`, and `webSecurity: true`.
+- Electron builds use OS-backed `safeStorage` for provider secrets. Non-Electron macOS development uses Keychain; Windows non-Electron development uses user-scoped DPAPI-protected files.
+
+User data stays local by default:
+
+- Provider metadata, workspaces, threads, messages, runs, approvals, automations, memory, artifacts, capabilities, and Forge recipes are stored in SQLite under Electron `userData` when launched from Electron.
+- Provider API keys are encrypted locally and are not returned to the browser after saving.
+- Test builds may opt into `AI_SPACE_SECRET_BACKEND=file`.
 
 ## V1.0 Capabilities
 
@@ -25,7 +39,7 @@ The V1.0 app includes:
 - AI Forge recipe flow: create recipe from a completed run, edit/test it, export it as a local capability, and rerun it.
 - V1.0 Start dashboard with readiness checks and local install status.
 
-## Local Install Path
+## Electron Install Paths
 
 From the repository root:
 
@@ -34,60 +48,74 @@ cd product
 npm ci
 npm test
 npm run package:mac
-open "build/AI OS.app"
+open "build/electron/mac-arm64/AI OS.app"
 ```
 
-The generated app is available at:
-
-```text
-product/build/AI OS.app
-```
-
-For a quick rebuild after dependencies are already installed:
+Windows packaging is configured from the same project:
 
 ```bash
 cd product
-npm run package:mac
-open "build/AI OS.app"
+npm run package:win
 ```
 
-## Runtime Requirements
+The Windows command is intended to run on a Windows build host for production artifacts. On macOS, use `npm run validate:electron` to statically verify the Windows target configuration.
 
-- macOS 14 or newer.
-- Node.js available on `PATH`; the current WebKit app starts the local server with `node`.
-- Optional: Codex CLI on `PATH` for Codex executor runs.
-- Optional: Claude Code CLI on `PATH` for Claude executor runs.
-- Provider API key and compatible base URL if using real chat.
+## Development Commands
 
-The V1.0 local build is not signed or notarized. If macOS blocks opening it, use Finder or `open "product/build/AI OS.app"` from a trusted local checkout. A production distribution should add certificate signing, notarization, and a bundled Node runtime.
-
-## Useful Commands
-
-Run the browser/server development app:
+Run the browser/server development app without Electron:
 
 ```bash
 cd product
 npm run dev
 ```
 
+Run the Electron desktop app in development:
+
+```bash
+cd product
+npm run desktop:dev
+```
+
+Validate Electron packaging configuration:
+
+```bash
+cd product
+npm run validate:electron
+```
+
 Use a larger timeout for real executor experiments:
 
 ```bash
 cd product
-AI_SPACE_EXECUTOR_TIMEOUT_MS=120000 npm run dev
+AI_SPACE_EXECUTOR_TIMEOUT_MS=120000 npm run desktop:dev
 ```
 
 Use isolated storage for testing:
 
 ```bash
 cd product
-AI_SPACE_STORAGE_DIR=/tmp/ai-os-space-test AI_SPACE_SECRET_BACKEND=file npm run dev
+AI_SPACE_STORAGE_DIR=/tmp/ai-os-space-test AI_SPACE_SECRET_BACKEND=file npm run desktop:dev
+```
+
+## Runtime Requirements
+
+- macOS or Windows for the Electron app.
+- Optional: Codex CLI on `PATH` for Codex executor runs.
+- Optional: Claude Code CLI on `PATH` for Claude executor runs.
+- Provider API key and compatible base URL if using real chat.
+
+The local Electron build is not signed or notarized. A production distribution should add Apple certificate signing, notarization, Windows code signing, and auto-update.
+
+The Electron app entry lives in:
+
+```text
+product/apps/space-desktop/electron-app/
 ```
 
 ## Troubleshooting
 
-- White screen: verify the local server is running by opening `http://127.0.0.1:5174` for the packaged app or `http://127.0.0.1:5173` for `npm run dev`.
+- White screen: open Start or check that `/api/app/readiness` responds from the local port shown in the Electron app process.
 - Provider chat fails: open `Providers`, save provider metadata and key, run `Doctor`, then load `Models`.
 - Codex or Claude is unavailable: open `Runs` or `Settings` and check `Executor Status`; install or expose the CLI on `PATH`.
-- Data looks stale: the default local database is `~/.ai_os/space-demo/app.db`; use `AI_SPACE_STORAGE_DIR` for isolated test profiles.
-- Keychain issues: re-save the provider key from `Providers`; API keys are not returned to the browser after saving.
+- Data looks stale: Electron uses its app `userData` profile by default; use `AI_SPACE_STORAGE_DIR` for isolated test profiles.
+- Secret storage issues: re-save the provider key from `Providers`; API keys are encrypted locally and never rendered back into the UI.

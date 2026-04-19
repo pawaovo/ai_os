@@ -22,6 +22,7 @@ const storageRoot = resolve(process.env.AI_SPACE_STORAGE_DIR ?? join(homedir(), 
 const SPACE_RUNTIME_SPACE_ID = "space-local-runtime";
 const APP_VERSION = "1.0.0";
 const APP_RELEASE_NAME = "Personal AI OS";
+const desktopShell = process.env.AI_SPACE_DESKTOP_SHELL ?? "local-browser-server";
 
 if (process.env.AI_SPACE_SKIP_BUILD !== "1") {
   buildProduct();
@@ -554,15 +555,20 @@ async function createAppReadinessSummary() {
     checks,
     nextActions: createNextActions(checks),
     install: {
-      mode: "local-macos-webkit",
+      mode: desktopShell === "electron" ? "electron-cross-platform" : "local-browser-server",
       appName: "AI OS.app",
       signed: false,
       notarized: false,
-      nodeRequired: true,
+      nodeRequired: desktopShell !== "electron",
       buildCommand: "cd product && npm run package:mac",
-      openCommand: "open \"product/build/AI OS.app\"",
+      openCommand: desktopShell === "electron"
+        ? "open \"product/build/electron/mac-arm64/AI OS.app\""
+        : "open \"product/build/AI OS.app\"",
+      windowsCommand: "cd product && npm run package:win",
       storageRoot,
-      note: "This local V1.0 build is packaged for macOS WebKit and starts the local Node server inside the app bundle.",
+      note: desktopShell === "electron"
+        ? "This local V1.0 build uses Electron as the product desktop shell for macOS and Windows."
+        : "This local V1.0 server is running without the Electron desktop shell.",
     },
   };
 }
@@ -3362,7 +3368,120 @@ function messageRowToUi(row) {
 
 function createSecretStore(root) {
   if (process.env.AI_SPACE_SECRET_BACKEND === "file") return new FileSecretStore(join(root, "secrets.json"));
+  if (process.versions.electron) return new ElectronSafeStorageSecretStore(join(root, "electron-secrets.json"));
+  if (process.platform === "win32") return new WindowsProtectedFileSecretStore(join(root, "windows-secrets"));
   return new KeychainSecretStore("AI OS Space Demo Provider");
+}
+
+class ElectronSafeStorageSecretStore {
+  constructor(filePath) {
+    this.filePath = filePath;
+    this.safeStoragePromise = import("electron").then((electron) => electron.safeStorage);
+  }
+
+  async getProviderApiKey(providerId) {
+    const secrets = await this.readAll();
+    const encrypted = secrets[providerId];
+    if (!encrypted) return undefined;
+
+    const safeStorage = await this.requireSafeStorage();
+    return safeStorage.decryptString(Buffer.from(encrypted, "base64"));
+  }
+
+  async setProviderApiKey(providerId, value) {
+    const safeStorage = await this.requireSafeStorage();
+    const encrypted = safeStorage.encryptString(value).toString("base64");
+    await this.writeAll({ ...(await this.readAll()), [providerId]: encrypted });
+  }
+
+  async deleteProviderApiKey(providerId) {
+    const secrets = await this.readAll();
+    delete secrets[providerId];
+    if (Object.keys(secrets).length === 0) {
+      await rm(this.filePath, { force: true });
+      return;
+    }
+    await this.writeAll(secrets);
+  }
+
+  async requireSafeStorage() {
+    const safeStorage = await this.safeStoragePromise;
+    if (!safeStorage.isEncryptionAvailable()) {
+      throw new Error("Electron safeStorage encryption is not available on this OS session.");
+    }
+    return safeStorage;
+  }
+
+  async readAll() {
+    try {
+      return JSON.parse(await readFile(this.filePath, "utf8"));
+    } catch (error) {
+      if (error?.code === "ENOENT") return {};
+      throw error;
+    }
+  }
+
+  async writeAll(value) {
+    await mkdir(dirname(this.filePath), { recursive: true });
+    await writeFile(this.filePath, JSON.stringify(value, null, 2), "utf8");
+  }
+}
+
+class WindowsProtectedFileSecretStore {
+  constructor(directoryPath) {
+    this.directoryPath = directoryPath;
+  }
+
+  async getProviderApiKey(providerId) {
+    const encrypted = await this.readSecretFile(providerId);
+    if (!encrypted) return undefined;
+    return execFileSync("powershell.exe", [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      [
+        "$secure = ConvertTo-SecureString -String $env:AI_OS_ENCRYPTED_SECRET;",
+        "$ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure);",
+        "try { [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }",
+      ].join(" "),
+    ], {
+      encoding: "utf8",
+      env: { ...process.env, AI_OS_ENCRYPTED_SECRET: encrypted },
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  }
+
+  async setProviderApiKey(providerId, value) {
+    const encrypted = execFileSync("powershell.exe", [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      "$secure = ConvertTo-SecureString -String $env:AI_OS_SECRET_VALUE -AsPlainText -Force; ConvertFrom-SecureString -SecureString $secure",
+    ], {
+      encoding: "utf8",
+      env: { ...process.env, AI_OS_SECRET_VALUE: value },
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    await mkdir(this.directoryPath, { recursive: true });
+    await writeFile(this.filePathFor(providerId), encrypted, "utf8");
+  }
+
+  async deleteProviderApiKey(providerId) {
+    await rm(this.filePathFor(providerId), { force: true });
+  }
+
+  async readSecretFile(providerId) {
+    try {
+      return (await readFile(this.filePathFor(providerId), "utf8")).trim();
+    } catch (error) {
+      if (error?.code === "ENOENT") return undefined;
+      throw error;
+    }
+  }
+
+  filePathFor(providerId) {
+    return join(this.directoryPath, `${Buffer.from(providerId).toString("base64url")}.txt`);
+  }
 }
 
 class KeychainSecretStore {
