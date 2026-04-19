@@ -76,6 +76,68 @@ interface ExecutorStatusSummary {
   message: string;
 }
 
+type ReadinessStatus = "ready" | "action" | "optional";
+
+interface AppReadinessCheck {
+  id: string;
+  title: string;
+  status: ReadinessStatus;
+  detail: string;
+  targetPage: string;
+}
+
+interface AppReadinessSummary {
+  version: string;
+  releaseName: string;
+  layout: string;
+  storageRoot: string;
+  generatedAt: string;
+  activeWorkspace?: {
+    id: string;
+    name: string;
+    trustLevel: WorkspaceTrustLevel;
+  };
+  activeProvider?: {
+    id?: string;
+    name: string;
+    protocol: ProviderProtocol;
+    modelId: string;
+    apiKeyPreview: string;
+  };
+  counts: {
+    workspaces: number;
+    providers: number;
+    threads: number;
+    messages: number;
+    runs: number;
+    completedRuns: number;
+    artifacts: number;
+    pendingApprovals: number;
+    automations: number;
+    automationRuns: number;
+    memories: number;
+    capabilities: number;
+    enabledCapabilities: number;
+    recipes: number;
+    exportedRecipes: number;
+    recipeTests: number;
+  };
+  executors: ExecutorStatusSummary[];
+  checks: AppReadinessCheck[];
+  nextActions: string[];
+  install: {
+    mode: string;
+    appName: string;
+    signed: boolean;
+    notarized: boolean;
+    nodeRequired: boolean;
+    buildCommand: string;
+    openCommand: string;
+    storageRoot: string;
+    note: string;
+  };
+}
+
 interface AutomationSummary {
   id: string;
   title: string;
@@ -147,6 +209,7 @@ const state = {
   recipeTests: [] as RecipeTestSummary[],
   memoryUsage: [] as RetrievedMemory[],
   executorStatuses: [] as ExecutorStatusSummary[],
+  appReadiness: undefined as AppReadinessSummary | undefined,
   liveRun: undefined as LiveRunState | undefined,
   runPoller: undefined as number | undefined,
   activeThreadId: undefined as string | undefined,
@@ -157,7 +220,7 @@ const state = {
   activeRunId: undefined as string | undefined,
   activeCapabilityId: undefined as string | undefined,
   activeRecipeId: undefined as string | undefined,
-  activePage: "space",
+  activePage: "start",
   chatMessages: [
     {
       role: "system",
@@ -170,6 +233,16 @@ const elements = {
   navButtons: Array.from(document.querySelectorAll<HTMLButtonElement>("[data-page-target]")),
   pageSections: Array.from(document.querySelectorAll<HTMLElement>(".page-section")),
   activeWorkspaceLabel: getElement("active-workspace-label", HTMLElement),
+  appReadinessStatus: getElement("app-readiness-status", HTMLElement),
+  appReadinessList: getElement("app-readiness-list", HTMLElement),
+  appReadinessHelp: getElement("app-readiness-help", HTMLElement),
+  startActionList: getElement("start-action-list", HTMLElement),
+  metricThreadCount: getElement("metric-thread-count", HTMLElement),
+  metricRunCount: getElement("metric-run-count", HTMLElement),
+  metricArtifactCount: getElement("metric-artifact-count", HTMLElement),
+  metricCapabilityCount: getElement("metric-capability-count", HTMLElement),
+  installStatusList: getElement("install-status-list", HTMLElement),
+  installHelp: getElement("install-help", HTMLElement),
   workspaceForm: getElement("workspace-form", HTMLFormElement),
   workspaceSelect: getElement("workspace-select", HTMLSelectElement),
   workspaceName: getElement("workspace-name", HTMLInputElement),
@@ -295,6 +368,14 @@ elements.navButtons.forEach((button) => {
   button.addEventListener("click", () => {
     setActivePage(button.dataset.pageTarget ?? "space");
   });
+});
+
+elements.appReadinessList.addEventListener("click", (event) => {
+  navigateFromReadinessList(event);
+});
+
+elements.installStatusList.addEventListener("click", (event) => {
+  navigateFromReadinessList(event);
 });
 
 elements.workspaceForm.addEventListener("submit", (event) => {
@@ -505,6 +586,7 @@ async function initializeAppState(): Promise<void> {
   await loadCapabilityRuns();
   await loadRecipes();
   await loadRecipeTests();
+  await loadAppReadiness();
 }
 
 function setActivePage(page: string): void {
@@ -521,6 +603,15 @@ function setActivePage(page: string): void {
   });
 }
 
+function navigateFromReadinessList(event: Event): void {
+  const target = event.target instanceof HTMLElement
+    ? event.target.closest<HTMLButtonElement>("button[data-readiness-target]")
+    : null;
+  if (target?.dataset.readinessTarget) {
+    setActivePage(target.dataset.readinessTarget);
+  }
+}
+
 async function loadExecutors(): Promise<void> {
   try {
     const payload = await apiJson<{ executors: ExecutorStatusSummary[] }>("/api/executors");
@@ -530,6 +621,77 @@ async function loadExecutors(): Promise<void> {
     elements.executorStatusHelp.textContent = errorToMessage(error, "Failed to load executor status.");
     renderExecutorStatuses();
   }
+}
+
+async function loadAppReadiness(): Promise<void> {
+  try {
+    state.appReadiness = await apiJson<AppReadinessSummary>("/api/app/readiness");
+    renderAppReadiness();
+  } catch (error) {
+    elements.appReadinessStatus.textContent = "failed";
+    elements.appReadinessList.replaceChildren(createListItem(errorToMessage(error, "Failed to load readiness.")));
+    elements.startActionList.replaceChildren(createListItem("Open Settings and verify the local server is running."));
+    elements.installHelp.textContent = "Readiness endpoint did not respond.";
+  }
+}
+
+function renderAppReadiness(): void {
+  const readiness = state.appReadiness;
+  if (!readiness) {
+    elements.appReadinessStatus.textContent = "checking";
+    return;
+  }
+
+  const actionCount = readiness.checks.filter((check) => check.status === "action").length;
+  const readyCount = readiness.checks.filter((check) => check.status === "ready").length;
+  elements.appReadinessStatus.textContent = actionCount > 0 ? `${actionCount} action${actionCount === 1 ? "" : "s"}` : "ready";
+  elements.appReadinessList.replaceChildren(
+    ...readiness.checks.map((check) => createReadinessListItem(check)),
+  );
+  elements.appReadinessHelp.textContent =
+    `${readiness.releaseName} ${readiness.version}: ${readyCount}/${readiness.checks.length} systems ready. Data root: ${readiness.storageRoot}`;
+  elements.metricThreadCount.textContent = String(readiness.counts.threads);
+  elements.metricRunCount.textContent = String(readiness.counts.runs);
+  elements.metricArtifactCount.textContent = String(readiness.counts.artifacts);
+  elements.metricCapabilityCount.textContent = `${readiness.counts.enabledCapabilities}/${readiness.counts.capabilities}`;
+  elements.startActionList.replaceChildren(
+    ...readiness.nextActions.map((action) => createListItem(action)),
+  );
+  elements.installStatusList.replaceChildren(
+    createReadinessListItem({
+      id: "install-build",
+      title: "Build Command",
+      status: "ready",
+      detail: readiness.install.buildCommand,
+      targetPage: "settings",
+    }),
+    createReadinessListItem({
+      id: "install-open",
+      title: "Open Command",
+      status: "ready",
+      detail: readiness.install.openCommand,
+      targetPage: "settings",
+    }),
+    createReadinessListItem({
+      id: "install-signing",
+      title: "Signing",
+      status: readiness.install.signed && readiness.install.notarized ? "ready" : "optional",
+      detail: readiness.install.signed && readiness.install.notarized
+        ? "Signed and notarized."
+        : "Unsigned local build. Use documented local install path for V1.0.",
+      targetPage: "settings",
+    }),
+    createReadinessListItem({
+      id: "install-node",
+      title: "Node Runtime",
+      status: readiness.install.nodeRequired ? "optional" : "ready",
+      detail: readiness.install.nodeRequired
+        ? "Node must be available on PATH because the WebKit app starts the local server with node."
+        : "Node is bundled.",
+      targetPage: "settings",
+    }),
+  );
+  elements.installHelp.textContent = readiness.install.note;
 }
 
 function renderExecutorStatuses(): void {
@@ -680,6 +842,10 @@ async function refreshWorkspaceScopedData(): Promise<void> {
   await loadAutomations();
   await loadAutomationRuns();
   await loadMemories();
+  await loadCapabilities();
+  await loadRecipes();
+  await loadRecipeTests();
+  await loadAppReadiness();
 }
 
 function renderWorkspaces(): void {
@@ -804,6 +970,7 @@ async function saveProviderFromForm(): Promise<void> {
     elements.providerStatus.dataset.phase = "completed";
     elements.providerHelp.textContent = `Provider saved locally. API key: ${payload.provider?.apiKeyPreview ?? "saved"}`;
     await loadProviders();
+    await loadAppReadiness();
   } catch (error) {
     renderProviderError(errorToMessage(error, "Failed to save provider settings."));
   } finally {
@@ -828,6 +995,7 @@ async function deleteSelectedProvider(): Promise<void> {
     elements.providerBaseUrl.value = "";
     elements.providerModel.value = "";
     await loadProviders();
+    await loadAppReadiness();
   } catch (error) {
     renderProviderError(errorToMessage(error, "Failed to delete provider."));
   } finally {
@@ -980,6 +1148,7 @@ async function createThread(): Promise<void> {
   });
   state.activeThreadId = payload.thread.id;
   await loadThreads();
+  await loadAppReadiness();
 }
 
 async function renameSelectedThread(): Promise<void> {
@@ -998,6 +1167,7 @@ async function renameSelectedThread(): Promise<void> {
     body: JSON.stringify({ title, workspaceId: state.activeWorkspaceId }),
   });
   await loadThreads();
+  await loadAppReadiness();
 }
 
 async function deleteSelectedThread(): Promise<void> {
@@ -1013,6 +1183,7 @@ async function deleteSelectedThread(): Promise<void> {
   state.chatMessages = [{ role: "system", content: "Thread deleted. Create a new thread to continue." }];
   renderChatMessages();
   await loadThreads();
+  await loadAppReadiness();
 }
 
 async function loadThread(threadId: string): Promise<void> {
@@ -1076,6 +1247,7 @@ async function sendChatFromForm(): Promise<void> {
     renderMemoryUsage();
     await loadThreads();
     await loadArtifacts();
+    await loadAppReadiness();
   } catch (error) {
     state.chatMessages = [
       ...state.chatMessages,
@@ -1124,6 +1296,7 @@ async function runDemoFromForm(): Promise<void> {
     renderCurrentRunView();
     await loadRuns();
     await loadApprovals();
+    await loadAppReadiness();
     startRunPolling(payload.run.id);
   } catch (error) {
     elements.runSummary.textContent = errorToMessage(error, "Failed to start executor run.");
@@ -1151,6 +1324,7 @@ async function cancelActiveRun(): Promise<void> {
     renderCurrentRunView();
     await loadRuns();
     await loadApprovals();
+    await loadAppReadiness();
   } catch (error) {
     elements.runSummary.textContent = errorToMessage(error, "Failed to cancel run.");
   }
@@ -1181,6 +1355,7 @@ async function resolveActiveApproval(decision: "grant" | "reject"): Promise<void
     }
     await loadRuns();
     await loadApprovals();
+    await loadAppReadiness();
   } catch (error) {
     elements.approvalReason.textContent = errorToMessage(error, "Failed to resolve approval.");
   } finally {
@@ -1216,6 +1391,7 @@ async function pollLiveRun(runId: string): Promise<void> {
       await loadRuns();
       await loadArtifacts();
       await loadApprovals();
+      await loadAppReadiness();
       state.liveRun = createPersistedRunView(payload.live.runId) ?? payload.live;
       renderCurrentRunView();
     }
@@ -1283,6 +1459,7 @@ async function saveArtifactFromForm(): Promise<void> {
     elements.artifactContent.value = "";
     elements.artifactHelp.textContent = `Saved artifact: ${payload.artifact.title}`;
     await loadArtifacts();
+    await loadAppReadiness();
   } catch (error) {
     elements.artifactHelp.textContent = errorToMessage(error, "Failed to save artifact.");
   } finally {
@@ -1305,6 +1482,7 @@ async function deleteSelectedArtifact(): Promise<void> {
     state.activeArtifact = undefined;
     elements.artifactHelp.textContent = "Artifact deleted.";
     await loadArtifacts();
+    await loadAppReadiness();
   } catch (error) {
     elements.artifactHelp.textContent = errorToMessage(error, "Failed to delete artifact.");
   } finally {
@@ -1422,6 +1600,7 @@ async function createMemoryFromForm(): Promise<void> {
     });
     elements.memoryHelp.textContent = "Memory saved locally.";
     await loadMemories();
+    await loadAppReadiness();
   } catch (error) {
     elements.memoryHelp.textContent = errorToMessage(error, "Failed to save memory.");
   } finally {
@@ -1437,6 +1616,7 @@ async function deleteMemory(memoryId: string): Promise<void> {
       renderMemoryUsage();
     }
     await loadMemories();
+    await loadAppReadiness();
   } catch (error) {
     elements.memoryHelp.textContent = errorToMessage(error, "Failed to delete memory.");
   }
@@ -1522,6 +1702,7 @@ async function toggleSelectedCapability(): Promise<void> {
   });
   state.capabilities = state.capabilities.map((item) => item.id === capability.id ? payload.capability : item);
   renderCapabilities();
+  await loadAppReadiness();
 }
 
 async function runSelectedCapability(): Promise<void> {
@@ -1531,6 +1712,7 @@ async function runSelectedCapability(): Promise<void> {
   await apiJson(`/api/capabilities/${encodeURIComponent(capability.id)}/run`, { method: "POST" });
   await loadCapabilityRuns();
   await loadArtifacts();
+  await loadAppReadiness();
 }
 
 function renderCapabilities(): void {
@@ -1631,6 +1813,7 @@ async function createRecipeFromSelectedRun(): Promise<void> {
   });
   state.activeRecipeId = payload.recipe.id;
   await loadRecipes();
+  await loadAppReadiness();
 }
 
 async function saveSelectedRecipe(): Promise<void> {
@@ -1649,6 +1832,7 @@ async function saveSelectedRecipe(): Promise<void> {
   });
   state.recipes = state.recipes.map((item) => item.id === recipe.id ? payload.recipe : item);
   renderRecipes();
+  await loadAppReadiness();
 }
 
 async function testSelectedRecipe(): Promise<void> {
@@ -1661,6 +1845,7 @@ async function testSelectedRecipe(): Promise<void> {
   elements.recipeTestPreview.textContent = payload.test.result ?? "Recipe test completed.";
   await loadRecipes();
   await loadRecipeTests();
+  await loadAppReadiness();
 }
 
 async function exportSelectedRecipe(): Promise<void> {
@@ -1675,6 +1860,7 @@ async function exportSelectedRecipe(): Promise<void> {
   state.activeCapabilityId = payload.capability.id;
   await loadRecipes();
   await loadCapabilities();
+  await loadAppReadiness();
 }
 
 function renderRecipes(): void {
@@ -1806,6 +1992,7 @@ async function createAutomationFromForm(): Promise<void> {
     });
     elements.automationHelp.textContent = "Automation created. It will run locally when due.";
     await loadAutomations();
+    await loadAppReadiness();
   } catch (error) {
     elements.automationHelp.textContent = errorToMessage(error, "Failed to create automation.");
   } finally {
@@ -1822,6 +2009,7 @@ async function runAutomationTick(): Promise<void> {
     await loadAutomationRuns();
     await loadApprovals();
     await loadArtifacts();
+    await loadAppReadiness();
   } catch (error) {
     elements.automationHelp.textContent = errorToMessage(error, "Failed to run due automations.");
   } finally {
@@ -1841,6 +2029,7 @@ async function handleAutomationAction(automationId: string, action: string): Pro
       });
     }
     await loadAutomations();
+    await loadAppReadiness();
   } catch (error) {
     elements.automationHelp.textContent = errorToMessage(error, "Failed to update automation.");
   }
@@ -2112,6 +2301,30 @@ function createEventListItem(typeText: string, messageText: string): HTMLLIEleme
   type.textContent = typeText;
   message.textContent = messageText;
   item.append(type, message);
+  return item;
+}
+
+function createReadinessListItem(input: AppReadinessCheck): HTMLLIElement {
+  const item = document.createElement("li");
+  const button = document.createElement("button");
+  const title = document.createElement("span");
+  const meta = document.createElement("span");
+  const badge = document.createElement("span");
+
+  button.type = "button";
+  button.className = "list-button readiness-list-item";
+  button.dataset.readinessTarget = input.targetPage;
+  button.setAttribute("aria-label", `Open ${input.targetPage} for ${input.title}`);
+  title.className = "item-title";
+  title.textContent = input.title;
+  meta.className = "item-meta";
+  meta.textContent = input.detail;
+  badge.className = "source-badge";
+  badge.dataset.source = input.status;
+  badge.textContent = input.status;
+
+  button.append(title, meta, badge);
+  item.append(button);
   return item;
 }
 

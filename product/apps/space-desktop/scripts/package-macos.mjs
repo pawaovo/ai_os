@@ -93,6 +93,7 @@ async function copyAppRuntime() {
   const bundledAppRoot = join(bundledProductRoot, "apps/space-desktop");
 
   await copyJson(join(appRoot, "package.json"), join(bundledAppRoot, "package.json"));
+  await cp(join(appRoot, "README.md"), join(bundledAppRoot, "README.md"));
   await cp(join(appRoot, "dist"), join(bundledAppRoot, "dist"), { recursive: true });
   await cp(join(appRoot, "public"), join(bundledAppRoot, "public"), { recursive: true });
   await mkdir(join(bundledAppRoot, "scripts"), { recursive: true });
@@ -134,7 +135,7 @@ function createInfoPlist() {
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.9.0</string>
+  <string>1.0.0</string>
   <key>CFBundleVersion</key>
   <string>1</string>
   <key>LSMinimumSystemVersion</key>

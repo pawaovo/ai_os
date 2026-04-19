@@ -20,6 +20,8 @@ const codexCommand = process.env.AI_SPACE_CODEX_COMMAND;
 const claudeCommand = process.env.AI_SPACE_CLAUDE_COMMAND;
 const storageRoot = resolve(process.env.AI_SPACE_STORAGE_DIR ?? join(homedir(), ".ai_os", "space-demo"));
 const SPACE_RUNTIME_SPACE_ID = "space-local-runtime";
+const APP_VERSION = "1.0.0";
+const APP_RELEASE_NAME = "Personal AI OS";
 
 if (process.env.AI_SPACE_SKIP_BUILD !== "1") {
   buildProduct();
@@ -97,6 +99,11 @@ const BUILT_IN_CAPABILITIES = [
 async function handleRequest(request, response) {
   const requestUrl = new URL(request.url ?? "/", "http://localhost");
   const pathname = requestUrl.pathname;
+
+  if (request.method === "GET" && pathname === "/api/app/readiness") {
+    await handleAppReadiness(response);
+    return;
+  }
 
   if (request.method === "GET" && pathname === "/api/workspaces") {
     await handleListWorkspaces(response);
@@ -378,6 +385,211 @@ function buildProduct() {
     cwd: productRoot,
     stdio: "inherit",
   });
+}
+
+async function handleAppReadiness(response) {
+  writeJson(response, 200, await createAppReadinessSummary());
+}
+
+async function createAppReadinessSummary() {
+  const activeWorkspaceId = appStore.getSetting("activeWorkspaceId");
+  const activeWorkspace = activeWorkspaceId ? appStore.getWorkspace(activeWorkspaceId) : undefined;
+  const providerList = createProviderListResponse(await appStore.listProviders(), appStore.getSetting("activeProviderId"));
+  const activeProvider = providerList.providers.find((provider) => provider.id === providerList.activeProviderId)
+    ?? providerList.providers[0];
+  const threads = appStore.listThreads(activeWorkspaceId).threads;
+  const artifacts = appStore.listArtifacts(activeWorkspaceId).artifacts;
+  const runs = appStore.listRuns(activeWorkspaceId).runs;
+  const approvals = appStore.listApprovals(activeWorkspaceId).approvals;
+  const automations = appStore.listAutomations(activeWorkspaceId).automations;
+  const automationRuns = appStore.listAutomationRuns(activeWorkspaceId).runs;
+  const memories = appStore.listMemories(activeWorkspaceId).memories;
+  const capabilities = appStore.listCapabilities().capabilities;
+  const capabilityRuns = appStore.listCapabilityRuns(activeWorkspaceId).runs;
+  const recipes = appStore.listRecipes(activeWorkspaceId).recipes;
+  const recipeTests = appStore.listRecipeTests(activeWorkspaceId).tests;
+  const executors = await listExecutorStatuses();
+  const codexStatus = executors.find((executor) => executor.choice === "codex");
+  const claudeStatus = executors.find((executor) => executor.choice === "claude-code");
+  const enabledCapabilities = capabilities.filter((capability) => capability.enabled);
+  const completedRuns = runs.filter((run) => run.status === "completed");
+  const exportedRecipes = recipes.filter((recipe) => recipe.capabilityId);
+  const pendingApprovals = approvals.filter((approval) => approval.status === "pending");
+
+  const checks = [
+    createReadinessCheck({
+      id: "workspace",
+      title: "Local Workspace",
+      ready: Boolean(activeWorkspace),
+      readyDetail: activeWorkspace
+        ? `${activeWorkspace.name}${activeWorkspace.path ? ` at ${activeWorkspace.path}` : ""} / ${activeWorkspace.trustLevel}`
+        : "",
+      actionDetail: "Create or select a workspace to scope chat, runs, artifacts, memory, and automations.",
+      targetPage: "space",
+    }),
+    createReadinessCheck({
+      id: "provider",
+      title: "Custom Provider",
+      ready: Boolean(activeProvider),
+      readyDetail: activeProvider
+        ? `${activeProvider.name} / ${activeProvider.protocol} / ${activeProvider.modelId}`
+        : "",
+      actionDetail: "Configure an OpenAI-compatible or Anthropic-compatible provider before daily chat.",
+      targetPage: "providers",
+    }),
+    createReadinessCheck({
+      id: "chat",
+      title: "Daily Chat",
+      ready: Boolean(activeProvider),
+      readyDetail: activeProvider
+        ? `${threads.length} thread${threads.length === 1 ? "" : "s"} ready; new threads can be created automatically.`
+        : "",
+      actionDetail: "Save a provider, then send a message in Chat.",
+      targetPage: "chat",
+    }),
+    createReadinessCheck({
+      id: "executors",
+      title: "Code Executors",
+      ready: Boolean(codexStatus?.available && claudeStatus?.available),
+      readyDetail: "Codex and Claude Code are available from the local machine.",
+      actionDetail: `Mock is available; Codex: ${codexStatus?.available ? "ready" : "needs setup"}; Claude Code: ${claudeStatus?.available ? "ready" : "needs setup"}.`,
+      targetPage: "runs",
+      optional: true,
+    }),
+    createReadinessCheck({
+      id: "approvals",
+      title: "Approval And Trust",
+      ready: true,
+      readyDetail: pendingApprovals.length > 0
+        ? `${pendingApprovals.length} approval request${pendingApprovals.length === 1 ? "" : "s"} waiting.`
+        : "Approval history and workspace trust controls are available.",
+      actionDetail: "",
+      targetPage: "approvals",
+    }),
+    createReadinessCheck({
+      id: "artifacts",
+      title: "Artifacts",
+      ready: artifacts.length > 0,
+      readyDetail: `${artifacts.length} artifact${artifacts.length === 1 ? "" : "s"} saved locally.`,
+      actionDetail: "Run a task, chat, or save a note artifact to build a local work record.",
+      targetPage: "artifacts",
+      optional: true,
+    }),
+    createReadinessCheck({
+      id: "automations",
+      title: "Automations",
+      ready: automations.length > 0,
+      readyDetail: `${automations.length} automation${automations.length === 1 ? "" : "s"} configured; ${automationRuns.length} run${automationRuns.length === 1 ? "" : "s"} recorded.`,
+      actionDetail: "Create a one-off, scheduled, or heartbeat automation for proactive follow-up.",
+      targetPage: "automations",
+      optional: true,
+    }),
+    createReadinessCheck({
+      id: "memory",
+      title: "Local Memory",
+      ready: memories.length > 0,
+      readyDetail: `${memories.length} memory item${memories.length === 1 ? "" : "s"} available for chat and runs.`,
+      actionDetail: "Save a personal or workspace memory to make future chat and runs more contextual.",
+      targetPage: "memory",
+      optional: true,
+    }),
+    createReadinessCheck({
+      id: "capabilities",
+      title: "Capabilities",
+      ready: enabledCapabilities.length > 0,
+      readyDetail: `${enabledCapabilities.length}/${capabilities.length} local capabilities enabled; ${capabilityRuns.length} run${capabilityRuns.length === 1 ? "" : "s"} recorded.`,
+      actionDetail: "Enable at least one local capability before reuse.",
+      targetPage: "capabilities",
+    }),
+    createReadinessCheck({
+      id: "forge",
+      title: "AI Forge",
+      ready: exportedRecipes.length > 0,
+      readyDetail: `${exportedRecipes.length} exported recipe${exportedRecipes.length === 1 ? "" : "s"}; ${recipeTests.length} validation run${recipeTests.length === 1 ? "" : "s"}.`,
+      actionDetail: completedRuns.length > 0
+        ? "Create a recipe from a completed run, test it, then save it as a local capability."
+        : "Complete a run first, then convert it into a reusable recipe.",
+      targetPage: "forge",
+      optional: true,
+    }),
+  ];
+
+  return {
+    version: APP_VERSION,
+    releaseName: APP_RELEASE_NAME,
+    layout: "v1.0-personal-ai-os",
+    storageRoot,
+    generatedAt: nowIso(),
+    activeWorkspace: activeWorkspace
+      ? { id: activeWorkspace.id, name: activeWorkspace.name, trustLevel: activeWorkspace.trustLevel }
+      : undefined,
+    activeProvider: activeProvider
+      ? {
+          id: activeProvider.id,
+          name: activeProvider.name,
+          protocol: activeProvider.protocol,
+          modelId: activeProvider.modelId,
+          apiKeyPreview: activeProvider.apiKeyPreview,
+        }
+      : undefined,
+    counts: {
+      workspaces: appStore.listWorkspaces().workspaces.length,
+      providers: providerList.providers.length,
+      threads: threads.length,
+      messages: threads.reduce((total, thread) => total + thread.messageCount, 0),
+      runs: runs.length,
+      completedRuns: completedRuns.length,
+      artifacts: artifacts.length,
+      pendingApprovals: pendingApprovals.length,
+      automations: automations.length,
+      automationRuns: automationRuns.length,
+      memories: memories.length,
+      capabilities: capabilities.length,
+      enabledCapabilities: enabledCapabilities.length,
+      recipes: recipes.length,
+      exportedRecipes: exportedRecipes.length,
+      recipeTests: recipeTests.length,
+    },
+    executors,
+    checks,
+    nextActions: createNextActions(checks),
+    install: {
+      mode: "local-macos-webkit",
+      appName: "AI OS.app",
+      signed: false,
+      notarized: false,
+      nodeRequired: true,
+      buildCommand: "cd product && npm run package:mac",
+      openCommand: "open \"product/build/AI OS.app\"",
+      storageRoot,
+      note: "This local V1.0 build is packaged for macOS WebKit and starts the local Node server inside the app bundle.",
+    },
+  };
+}
+
+function createReadinessCheck(input) {
+  return {
+    id: input.id,
+    title: input.title,
+    status: input.ready ? "ready" : input.optional ? "optional" : "action",
+    detail: input.ready ? input.readyDetail : input.actionDetail,
+    targetPage: input.targetPage,
+  };
+}
+
+function createNextActions(checks) {
+  const required = checks
+    .filter((check) => check.status === "action")
+    .map((check) => `Open ${check.targetPage}: ${check.detail}`);
+
+  if (required.length > 0) return required.slice(0, 4);
+
+  return [
+    "Send a daily chat message from Chat.",
+    "Run a local task from Runs using mock, Codex, or Claude Code.",
+    "Save useful context in Memory.",
+    "Turn a successful run into a Forge recipe and local capability.",
+  ];
 }
 
 async function handleListWorkspaces(response) {

@@ -1,37 +1,93 @@
-# Space Desktop
+# AI OS Space Desktop
 
-Thin desktop product shell for AI Space.
+Local-first desktop app for the V1.0 Personal AI OS preview.
 
-V0.1 keeps this package intentionally small:
+The app uses a lightweight native macOS WebKit shell that starts the local Node server bundled in `AI OS.app`. It is not Electron or Tauri. User data stays local by default:
 
-- Pure TypeScript shell model, no UI framework.
-- Fixed app shell sections for chat, run status, and artifact list.
-- `createSpaceDesktopShellModel()` for assembling the minimal app state consumed by later UI work.
-- A browser-first local demo that can be started with `cd product && npm run dev`.
+- Provider metadata, workspaces, threads, messages, runs, approvals, automations, memory, artifacts, capabilities, and Forge recipes are stored in SQLite at `~/.ai_os/space-demo/app.db` unless `AI_SPACE_STORAGE_DIR` is set.
+- Provider API keys are stored in macOS Keychain by default.
+- Test builds may opt into `AI_SPACE_SECRET_BACKEND=file`; the normal app path uses Keychain.
 
-The local demo runs the first visible Space loop with a deterministic mock executor by default. It can also send goals to local Codex and Claude Code CLI adapters through the Node dev server. It is not the final desktop app package, and it does not include persistence, cloud runtime, account management, approval UI, or polished infinite-canvas behavior.
+## V1.0 Capabilities
 
-The V0.2 Secure Chat Assistant also includes:
+The V1.0 app includes:
 
-- Provider settings for OpenAI-compatible and Anthropic-compatible model providers.
-- Local provider metadata, thread, and message persistence at `~/.ai_os/space-demo/app.db`.
-- Provider API key storage in macOS Keychain.
-- Real chat requests through the configured provider.
-- Session-local chat transcript rendering.
+- Daily provider-backed chat with persistent workspace-scoped threads.
+- Custom OpenAI-compatible and Anthropic-compatible provider configuration.
+- Provider Doctor and model loading.
+- Local workspaces with strict or trusted-local-writes trust modes.
+- Mock, Codex CLI, and Claude Code CLI executor paths.
+- Approval and trust UI for risky execution.
+- Persistent run history, run events, and saved artifacts.
+- Local automations for one-off, scheduled, and heartbeat follow-ups.
+- Local memory with personal/workspace scope and sensitivity labels.
+- Safe local capability registry, permission inspection, enable/disable, run history, and artifacts.
+- AI Forge recipe flow: create recipe from a completed run, edit/test it, export it as a local capability, and rerun it.
+- V1.0 Start dashboard with readiness checks and local install status.
 
-Test builds may opt into `AI_SPACE_SECRET_BACKEND=file`; the normal app path uses Keychain.
+## Local Install Path
 
-Use a larger timeout for longer real executor experiments:
+From the repository root:
 
 ```bash
-AI_SPACE_EXECUTOR_TIMEOUT_MS=120000 npm run dev
-```
-
-Build the clickable V0.1 macOS app from `product/`:
-
-```bash
+cd product
+npm ci
+npm test
 npm run package:mac
 open "build/AI OS.app"
 ```
 
-The generated `.app` opens a native WebKit window and starts the local Space Demo server internally. For V0.1 it requires Node to be available on the machine and is not signed or notarized.
+The generated app is available at:
+
+```text
+product/build/AI OS.app
+```
+
+For a quick rebuild after dependencies are already installed:
+
+```bash
+cd product
+npm run package:mac
+open "build/AI OS.app"
+```
+
+## Runtime Requirements
+
+- macOS 14 or newer.
+- Node.js available on `PATH`; the current WebKit app starts the local server with `node`.
+- Optional: Codex CLI on `PATH` for Codex executor runs.
+- Optional: Claude Code CLI on `PATH` for Claude executor runs.
+- Provider API key and compatible base URL if using real chat.
+
+The V1.0 local build is not signed or notarized. If macOS blocks opening it, use Finder or `open "product/build/AI OS.app"` from a trusted local checkout. A production distribution should add certificate signing, notarization, and a bundled Node runtime.
+
+## Useful Commands
+
+Run the browser/server development app:
+
+```bash
+cd product
+npm run dev
+```
+
+Use a larger timeout for real executor experiments:
+
+```bash
+cd product
+AI_SPACE_EXECUTOR_TIMEOUT_MS=120000 npm run dev
+```
+
+Use isolated storage for testing:
+
+```bash
+cd product
+AI_SPACE_STORAGE_DIR=/tmp/ai-os-space-test AI_SPACE_SECRET_BACKEND=file npm run dev
+```
+
+## Troubleshooting
+
+- White screen: verify the local server is running by opening `http://127.0.0.1:5174` for the packaged app or `http://127.0.0.1:5173` for `npm run dev`.
+- Provider chat fails: open `Providers`, save provider metadata and key, run `Doctor`, then load `Models`.
+- Codex or Claude is unavailable: open `Runs` or `Settings` and check `Executor Status`; install or expose the CLI on `PATH`.
+- Data looks stale: the default local database is `~/.ai_os/space-demo/app.db`; use `AI_SPACE_STORAGE_DIR` for isolated test profiles.
+- Keychain issues: re-save the provider key from `Providers`; API keys are not returned to the browser after saving.

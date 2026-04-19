@@ -139,9 +139,11 @@ test("createInitialSpaceDemoState exposes the visible local demo shell", () => {
   assert.equal(state.events[0].type, "space.ready");
 });
 
-test("space desktop V0.9 page exposes forge preview controls", async () => {
+test("space desktop V1.0 page exposes readiness and forge controls", async () => {
   const html = await readFile(resolve(productRoot, "apps/space-desktop/public/index.html"), "utf8");
   const styles = await readFile(resolve(productRoot, "apps/space-desktop/public/styles.css"), "utf8");
+  const readme = await readFile(resolve(productRoot, "apps/space-desktop/README.md"), "utf8");
+  const packageScript = await readFile(resolve(productRoot, "apps/space-desktop/scripts/package-macos.mjs"), "utf8");
 
   assert.doesNotMatch(html, /data-layout="v0\.3-workbench"/);
   assert.doesNotMatch(html, /data-layout="v0\.4-executor-workbench"/);
@@ -150,12 +152,28 @@ test("space desktop V0.9 page exposes forge preview controls", async () => {
   assert.doesNotMatch(html, /data-layout="v0\.6\.1-product-shell"/);
   assert.doesNotMatch(html, /data-layout="v0\.7-local-memory-workbench"/);
   assert.doesNotMatch(html, /data-layout="v0\.8-capability-workbench"/);
-  assert.match(html, /data-layout="v0\.9-forge-preview-workbench"/);
+  assert.doesNotMatch(html, /data-layout="v0\.9-forge-preview-workbench"/);
+  assert.match(html, /data-layout="v1\.0-personal-ai-os"/);
+  assert.match(html, /AI OS \/ V1\.0 Personal AI OS/);
   assert.match(html, /class="app-nav"/);
+  assert.match(html, /data-page-target="start"/);
   assert.match(html, /data-page-target="memory"/);
   assert.match(html, /data-page-target="capabilities"/);
   assert.match(html, /data-page-target="forge"/);
   assert.match(html, /data-page-target="settings"/);
+  assert.match(html, /id="readiness-title"/);
+  assert.match(html, /id="app-readiness-status"/);
+  assert.match(html, /id="app-readiness-list"/);
+  assert.match(html, /id="start-title"/);
+  assert.match(html, /id="start-action-list"/);
+  assert.match(html, /id="metric-thread-count"/);
+  assert.match(html, /id="metric-run-count"/);
+  assert.match(html, /id="metric-artifact-count"/);
+  assert.match(html, /id="metric-capability-count"/);
+  assert.match(html, /id="install-title"/);
+  assert.match(html, /id="install-status-list"/);
+  assert.match(html, /Capabilities And Forge/);
+  assert.match(html, /Local Install/);
   assert.match(html, /id="settings-title"/);
   assert.match(html, /id="memory-title"/);
   assert.match(html, /id="memory-form"/);
@@ -210,8 +228,18 @@ test("space desktop V0.9 page exposes forge preview controls", async () => {
   assert.match(styles, /\.app-nav/);
   assert.match(styles, /\.nav-button/);
   assert.match(styles, /\.page-section\[hidden\]/);
+  assert.match(styles, /\.metric-grid/);
+  assert.match(styles, /\.readiness-list-item/);
+  assert.match(styles, /data-source="ready"/);
+  assert.match(styles, /data-source="action"/);
+  assert.match(styles, /data-source="optional"/);
   assert.match(styles, /awaiting-approval/);
   assert.match(styles, /approval-detail-grid/);
+  assert.match(readme, /V1\.0 Capabilities/);
+  assert.match(readme, /Local Install Path/);
+  assert.match(readme, /npm run package:mac/);
+  assert.match(readme, /not signed or notarized/);
+  assert.match(packageScript, /README\.md/);
 });
 
 test("createRunningSpaceDemoState shows an in-progress mission before completion", () => {
@@ -931,6 +959,86 @@ test("space desktop V0.9 forge recipes can be created, tested, exported, and rer
 
     const recipeTests = await getJson(`http://127.0.0.1:${appPort}/api/recipe-tests`);
     assert.equal(recipeTests.tests.some((testRun) => testRun.recipeId === created.recipe.id), true);
+  } finally {
+    await appServer.stop();
+    await rm(storageDir, { recursive: true, force: true });
+  }
+});
+
+test("space desktop V1.0 readiness summarizes local setup without leaking secrets", async () => {
+  const storageDir = await mkdtemp(`${tmpdir()}/ai-os-v10-`);
+  const appPort = await getAvailablePort();
+  const appServer = startSpaceDesktopServer({
+    port: appPort,
+    storageDir,
+  });
+
+  try {
+    await waitForHttp(`http://127.0.0.1:${appPort}/`);
+
+    const initial = await getJson(`http://127.0.0.1:${appPort}/api/app/readiness`);
+    assert.equal(initial.version, "1.0.0");
+    assert.equal(initial.releaseName, "Personal AI OS");
+    assert.equal(initial.layout, "v1.0-personal-ai-os");
+    assert.equal(initial.install.signed, false);
+    assert.equal(initial.install.notarized, false);
+    assert.equal(initial.install.nodeRequired, true);
+    assert.equal(initial.checks.some((check) => check.id === "workspace" && check.status === "action"), true);
+    assert.deepEqual(
+      initial.checks.map((check) => check.id),
+      [
+        "workspace",
+        "provider",
+        "chat",
+        "executors",
+        "approvals",
+        "artifacts",
+        "automations",
+        "memory",
+        "capabilities",
+        "forge",
+      ],
+    );
+
+    await postJson(`http://127.0.0.1:${appPort}/api/workspaces`, {
+      name: "V1.0 Workspace",
+      path: storageDir,
+    });
+    await postJson(`http://127.0.0.1:${appPort}/api/providers`, {
+      name: "V1 Provider",
+      protocol: "openai-compatible",
+      baseUrl: "http://127.0.0.1:1/v1",
+      apiKey: "sk-v1-secret",
+      modelId: "v1-model",
+    });
+    await postJson(`http://127.0.0.1:${appPort}/api/memories`, {
+      title: "V1 Preference",
+      content: "Use local-first defaults.",
+      scope: "personal",
+      sensitivity: "low",
+    });
+    await postJson(`http://127.0.0.1:${appPort}/api/automations`, {
+      title: "V1 Follow-up",
+      kind: "one-off",
+      prompt: "remind me to review the workspace",
+      intervalMs: 1000,
+    });
+
+    const ready = await getJson(`http://127.0.0.1:${appPort}/api/app/readiness`);
+    assert.equal(JSON.stringify(ready).includes("sk-v1-secret"), false);
+    assert.equal(ready.activeWorkspace.name, "V1.0 Workspace");
+    assert.equal(ready.activeProvider.name, "V1 Provider");
+    assert.equal(ready.activeProvider.apiKeyPreview.includes("sk-v1-secret"), false);
+    assert.equal(ready.counts.workspaces, 1);
+    assert.equal(ready.counts.providers, 1);
+    assert.equal(ready.counts.memories, 1);
+    assert.equal(ready.counts.automations, 1);
+    assert.equal(ready.counts.enabledCapabilities >= 3, true);
+    assert.equal(ready.checks.some((check) => check.id === "workspace" && check.status === "ready"), true);
+    assert.equal(ready.checks.some((check) => check.id === "provider" && check.status === "ready"), true);
+    assert.equal(ready.checks.some((check) => check.id === "memory" && check.status === "ready"), true);
+    assert.equal(ready.checks.some((check) => check.id === "automations" && check.status === "ready"), true);
+    assert.equal(ready.nextActions.length > 0, true);
   } finally {
     await appServer.stop();
     await rm(storageDir, { recursive: true, force: true });

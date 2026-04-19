@@ -137,6 +137,40 @@ input {
   line-height: 1.4;
 }
 
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.metric-grid div {
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 0.9rem;
+  background: rgba(255, 253, 244, 0.66);
+}
+
+.metric-grid strong,
+.metric-grid span {
+  display: block;
+}
+
+.metric-grid strong {
+  font-size: clamp(1.5rem, 3vw, 2.4rem);
+  line-height: 1;
+}
+
+.metric-grid span {
+  margin-top: 0.35rem;
+  color: var(--muted);
+  font-family: "Menlo", "Monaco", monospace;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .panel {
   border: 1px solid var(--line);
   border-radius: 28px;
@@ -208,6 +242,10 @@ h3 {
   max-width: 48rem;
   margin: 0;
   font-size: 1.02rem;
+}
+
+.start-copy {
+  margin-top: 1rem;
 }
 
 .run-summary,
@@ -437,6 +475,12 @@ button:disabled {
   overflow: hidden;
 }
 
+.readiness-list-item {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.78rem !important;
+}
+
 .list-button {
   display: grid;
   width: 100%;
@@ -495,6 +539,18 @@ button:disabled {
 
 .source-badge[data-source="completed"] {
   background: var(--moss);
+}
+
+.source-badge[data-source="ready"] {
+  background: var(--moss);
+}
+
+.source-badge[data-source="action"] {
+  background: var(--ember);
+}
+
+.source-badge[data-source="optional"] {
+  background: var(--ochre);
 }
 
 .source-badge[data-source="failed"],
@@ -590,6 +646,7 @@ button:disabled {
   .workbench-hero,
   .app-nav,
   .right-rail,
+  .metric-grid,
   .output-grid {
     grid-template-columns: 1fr;
   }

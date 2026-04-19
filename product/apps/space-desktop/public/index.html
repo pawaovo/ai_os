@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>AI OS Space Workbench</title>
+    <title>AI OS Personal</title>
     <link rel="stylesheet" href="/assets/styles.css" />
     <script type="importmap">
       {
@@ -15,21 +15,22 @@
     </script>
   </head>
   <body>
-    <main class="space-workbench app-shell" data-layout="v0.9-forge-preview-workbench">
+    <main class="space-workbench app-shell" data-layout="v1.0-personal-ai-os">
       <header class="workbench-hero" aria-labelledby="app-title">
         <div>
-          <p class="eyebrow">AI OS / V0.9 AI Forge preview</p>
-          <h1 id="app-title">AI OS Space</h1>
+          <p class="eyebrow">AI OS / V1.0 Personal AI OS</p>
+          <h1 id="app-title">AI OS Personal</h1>
         </div>
         <p class="hero-copy">
-          Turn successful local runs into editable recipes, test them, and export them as reusable
-          local capabilities without opening the system up to marketplace or arbitrary plugin execution.
+          A local-first personal assistant for daily chat, workspaces, code execution, approvals,
+          automations, memory, artifacts, capabilities, and AI Forge recipes.
         </p>
         <span id="active-workspace-label" class="status-pill" data-phase="idle">no workspace</span>
       </header>
 
       <aside class="app-nav" aria-label="Main navigation">
         <p class="eyebrow">Navigate</p>
+        <button class="nav-button" type="button" data-page-target="start">Start</button>
         <button class="nav-button" type="button" data-page-target="space">Space</button>
         <button class="nav-button" type="button" data-page-target="chat">Chat</button>
         <button class="nav-button" type="button" data-page-target="runs">Runs</button>
@@ -44,6 +45,16 @@
       </aside>
 
       <aside class="left-rail" aria-label="Workspace and threads">
+        <section class="readiness-panel panel page-section" data-pages="start settings" aria-labelledby="readiness-title">
+          <div class="panel-heading">
+            <p class="eyebrow">Readiness</p>
+            <span id="app-readiness-status" class="mini-label">checking</span>
+          </div>
+          <h2 id="readiness-title">Daily Assistant Status</h2>
+          <ul id="app-readiness-list" class="action-list"></ul>
+          <p id="app-readiness-help" class="inline-help">AI OS checks local setup without sending secrets anywhere.</p>
+        </section>
+
         <section class="workspace-panel panel page-section" data-pages="space settings" aria-labelledby="workspace-title">
           <div class="panel-heading">
             <p class="eyebrow">Workspace</p>
@@ -197,6 +208,27 @@
       </aside>
 
       <section class="center-stage" aria-label="Chat and current run">
+        <section class="start-panel panel tall-panel page-section" data-pages="start" aria-labelledby="start-title">
+          <div class="panel-heading">
+            <p class="eyebrow">Start Here</p>
+            <span class="mini-label">v1.0</span>
+          </div>
+          <h2 id="start-title">Personal AI OS Dashboard</h2>
+          <p class="hero-copy start-copy">
+            Use this dashboard to see whether AI OS is ready for real daily use. Each item maps to a
+            local surface in the left navigation, so you can configure providers, create workspaces,
+            run Codex or Claude Code, save memories, schedule follow-ups, and reuse Forge capabilities.
+          </p>
+          <div class="metric-grid" aria-label="Local AI OS counters">
+            <div><strong id="metric-thread-count">0</strong><span>threads</span></div>
+            <div><strong id="metric-run-count">0</strong><span>runs</span></div>
+            <div><strong id="metric-artifact-count">0</strong><span>artifacts</span></div>
+            <div><strong id="metric-capability-count">0</strong><span>capabilities</span></div>
+          </div>
+          <h3>Recommended Next Actions</h3>
+          <ul id="start-action-list" class="stack-list"></ul>
+        </section>
+
         <section class="chat-panel panel tall-panel page-section" data-pages="space chat" aria-labelledby="chat-title">
           <div class="panel-heading">
             <p class="eyebrow">Chat Output</p>
@@ -294,13 +326,14 @@
           </div>
           <h2 id="settings-title">App Settings</h2>
           <ul class="settings-list">
-            <li><strong>Providers</strong><span>Configure model providers and API keys in the Providers page.</span></li>
-            <li><strong>Executors</strong><span>Check Codex / Claude Code availability from Providers or Runs.</span></li>
-            <li><strong>Workspace Trust</strong><span>Change trust mode in the Workspace card.</span></li>
-            <li><strong>Automation</strong><span>Create and pause local automations from the Automations page.</span></li>
+            <li><strong>Start</strong><span>Use the V1.0 readiness dashboard to see what is configured and what to do next.</span></li>
+            <li><strong>Providers</strong><span>Configure custom provider base URLs, API keys, and models in the Providers page.</span></li>
+            <li><strong>Executors</strong><span>Check mock, Codex, and Claude Code availability from Runs, Providers, or Settings.</span></li>
+            <li><strong>Workspace Trust</strong><span>Create local workspaces and choose strict approval or trusted local writes.</span></li>
+            <li><strong>Automation</strong><span>Create and pause one-off, scheduled, or heartbeat automations from the Automations page.</span></li>
             <li><strong>Memory</strong><span>Save personal or workspace context from the Memory page and review usage in chat or runs.</span></li>
-            <li><strong>Capabilities</strong><span>Inspect, enable, and run safe local capabilities from the Capabilities page.</span></li>
-            <li><strong>Diagnostics</strong><span>Local server, SQLite, Keychain, and bundled resources are checked by tests and smoke runs.</span></li>
+            <li><strong>Capabilities And Forge</strong><span>Inspect local capabilities, run them, and export Forge recipes as reusable capabilities.</span></li>
+            <li><strong>Local Install</strong><span>Build with <code>cd product && npm run package:mac</code>, then open <code>product/build/AI OS.app</code>.</span></li>
           </ul>
         </section>
 
@@ -352,6 +385,16 @@
       </section>
 
       <aside class="right-rail" aria-label="Provider, run history, and saved artifacts">
+        <section class="install-panel panel page-section" data-pages="start settings" aria-labelledby="install-title">
+          <div class="panel-heading">
+            <p class="eyebrow">Local Install</p>
+            <span class="mini-label">macOS</span>
+          </div>
+          <h2 id="install-title">Desktop App Path</h2>
+          <ul id="install-status-list" class="action-list"></ul>
+          <p id="install-help" class="inline-help">The local build is unsigned and uses the bundled WebKit shell plus local Node server.</p>
+        </section>
+
         <section class="memory-usage-panel panel page-section" data-pages="chat runs memory" aria-labelledby="memory-usage-title">
           <div class="panel-heading">
             <p class="eyebrow">Memory Usage</p>

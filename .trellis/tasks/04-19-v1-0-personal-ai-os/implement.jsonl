@@ -1,0 +1,10 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend development guide"}
+{"file": "ai_os/ai_os_docs/04-implementation-roadmap.md", "reason": "V1.0 requirements and non-goals"}
+{"file": "product/apps/space-desktop/scripts/dev-server.mjs", "reason": "Readiness API and local app server routes"}
+{"file": "product/apps/space-desktop/src/browser.ts", "reason": "V1.0 readiness UI binding"}
+{"file": "product/apps/space-desktop/public/index.html", "reason": "V1.0 shell and start-here panel"}
+{"file": "product/apps/space-desktop/README.md", "reason": "Document local install path"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Readiness flow spans API, store, UI, tests"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Avoid duplicating existing summary/list patterns"}
