@@ -139,6 +139,22 @@ test("createInitialSpaceDemoState exposes the visible local demo shell", () => {
   assert.equal(state.events[0].type, "space.ready");
 });
 
+test("space desktop V0.3 page exposes a structured workspace workbench", async () => {
+  const html = await readFile(resolve(productRoot, "apps/space-desktop/public/index.html"), "utf8");
+  const styles = await readFile(resolve(productRoot, "apps/space-desktop/public/styles.css"), "utf8");
+
+  assert.match(html, /data-layout="v0\.3-workbench"/);
+  assert.match(html, /id="workspace-select"/);
+  assert.match(html, /id="active-workspace-label"/);
+  assert.match(html, /id="run-history-list"/);
+  assert.match(html, /id="artifact-select"/);
+  assert.match(html, /id="run-artifact-preview"/);
+  assert.match(styles, /\.space-workbench/);
+  assert.match(styles, /\.left-rail/);
+  assert.match(styles, /\.center-stage/);
+  assert.match(styles, /\.right-rail/);
+});
+
 test("createRunningSpaceDemoState shows an in-progress mission before completion", () => {
   const state = createRunningSpaceDemoState({
     goal: " Summarize my workspace ",
@@ -347,6 +363,26 @@ test("space desktop dev server persists providers, threads, and messages without
     });
     assert.equal(thread.thread.workspaceId, workspace.workspace.id);
 
+    const otherWorkspace = await postJson(`http://127.0.0.1:${appPort}/api/workspaces`, {
+      name: "Other Workspace",
+      path: "/tmp/ai-os-other-workspace",
+    });
+    const otherThread = await postJson(`http://127.0.0.1:${appPort}/api/threads`, {
+      title: "Other Thread",
+    });
+    assert.equal(otherThread.thread.workspaceId, otherWorkspace.workspace.id);
+
+    await patchJson(`http://127.0.0.1:${appPort}/api/settings/workspace-selection`, {
+      workspaceId: workspace.workspace.id,
+    });
+    const scopedThreads = await getJson(`http://127.0.0.1:${appPort}/api/threads`);
+    assert.deepEqual(scopedThreads.threads.map((item) => item.title), ["Persistent Thread"]);
+
+    const missingWorkspace = await patchJsonAllowFailure(`http://127.0.0.1:${appPort}/api/settings/workspace-selection`, {
+      workspaceId: "missing-workspace",
+    });
+    assert.equal(missingWorkspace.ok, false);
+
     await postJson(`http://127.0.0.1:${appPort}/api/threads/${thread.thread.id}/messages`, {
       message: "hello persistent server",
     });
@@ -386,8 +422,11 @@ test("space desktop dev server persists providers, threads, and messages without
     assert.equal(providers.providers[0].apiKey, undefined);
 
     const workspaces = await getJson(`http://127.0.0.1:${appPort}/api/workspaces`);
-    assert.equal(workspaces.workspaces.length, 1);
-    assert.equal(workspaces.workspaces[0].name, "Persistent Workspace");
+    assert.equal(workspaces.workspaces.length, 2);
+    assert.deepEqual(
+      workspaces.workspaces.map((item) => item.name).sort(),
+      ["Other Workspace", "Persistent Workspace"],
+    );
     assert.equal(workspaces.activeWorkspaceId, workspace.workspace.id);
 
     const messages = await getJson(`http://127.0.0.1:${appPort}/api/threads/${thread.thread.id}/messages`);
@@ -701,6 +740,35 @@ async function postJson(url, body) {
 async function postJsonAllowFailure(url, body) {
   const response = await fetch(url, {
     method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return {
+    ok: response.ok,
+    status: response.status,
+    payload: await response.json(),
+  };
+}
+
+async function patchJson(url, body) {
+  const response = await fetch(url, {
+    method: "PATCH",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  assert.equal(response.ok, true);
+  return response.json();
+}
+
+async function patchJsonAllowFailure(url, body) {
+  const response = await fetch(url, {
+    method: "PATCH",
     headers: {
       "content-type": "application/json",
     },

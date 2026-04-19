@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>AI Space Demo</title>
+    <title>AI OS Space Workbench</title>
     <link rel="stylesheet" href="/assets/styles.css" />
     <script type="importmap">
       {
@@ -15,135 +15,223 @@
     </script>
   </head>
   <body>
-    <main class="demo-shell">
-      <section class="hero-panel" aria-labelledby="app-title">
-        <p class="eyebrow">AI OS / V0.1 local validation surface</p>
-        <h1 id="app-title">AI Space Demo</h1>
-        <p class="hero-copy">
-          Configure a model provider, chat with it, then test the executor loop with
-          Companion, Control Plane, normalized events, and artifact return.
-        </p>
-      </section>
-
-      <section class="provider-panel" aria-labelledby="provider-title">
-        <div class="panel-heading">
-          <p class="eyebrow">Model Provider</p>
-          <span id="provider-status" class="status-pill" data-phase="idle">not configured</span>
+    <main class="space-workbench" data-layout="v0.3-workbench">
+      <header class="workbench-hero" aria-labelledby="app-title">
+        <div>
+          <p class="eyebrow">AI OS / V0.3 workspace-aware assistant</p>
+          <h1 id="app-title">Space Workbench</h1>
         </div>
-        <h2 id="provider-title">Provider Settings</h2>
-        <form id="provider-form" class="provider-form">
-          <label>
-            Saved providers
-            <select id="provider-select"></select>
-          </label>
-          <div class="form-grid">
+        <p class="hero-copy">
+          Select a local workspace, keep its chat threads scoped, run executor tasks,
+          and reopen saved artifacts from the local SQLite store.
+        </p>
+        <span id="active-workspace-label" class="status-pill" data-phase="idle">no workspace</span>
+      </header>
+
+      <aside class="left-rail" aria-label="Workspace and threads">
+        <section class="workspace-panel panel" aria-labelledby="workspace-title">
+          <div class="panel-heading">
+            <p class="eyebrow">Workspace</p>
+            <span class="mini-label">local-first</span>
+          </div>
+          <h2 id="workspace-title">Active Space</h2>
+          <form id="workspace-form" class="stack-form">
             <label>
-              Provider name
-              <input id="provider-name" value="Local OpenAI-Compatible" autocomplete="off" />
+              Saved workspaces
+              <select id="workspace-select"></select>
             </label>
             <label>
-              Protocol
-              <select id="provider-protocol">
-                <option value="openai-compatible" selected>OpenAI-compatible</option>
-                <option value="anthropic-compatible">Anthropic-compatible</option>
+              Workspace name
+              <input id="workspace-name" value="AI OS Workspace" autocomplete="off" />
+            </label>
+            <label>
+              Local path
+              <input id="workspace-path" placeholder="/Users/zzz/work/my-project" autocomplete="off" />
+            </label>
+            <div class="button-grid">
+              <button id="workspace-save-button" type="submit">Create Workspace</button>
+              <button id="workspace-update-button" type="button">Update Selected</button>
+              <button id="workspace-delete-button" type="button" class="secondary-button">Delete</button>
+            </div>
+            <p id="workspace-help" class="inline-help">Create or select a workspace before starting V0.3 tests.</p>
+          </form>
+        </section>
+
+        <section class="threads-panel panel" aria-labelledby="threads-title">
+          <div class="panel-heading">
+            <p class="eyebrow">Scoped Threads</p>
+            <span class="mini-label">chat history</span>
+          </div>
+          <h2 id="threads-title">Chat Threads</h2>
+          <div class="stack-form">
+            <select id="thread-select"></select>
+            <div class="button-grid">
+              <button id="thread-new-button" type="button">New Thread</button>
+              <button id="thread-rename-button" type="button">Rename</button>
+              <button id="thread-delete-button" type="button" class="secondary-button">Delete</button>
+            </div>
+            <p id="thread-help" class="inline-help">Threads are scoped to the selected workspace.</p>
+          </div>
+        </section>
+      </aside>
+
+      <section class="center-stage" aria-label="Chat and current run">
+        <section class="chat-panel panel tall-panel" aria-labelledby="chat-title">
+          <div class="panel-heading">
+            <p class="eyebrow">Chat Output</p>
+            <span class="mini-label">provider-backed</span>
+          </div>
+          <h2 id="chat-title">Assistant Chat</h2>
+          <ul id="chat-messages" class="message-list"></ul>
+          <form id="chat-form" class="chat-form">
+            <label for="chat-input">Message</label>
+            <textarea id="chat-input" rows="4">Summarize the current workspace in one paragraph.</textarea>
+            <button id="chat-send-button" type="submit">Send Chat</button>
+          </form>
+        </section>
+
+        <section class="executor-panel panel" aria-labelledby="executor-title">
+          <div class="panel-heading">
+            <p class="eyebrow">Current Run</p>
+            <span id="status-pill" class="status-pill" data-phase="idle">idle</span>
+          </div>
+          <h2 id="executor-title">Run A Task</h2>
+          <form id="goal-form" class="goal-form">
+            <label for="goal-input">Goal</label>
+            <textarea id="goal-input" rows="4">Draft a concise plan for organizing my AI OS workspace.</textarea>
+            <div class="form-row">
+              <label for="executor-select">Executor</label>
+              <select id="executor-select">
+                <option value="mock" selected>Mock local executor</option>
+                <option value="codex">Codex local CLI</option>
+                <option value="claude-code">Claude Code local CLI</option>
+              </select>
+              <button id="run-button" type="submit">Run Task</button>
+            </div>
+          </form>
+          <p id="run-summary" class="run-summary">Enter a goal to start the local demo run.</p>
+          <p id="mission-meta" class="mission-meta">Executor mock / waiting for a goal</p>
+        </section>
+
+        <section class="run-output-panel panel" aria-labelledby="run-output-title">
+          <div class="panel-heading">
+            <p class="eyebrow">Run Output</p>
+            <span class="mini-label">transient preview</span>
+          </div>
+          <h2 id="run-output-title">Transcript And Events</h2>
+          <div class="output-grid">
+            <div>
+              <h3>Transcript</h3>
+              <ul id="transcript" class="stack-list compact-list"></ul>
+            </div>
+            <div>
+              <h3>Event Stream</h3>
+              <ul id="event-log" class="event-list compact-list"></ul>
+            </div>
+          </div>
+          <h3>Run Artifact Preview</h3>
+          <ul id="run-artifact-list" class="stack-list compact-list"></ul>
+          <pre id="run-artifact-preview" class="artifact-preview">Run artifacts will render here after a task completes.</pre>
+        </section>
+      </section>
+
+      <aside class="right-rail" aria-label="Provider, run history, and saved artifacts">
+        <section class="provider-panel panel" aria-labelledby="provider-title">
+          <div class="panel-heading">
+            <p class="eyebrow">Model Provider</p>
+            <span id="provider-status" class="status-pill" data-phase="idle">not configured</span>
+          </div>
+          <h2 id="provider-title">Provider Settings</h2>
+          <form id="provider-form" class="provider-form">
+            <label>
+              Saved providers
+              <select id="provider-select"></select>
+            </label>
+            <div class="form-grid">
+              <label>
+                Provider name
+                <input id="provider-name" value="Local OpenAI-Compatible" autocomplete="off" />
+              </label>
+              <label>
+                Protocol
+                <select id="provider-protocol">
+                  <option value="openai-compatible" selected>OpenAI-compatible</option>
+                  <option value="anthropic-compatible">Anthropic-compatible</option>
+                </select>
+              </label>
+              <label>
+                API base URL
+                <input id="provider-base-url" placeholder="https://api.openai.com/v1" autocomplete="off" />
+              </label>
+              <label>
+                Model
+                <select id="provider-model-select"></select>
+              </label>
+              <label class="wide-field">
+                Manual model fallback
+                <input id="provider-model" placeholder="gpt-4.1-mini" autocomplete="off" />
+              </label>
+            </div>
+            <label>
+              API key
+              <input id="provider-api-key" type="password" placeholder="Paste API key. Leave blank to keep saved key." autocomplete="off" />
+            </label>
+            <div class="button-grid">
+              <button id="provider-save-button" type="submit">Save</button>
+              <button id="provider-test-button" type="button">Doctor</button>
+              <button id="provider-models-button" type="button">Models</button>
+              <button id="provider-delete-button" type="button" class="secondary-button">Delete</button>
+            </div>
+            <p id="provider-help" class="inline-help">Provider metadata is stored in SQLite. API keys stay in macOS Keychain.</p>
+          </form>
+        </section>
+
+        <section class="run-history-panel panel" aria-labelledby="run-history-title">
+          <div class="panel-heading">
+            <p class="eyebrow">Run History</p>
+            <span class="mini-label">persisted</span>
+          </div>
+          <h2 id="run-history-title">Saved Runs</h2>
+          <ul id="run-history-list" class="action-list"></ul>
+          <p id="run-history-help" class="inline-help">Mock/Codex/Claude runs in the active workspace appear here after restart.</p>
+          <ul id="run-event-history" class="event-list compact-list"></ul>
+        </section>
+
+        <section class="artifact-panel panel" aria-labelledby="artifact-title">
+          <div class="panel-heading">
+            <p class="eyebrow">Saved Artifacts</p>
+            <span class="mini-label">manual / chat / run</span>
+          </div>
+          <h2 id="artifact-title">Artifact Library</h2>
+          <div class="form-row">
+            <select id="artifact-select"></select>
+            <button id="artifact-open-button" type="button">Open</button>
+            <button id="artifact-delete-button" type="button" class="secondary-button">Delete</button>
+          </div>
+          <ul id="artifact-list" class="action-list"></ul>
+          <form id="artifact-form" class="stack-form">
+            <label>
+              Save a note artifact
+              <input id="artifact-title-input" placeholder="Artifact title" autocomplete="off" />
+            </label>
+            <label>
+              Kind
+              <select id="artifact-kind">
+                <option value="markdown" selected>Markdown</option>
+                <option value="text">Text</option>
+                <option value="report">Report</option>
               </select>
             </label>
             <label>
-              API base URL
-              <input id="provider-base-url" placeholder="https://api.openai.com/v1" autocomplete="off" />
+              Content
+              <textarea id="artifact-content" rows="5" placeholder="Write something to save in this workspace."></textarea>
             </label>
-            <label>
-              Model
-              <select id="provider-model-select"></select>
-            </label>
-            <label>
-              Manual model fallback
-              <input id="provider-model" placeholder="gpt-4.1-mini" autocomplete="off" />
-            </label>
-          </div>
-          <label>
-            API key
-            <input id="provider-api-key" type="password" placeholder="Paste API key. Leave blank to keep saved key." autocomplete="off" />
-          </label>
-          <div class="form-row">
-            <button id="provider-save-button" type="submit">Save Provider</button>
-            <button id="provider-test-button" type="button">Test Provider</button>
-            <button id="provider-models-button" type="button">Load Models</button>
-            <button id="provider-delete-button" type="button">Delete Provider</button>
-            <p id="provider-help" class="inline-help">Provider metadata is stored in SQLite. API keys are stored in macOS Keychain.</p>
-          </div>
-        </form>
-      </section>
-
-      <section class="threads-panel" aria-labelledby="threads-title">
-        <p class="eyebrow">Threads</p>
-        <h2 id="threads-title">Chat Threads</h2>
-        <div class="form-row">
-          <select id="thread-select"></select>
-          <button id="thread-new-button" type="button">New Thread</button>
-          <button id="thread-rename-button" type="button">Rename Thread</button>
-          <button id="thread-delete-button" type="button">Delete Thread</button>
-        </div>
-        <p id="thread-help" class="inline-help">Threads and messages persist locally in V0.2.</p>
-      </section>
-
-      <section class="chat-panel" aria-labelledby="chat-title">
-        <p class="eyebrow">Chatbot</p>
-        <h2 id="chat-title">Real Chat</h2>
-        <ul id="chat-messages" class="message-list"></ul>
-        <form id="chat-form" class="chat-form">
-          <label for="chat-input">Message</label>
-          <textarea id="chat-input" rows="4">Hello, summarize what AI OS can do in V0.1.</textarea>
-          <button id="chat-send-button" type="submit">Send Chat</button>
-        </form>
-      </section>
-
-      <section class="executor-panel" aria-labelledby="executor-title">
-        <p class="eyebrow">Executor Loop</p>
-        <h2 id="executor-title">Run A Task</h2>
-        <form id="goal-form" class="goal-form">
-          <label for="goal-input">Goal</label>
-          <textarea id="goal-input" rows="5">Draft a concise plan for organizing my AI OS workspace.</textarea>
-          <div class="form-row">
-            <label for="executor-select">Executor</label>
-            <select id="executor-select">
-              <option value="mock" selected>Mock local executor</option>
-              <option value="codex">Codex local CLI</option>
-              <option value="claude-code">Claude Code local CLI</option>
-            </select>
-            <button id="run-button" type="submit">Run Demo</button>
-          </div>
-        </form>
-      </section>
-
-      <section class="status-panel" aria-labelledby="status-title">
-        <div class="panel-heading">
-          <p class="eyebrow">Mission / Run</p>
-          <span id="status-pill" class="status-pill" data-phase="idle">idle</span>
-        </div>
-        <h2 id="status-title">Control Plane Status</h2>
-        <p id="run-summary" class="run-summary">Enter a goal to start the local demo run.</p>
-        <p id="mission-meta" class="mission-meta">Executor mock / waiting for a goal</p>
-      </section>
-
-      <section class="transcript-panel" aria-labelledby="transcript-title">
-        <p class="eyebrow">Executor Transcript</p>
-        <h2 id="transcript-title">Transcript Preview</h2>
-        <ul id="transcript" class="stack-list"></ul>
-      </section>
-
-      <section class="event-panel" aria-labelledby="event-title">
-        <p class="eyebrow">Kernel Events</p>
-        <h2 id="event-title">Run Event Stream</h2>
-        <ul id="event-log" class="event-list"></ul>
-      </section>
-
-      <section class="artifact-panel" aria-labelledby="artifact-title">
-        <p class="eyebrow">Artifacts</p>
-        <h2 id="artifact-title">Returned To Space</h2>
-        <ul id="artifact-list" class="stack-list"></ul>
-        <pre id="artifact-preview" class="artifact-preview">Artifacts will render here after a run completes.</pre>
-      </section>
+            <button id="artifact-save-button" type="submit">Save Artifact</button>
+          </form>
+          <p id="artifact-help" class="inline-help">Open a saved artifact to verify it survives restart.</p>
+          <pre id="artifact-preview" class="artifact-preview">Saved artifact content will render here.</pre>
+        </section>
+      </aside>
     </main>
 
     <script type="module" src="/apps/space-desktop/dist/browser.js"></script>

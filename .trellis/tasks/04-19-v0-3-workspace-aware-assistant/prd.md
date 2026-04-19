@@ -22,16 +22,16 @@ Implement V0.3 from `ai_os/ai_os_docs/04-implementation-roadmap.md`: make AI OS 
 
 ## Acceptance Criteria
 
-- [ ] `cd product && npm test` passes.
-- [ ] `cd product && npm ci --ignore-scripts --dry-run` passes.
-- [ ] `cd product && npm run package:mac` succeeds.
-- [ ] User can create/select a workspace.
-- [ ] Active workspace survives app restart.
-- [ ] Threads can be associated with a workspace.
-- [ ] Artifact can be saved and reopened.
-- [ ] Run history survives app restart.
-- [ ] User can distinguish chat output, run output, and saved artifact.
-- [ ] App is no longer a single long unstructured page.
+- [x] `cd product && npm test` passes.
+- [x] `cd product && npm ci --ignore-scripts --dry-run` passes.
+- [x] `cd product && npm run package:mac` succeeds.
+- [x] User can create/select a workspace.
+- [x] Active workspace survives app restart.
+- [x] Threads can be associated with a workspace.
+- [x] Artifact can be saved and reopened.
+- [x] Run history survives app restart.
+- [x] User can distinguish chat output, run output, and saved artifact.
+- [x] App is no longer a single long unstructured page.
 
 ## Non-Goals
 

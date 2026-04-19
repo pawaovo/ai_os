@@ -228,10 +228,14 @@ async function handleDeleteWorkspace(response, workspaceId) {
 }
 
 async function handleWorkspaceSelection(request, response) {
-  const body = await readJsonBody(request);
-  const workspaceId = readRequiredString(body.workspaceId, "workspaceId");
-  appStore.setSetting("activeWorkspaceId", workspaceId);
-  writeJson(response, 200, { activeWorkspaceId: workspaceId });
+  try {
+    const body = await readJsonBody(request);
+    const workspaceId = readRequiredString(body.workspaceId, "workspaceId");
+    appStore.activateWorkspace(workspaceId);
+    writeJson(response, 200, { activeWorkspaceId: workspaceId });
+  } catch (error) {
+    writeJson(response, 400, { error: sanitizeErrorMessage(error) });
+  }
 }
 
 async function handleListArtifacts(response) {
@@ -255,7 +259,15 @@ async function handleCreateArtifact(request, response) {
 }
 
 async function handleGetArtifact(response, artifactId) {
-  writeJson(response, 200, { artifact: appStore.getArtifact(artifactId) });
+  const artifact = appStore.getArtifact(artifactId);
+  const activeWorkspaceId = appStore.getSetting("activeWorkspaceId");
+
+  if (!artifact || (activeWorkspaceId && artifact.workspaceId !== activeWorkspaceId)) {
+    writeJson(response, 404, { error: "Artifact not found in active workspace." });
+    return;
+  }
+
+  writeJson(response, 200, { artifact });
 }
 
 async function handleDeleteArtifact(response, artifactId) {
@@ -268,6 +280,14 @@ async function handleListRuns(response) {
 }
 
 async function handleRunEvents(response, runId) {
+  const run = appStore.getRun(runId);
+  const activeWorkspaceId = appStore.getSetting("activeWorkspaceId");
+
+  if (!run || (activeWorkspaceId && run.workspaceId !== activeWorkspaceId)) {
+    writeJson(response, 404, { error: "Run not found in active workspace." });
+    return;
+  }
+
   writeJson(response, 200, { events: appStore.listRunEvents(runId) });
 }
 
@@ -343,7 +363,7 @@ async function handleModelSelection(request, response) {
 }
 
 async function handleListThreads(response) {
-  writeJson(response, 200, appStore.listThreads());
+  writeJson(response, 200, appStore.listThreads(appStore.getSetting("activeWorkspaceId")));
 }
 
 async function handleCreateThread(request, response) {
@@ -373,7 +393,7 @@ async function handleUpdateThread(request, response, threadId) {
 
 async function handleDeleteThread(response, threadId) {
   appStore.deleteThread(threadId);
-  writeJson(response, 200, appStore.listThreads());
+  writeJson(response, 200, appStore.listThreads(appStore.getSetting("activeWorkspaceId")));
 }
 
 async function handleThreadMessages(response, threadId) {
@@ -692,6 +712,10 @@ class SqliteAppStore {
     `).run(key, value);
   }
 
+  deleteSetting(key) {
+    this.db.prepare("DELETE FROM app_settings WHERE key = ?").run(key);
+  }
+
   listWorkspaces() {
     const workspaces = this.db.prepare("SELECT * FROM workspaces ORDER BY updated_at DESC").all().map(workspaceRowToSummary);
     const activeWorkspaceId = this.getSetting("activeWorkspaceId");
@@ -735,6 +759,21 @@ class SqliteAppStore {
     if (this.getSetting("activeWorkspaceId") === id) {
       this.db.prepare("DELETE FROM app_settings WHERE key = 'activeWorkspaceId'").run();
     }
+  }
+
+  activateWorkspace(id) {
+    const workspace = this.getWorkspace(id);
+    if (!workspace) throw new Error("Workspace not found.");
+
+    this.setSetting("activeWorkspaceId", id);
+
+    const activeThreadId = this.getSetting("activeThreadId");
+    const activeThread = activeThreadId ? this.getThread(activeThreadId) : undefined;
+    if (activeThread && activeThread.workspaceId !== id) {
+      this.deleteSetting("activeThreadId");
+    }
+
+    return workspace;
   }
 
   async listProviders() {
@@ -805,17 +844,30 @@ class SqliteAppStore {
     };
   }
 
-  listThreads() {
-    const threads = this.db.prepare(`
+  listThreads(workspaceId) {
+    const rows = workspaceId
+      ? this.db.prepare(`
+      SELECT t.*, COUNT(m.id) AS message_count,
+        (SELECT content FROM messages WHERE thread_id = t.id ORDER BY created_at DESC LIMIT 1) AS last_message_preview
+      FROM threads t
+      LEFT JOIN messages m ON m.thread_id = t.id
+      WHERE t.workspace_id = ?
+      GROUP BY t.id
+      ORDER BY t.updated_at DESC
+    `).all(workspaceId)
+      : this.db.prepare(`
       SELECT t.*, COUNT(m.id) AS message_count,
         (SELECT content FROM messages WHERE thread_id = t.id ORDER BY created_at DESC LIMIT 1) AS last_message_preview
       FROM threads t
       LEFT JOIN messages m ON m.thread_id = t.id
       GROUP BY t.id
       ORDER BY t.updated_at DESC
-    `).all().map(threadRowToSummary);
+    `).all();
+
+    const threads = rows.map(threadRowToSummary);
     const activeThreadId = this.getSetting("activeThreadId");
-    return { threads, ...(activeThreadId ? { activeThreadId } : {}) };
+    const activeThreadIsVisible = threads.some((thread) => thread.id === activeThreadId);
+    return { threads, ...(activeThreadId && activeThreadIsVisible ? { activeThreadId } : {}) };
   }
 
   createThread(input = {}) {
@@ -838,6 +890,8 @@ class SqliteAppStore {
   }
 
   async ensureThread(threadId) {
+    const activeWorkspaceId = this.getSetting("activeWorkspaceId");
+
     if (threadId) {
       const thread = this.getThread(threadId);
       if (thread) return thread;
@@ -845,13 +899,13 @@ class SqliteAppStore {
     const activeThreadId = this.getSetting("activeThreadId");
     if (activeThreadId) {
       const activeThread = this.getThread(activeThreadId);
-      if (activeThread) return activeThread;
+      if (activeThread && (!activeWorkspaceId || activeThread.workspaceId === activeWorkspaceId)) return activeThread;
     }
     const activeProvider = await this.readActiveProvider();
     return this.createThread({
       providerId: activeProvider?.id,
       modelId: activeProvider?.modelId,
-      workspaceId: this.getSetting("activeWorkspaceId"),
+      workspaceId: activeWorkspaceId,
     });
   }
 
@@ -1005,6 +1059,11 @@ class SqliteAppStore {
       ? this.db.prepare("SELECT * FROM runs WHERE workspace_id = ? ORDER BY started_at DESC").all(workspaceId)
       : this.db.prepare("SELECT * FROM runs ORDER BY started_at DESC").all();
     return { runs: rows.map(runRowToSummary) };
+  }
+
+  getRun(id) {
+    const row = this.db.prepare("SELECT * FROM runs WHERE id = ?").get(id);
+    return row ? runRowToSummary(row) : undefined;
   }
 
   listRunEvents(runId) {

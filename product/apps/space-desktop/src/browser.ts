@@ -6,19 +6,97 @@ import {
 } from "./demo-runtime.js";
 import type { ChatUiMessage } from "./server-runtime.js";
 
+type ProviderProtocol = "openai-compatible" | "anthropic-compatible";
+
+interface ProviderSummary {
+  id?: string;
+  name: string;
+  protocol: ProviderProtocol;
+  baseUrl: string;
+  apiKeyPreview: string;
+  modelId: string;
+}
+
+interface WorkspaceSummary {
+  id: string;
+  name: string;
+  path?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface ThreadSummary {
+  id: string;
+  title: string;
+  messageCount: number;
+  workspaceId?: string;
+  lastMessagePreview?: string;
+}
+
+interface ArtifactSummary {
+  id: string;
+  title: string;
+  kind: string;
+  content: string;
+  path?: string;
+  workspaceId?: string;
+  threadId?: string;
+  runId?: string;
+  source: "manual" | "chat" | "run" | string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface RunSummary {
+  id: string;
+  goal: string;
+  executorChoice: string;
+  status: string;
+  workspaceId?: string;
+  threadId?: string;
+  startedAt: string;
+  completedAt?: string;
+}
+
+interface RunEventSummary {
+  id: string;
+  runId: string;
+  type: string;
+  message: string;
+  createdAt: string;
+}
+
 const state = {
   current: createInitialSpaceDemoState(),
+  providers: [] as ProviderSummary[],
+  workspaces: [] as WorkspaceSummary[],
+  artifacts: [] as ArtifactSummary[],
+  runs: [] as RunSummary[],
+  runEvents: [] as RunEventSummary[],
   activeThreadId: undefined as string | undefined,
   activeProviderId: undefined as string | undefined,
+  activeWorkspaceId: undefined as string | undefined,
+  activeArtifactId: undefined as string | undefined,
+  activeArtifact: undefined as ArtifactSummary | undefined,
+  activeRunId: undefined as string | undefined,
   chatMessages: [
     {
       role: "system",
-      content: "Configure a provider, then send a real chat message.",
+      content: "Create or select a workspace, configure a provider, then send a real chat message.",
     },
   ] as ChatUiMessage[],
 };
 
 const elements = {
+  activeWorkspaceLabel: getElement("active-workspace-label", HTMLElement),
+  workspaceForm: getElement("workspace-form", HTMLFormElement),
+  workspaceSelect: getElement("workspace-select", HTMLSelectElement),
+  workspaceName: getElement("workspace-name", HTMLInputElement),
+  workspacePath: getElement("workspace-path", HTMLInputElement),
+  workspaceSaveButton: getElement("workspace-save-button", HTMLButtonElement),
+  workspaceUpdateButton: getElement("workspace-update-button", HTMLButtonElement),
+  workspaceDeleteButton: getElement("workspace-delete-button", HTMLButtonElement),
+  workspaceHelp: getElement("workspace-help", HTMLElement),
   providerForm: getElement("provider-form", HTMLFormElement),
   providerSelect: getElement("provider-select", HTMLSelectElement),
   providerName: getElement("provider-name", HTMLInputElement),
@@ -49,11 +127,42 @@ const elements = {
   statusPill: getElement("status-pill", HTMLElement),
   transcript: getElement("transcript", HTMLElement),
   eventLog: getElement("event-log", HTMLElement),
-  artifactList: getElement("artifact-list", HTMLElement),
-  artifactPreview: getElement("artifact-preview", HTMLElement),
+  runArtifactList: getElement("run-artifact-list", HTMLElement),
+  runArtifactPreview: getElement("run-artifact-preview", HTMLElement),
   runSummary: getElement("run-summary", HTMLElement),
   missionMeta: getElement("mission-meta", HTMLElement),
+  runHistoryList: getElement("run-history-list", HTMLElement),
+  runHistoryHelp: getElement("run-history-help", HTMLElement),
+  runEventHistory: getElement("run-event-history", HTMLElement),
+  artifactForm: getElement("artifact-form", HTMLFormElement),
+  artifactSelect: getElement("artifact-select", HTMLSelectElement),
+  artifactOpenButton: getElement("artifact-open-button", HTMLButtonElement),
+  artifactDeleteButton: getElement("artifact-delete-button", HTMLButtonElement),
+  artifactTitleInput: getElement("artifact-title-input", HTMLInputElement),
+  artifactKind: getElement("artifact-kind", HTMLSelectElement),
+  artifactContent: getElement("artifact-content", HTMLTextAreaElement),
+  artifactSaveButton: getElement("artifact-save-button", HTMLButtonElement),
+  artifactList: getElement("artifact-list", HTMLElement),
+  artifactPreview: getElement("artifact-preview", HTMLElement),
+  artifactHelp: getElement("artifact-help", HTMLElement),
 };
+
+elements.workspaceForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void createWorkspaceFromForm();
+});
+
+elements.workspaceSelect.addEventListener("change", () => {
+  void selectWorkspaceFromList();
+});
+
+elements.workspaceUpdateButton.addEventListener("click", () => {
+  void updateSelectedWorkspace();
+});
+
+elements.workspaceDeleteButton.addEventListener("click", () => {
+  void deleteSelectedWorkspace();
+});
 
 elements.providerForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -78,6 +187,7 @@ elements.providerDeleteButton.addEventListener("click", () => {
 
 elements.providerModelSelect.addEventListener("change", () => {
   elements.providerModel.value = elements.providerModelSelect.value;
+  void saveModelSelectionFromForm();
 });
 
 elements.threadSelect.addEventListener("change", () => {
@@ -106,45 +216,227 @@ elements.form.addEventListener("submit", (event) => {
   void runDemoFromForm();
 });
 
+elements.runHistoryList.addEventListener("click", (event) => {
+  const target = event.target instanceof HTMLElement ? event.target.closest<HTMLButtonElement>("button[data-run-id]") : null;
+  if (target?.dataset.runId) void openRun(target.dataset.runId);
+});
+
+elements.artifactForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void saveArtifactFromForm();
+});
+
+elements.artifactSelect.addEventListener("change", () => {
+  void openArtifact(elements.artifactSelect.value);
+});
+
+elements.artifactOpenButton.addEventListener("click", () => {
+  void openArtifact(elements.artifactSelect.value);
+});
+
+elements.artifactDeleteButton.addEventListener("click", () => {
+  void deleteSelectedArtifact();
+});
+
+elements.artifactList.addEventListener("click", (event) => {
+  const target = event.target instanceof HTMLElement
+    ? event.target.closest<HTMLButtonElement>("button[data-artifact-id]")
+    : null;
+  if (target?.dataset.artifactId) void openArtifact(target.dataset.artifactId);
+});
+
 void initializeAppState();
 renderChatMessages();
 render(state.current);
 
 async function initializeAppState(): Promise<void> {
+  await loadWorkspaces();
   await loadProviders();
   await loadThreads();
+  await loadArtifacts();
+  await loadRuns();
+}
+
+async function loadWorkspaces(): Promise<void> {
+  try {
+    const payload = await apiJson<{
+      activeWorkspaceId?: string;
+      workspaces: WorkspaceSummary[];
+    }>("/api/workspaces");
+
+    state.workspaces = payload.workspaces;
+    state.activeWorkspaceId = payload.activeWorkspaceId;
+    renderWorkspaces();
+  } catch (error) {
+    elements.workspaceHelp.textContent = errorToMessage(error, "Failed to load workspaces.");
+    state.activeWorkspaceId = undefined;
+    renderWorkspaces();
+  }
+}
+
+async function createWorkspaceFromForm(): Promise<void> {
+  const name = elements.workspaceName.value.trim();
+  if (!name) {
+    elements.workspaceHelp.textContent = "Workspace name is required.";
+    return;
+  }
+
+  elements.workspaceSaveButton.disabled = true;
+  try {
+    const payload = await apiJson<{ workspace: WorkspaceSummary }>("/api/workspaces", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name,
+        path: optionalFormValue(elements.workspacePath.value),
+      }),
+    });
+    state.activeWorkspaceId = payload.workspace.id;
+    state.activeThreadId = undefined;
+    elements.workspaceHelp.textContent = `Workspace created: ${payload.workspace.name}`;
+    await refreshWorkspaceScopedData();
+  } catch (error) {
+    elements.workspaceHelp.textContent = errorToMessage(error, "Failed to create workspace.");
+  } finally {
+    elements.workspaceSaveButton.disabled = false;
+  }
+}
+
+async function selectWorkspaceFromList(): Promise<void> {
+  const workspaceId = elements.workspaceSelect.value;
+  if (!workspaceId) return;
+
+  const workspace = state.workspaces.find((item) => item.id === workspaceId);
+  if (workspace) fillWorkspaceForm(workspace);
+
+  try {
+    await apiJson<{ activeWorkspaceId: string }>("/api/settings/workspace-selection", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workspaceId }),
+    });
+    state.activeWorkspaceId = workspaceId;
+    state.activeThreadId = undefined;
+    await refreshWorkspaceScopedData();
+  } catch (error) {
+    elements.workspaceHelp.textContent = errorToMessage(error, "Failed to select workspace.");
+  }
+}
+
+async function updateSelectedWorkspace(): Promise<void> {
+  if (!state.activeWorkspaceId) {
+    elements.workspaceHelp.textContent = "Select a workspace before updating it.";
+    return;
+  }
+
+  elements.workspaceUpdateButton.disabled = true;
+  try {
+    const payload = await apiJson<{ workspace: WorkspaceSummary }>(
+      `/api/workspaces/${encodeURIComponent(state.activeWorkspaceId)}`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: optionalFormValue(elements.workspaceName.value),
+          path: optionalFormValue(elements.workspacePath.value),
+        }),
+      },
+    );
+    elements.workspaceHelp.textContent = `Workspace updated: ${payload.workspace.name}`;
+    await refreshWorkspaceScopedData();
+  } catch (error) {
+    elements.workspaceHelp.textContent = errorToMessage(error, "Failed to update workspace.");
+  } finally {
+    elements.workspaceUpdateButton.disabled = false;
+  }
+}
+
+async function deleteSelectedWorkspace(): Promise<void> {
+  if (!state.activeWorkspaceId) {
+    elements.workspaceHelp.textContent = "Select a workspace before deleting it.";
+    return;
+  }
+
+  elements.workspaceDeleteButton.disabled = true;
+  try {
+    await apiJson<{ workspaces: WorkspaceSummary[] }>(
+      `/api/workspaces/${encodeURIComponent(state.activeWorkspaceId)}`,
+      { method: "DELETE" },
+    );
+    state.activeWorkspaceId = undefined;
+    state.activeThreadId = undefined;
+    state.activeArtifactId = undefined;
+    state.activeRunId = undefined;
+    elements.workspaceHelp.textContent = "Workspace deleted. Select or create another workspace.";
+    await refreshWorkspaceScopedData();
+  } catch (error) {
+    elements.workspaceHelp.textContent = errorToMessage(error, "Failed to delete workspace.");
+  } finally {
+    elements.workspaceDeleteButton.disabled = false;
+  }
+}
+
+async function refreshWorkspaceScopedData(): Promise<void> {
+  await loadWorkspaces();
+  await loadThreads();
+  await loadArtifacts();
+  await loadRuns();
+}
+
+function renderWorkspaces(): void {
+  const activeWorkspace = getActiveWorkspace();
+  const options = [
+    createOption("", state.workspaces.length > 0 ? "Select a workspace" : "No workspaces saved"),
+    ...state.workspaces.map((workspace) => createOption(workspace.id, workspace.name)),
+  ];
+
+  elements.workspaceSelect.replaceChildren(...options);
+  elements.workspaceSelect.value = activeWorkspace?.id ?? "";
+
+  if (activeWorkspace) {
+    fillWorkspaceForm(activeWorkspace);
+    elements.activeWorkspaceLabel.textContent = activeWorkspace.name;
+    elements.activeWorkspaceLabel.dataset.phase = "completed";
+    elements.workspaceHelp.textContent =
+      `${activeWorkspace.name}${activeWorkspace.path ? ` at ${activeWorkspace.path}` : ""}`;
+    return;
+  }
+
+  elements.activeWorkspaceLabel.textContent = "no workspace";
+  elements.activeWorkspaceLabel.dataset.phase = "idle";
+  if (state.workspaces.length === 0) {
+    elements.workspaceHelp.textContent = "Create a workspace to scope threads, runs, and artifacts.";
+  }
+}
+
+function fillWorkspaceForm(workspace: WorkspaceSummary): void {
+  elements.workspaceName.value = workspace.name;
+  elements.workspacePath.value = workspace.path ?? "";
+}
+
+function getActiveWorkspace(): WorkspaceSummary | undefined {
+  return state.workspaces.find((workspace) => workspace.id === state.activeWorkspaceId);
 }
 
 async function loadProviders(): Promise<void> {
   try {
-    const response = await fetch("/api/providers");
-    const payload = (await response.json()) as {
+    const payload = await apiJson<{
       activeProviderId?: string;
-      providers: Array<{
-        id?: string;
-        name: string;
-        protocol: string;
-        baseUrl: string;
-        apiKeyPreview: string;
-        modelId: string;
-      }>;
-    };
+      providers: ProviderSummary[];
+    }>("/api/providers");
 
-    elements.providerSelect.replaceChildren(
-      ...payload.providers.map((provider) => {
-        const option = document.createElement("option");
-        option.value = provider.id ?? "";
-        option.textContent = `${provider.name} / ${provider.modelId}`;
-        return option;
-      }),
-    );
-
+    state.providers = payload.providers;
     const activeProvider = payload.providers.find((provider) => provider.id === payload.activeProviderId)
       ?? payload.providers[0];
     state.activeProviderId = activeProvider?.id;
 
+    elements.providerSelect.replaceChildren(
+      createOption("", payload.providers.length > 0 ? "Select a provider" : "No providers saved"),
+      ...payload.providers.map((provider) => createOption(provider.id ?? "", `${provider.name} / ${provider.modelId}`)),
+    );
+    elements.providerSelect.value = activeProvider?.id ?? "";
+
     if (activeProvider) {
-      elements.providerSelect.value = activeProvider.id ?? "";
       fillProviderForm(activeProvider);
       elements.providerStatus.textContent = "configured";
       elements.providerStatus.dataset.phase = "completed";
@@ -157,21 +449,25 @@ async function loadProviders(): Promise<void> {
       setModelOptions([], "");
     }
   } catch (error) {
-    renderProviderError(error instanceof Error ? error.message : "Failed to load provider settings.");
+    renderProviderError(errorToMessage(error, "Failed to load provider settings."));
   }
 }
 
 async function selectProviderFromList(): Promise<void> {
-  state.activeProviderId = elements.providerSelect.value || undefined;
+  const providerId = elements.providerSelect.value;
+  const provider = state.providers.find((item) => item.id === providerId);
+  if (!provider?.id) return;
+
+  state.activeProviderId = provider.id;
+  fillProviderForm(provider);
+  await saveModelSelection(provider.id, provider.modelId);
+  elements.providerStatus.textContent = "configured";
+  elements.providerStatus.dataset.phase = "completed";
+  elements.providerHelp.textContent = `Active provider: ${provider.name}`;
   await loadProviders();
 }
 
-function fillProviderForm(provider: {
-  name: string;
-  protocol: string;
-  baseUrl: string;
-  modelId: string;
-}): void {
+function fillProviderForm(provider: ProviderSummary): void {
   elements.providerName.value = provider.name;
   elements.providerProtocol.value = provider.protocol;
   elements.providerBaseUrl.value = provider.baseUrl;
@@ -185,7 +481,9 @@ async function saveProviderFromForm(): Promise<void> {
   elements.providerStatus.dataset.phase = "running";
 
   try {
-    const response = await fetch("/api/provider", {
+    const payload = await apiJson<{
+      provider?: { id?: string; apiKeyPreview: string };
+    }>("/api/providers", {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -199,22 +497,15 @@ async function saveProviderFromForm(): Promise<void> {
         modelId: elements.providerModel.value,
       }),
     });
-    const payload = (await response.json()) as {
-      error?: string;
-      provider?: { apiKeyPreview: string };
-    };
 
-    if (!response.ok) {
-      throw new Error(payload.error ?? "Failed to save provider settings.");
-    }
-
+    state.activeProviderId = payload.provider?.id ?? state.activeProviderId;
     elements.providerApiKey.value = "";
     elements.providerStatus.textContent = "configured";
     elements.providerStatus.dataset.phase = "completed";
     elements.providerHelp.textContent = `Provider saved locally. API key: ${payload.provider?.apiKeyPreview ?? "saved"}`;
     await loadProviders();
   } catch (error) {
-    renderProviderError(error instanceof Error ? error.message : "Failed to save provider settings.");
+    renderProviderError(errorToMessage(error, "Failed to save provider settings."));
   } finally {
     elements.providerSaveButton.disabled = false;
   }
@@ -228,7 +519,7 @@ async function deleteSelectedProvider(): Promise<void> {
 
   elements.providerDeleteButton.disabled = true;
   try {
-    await fetch(`/api/providers/${encodeURIComponent(state.activeProviderId)}`, {
+    await apiJson(`/api/providers/${encodeURIComponent(state.activeProviderId)}`, {
       method: "DELETE",
     });
     state.activeProviderId = undefined;
@@ -238,7 +529,7 @@ async function deleteSelectedProvider(): Promise<void> {
     elements.providerModel.value = "";
     await loadProviders();
   } catch (error) {
-    renderProviderError(error instanceof Error ? error.message : "Failed to delete provider.");
+    renderProviderError(errorToMessage(error, "Failed to delete provider."));
   } finally {
     elements.providerDeleteButton.disabled = false;
   }
@@ -250,19 +541,18 @@ async function testProviderFromForm(): Promise<void> {
   elements.providerStatus.dataset.phase = "running";
 
   try {
-    const response = await fetch("/api/providers/doctor", {
+    const payload = await apiJson<{ available: boolean; message: string; models: string[] }>("/api/providers/doctor", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(providerDraftFromForm()),
     });
-    const payload = (await response.json()) as { available: boolean; message: string; models: string[] };
 
     elements.providerStatus.textContent = payload.available ? "healthy" : "failed";
     elements.providerStatus.dataset.phase = payload.available ? "completed" : "failed";
     elements.providerHelp.textContent = `${payload.message}${payload.models.length ? ` Models: ${payload.models.slice(0, 5).join(", ")}` : ""}`;
     setModelOptions(payload.models, elements.providerModel.value);
   } catch (error) {
-    renderProviderError(error instanceof Error ? error.message : "Provider Doctor failed.");
+    renderProviderError(errorToMessage(error, "Provider Doctor failed."));
   } finally {
     elements.providerTestButton.disabled = false;
   }
@@ -276,8 +566,9 @@ async function loadModelsForSelectedProvider(): Promise<void> {
 
   elements.providerModelsButton.disabled = true;
   try {
-    const response = await fetch(`/api/providers/${encodeURIComponent(state.activeProviderId)}/models`);
-    const payload = (await response.json()) as { available: boolean; message: string; models: string[] };
+    const payload = await apiJson<{ available: boolean; message: string; models: string[] }>(
+      `/api/providers/${encodeURIComponent(state.activeProviderId)}/models`,
+    );
 
     if (!payload.available) {
       throw new Error(payload.message);
@@ -288,31 +579,41 @@ async function loadModelsForSelectedProvider(): Promise<void> {
     if (payload.models.length > 0) {
       elements.providerModel.value = payload.models[0] ?? elements.providerModel.value;
       elements.providerModelSelect.value = elements.providerModel.value;
+      await saveModelSelectionFromForm();
     }
   } catch (error) {
-    renderProviderError(error instanceof Error ? error.message : "Failed to load models.");
+    renderProviderError(errorToMessage(error, "Failed to load models."));
   } finally {
     elements.providerModelsButton.disabled = false;
   }
+}
+
+async function saveModelSelectionFromForm(): Promise<void> {
+  if (!state.activeProviderId || !elements.providerModel.value) return;
+  try {
+    await saveModelSelection(state.activeProviderId, elements.providerModel.value);
+  } catch (error) {
+    renderProviderError(errorToMessage(error, "Failed to save model selection."));
+  }
+}
+
+async function saveModelSelection(providerId: string, modelId: string): Promise<void> {
+  await apiJson("/api/settings/model-selection", {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ providerId, modelId }),
+  });
 }
 
 function setModelOptions(models: string[], selectedModel: string): void {
   const uniqueModels = [...new Set(models.filter(Boolean))];
 
   elements.providerModelSelect.replaceChildren(
-    ...uniqueModels.map((model) => {
-      const option = document.createElement("option");
-      option.value = model;
-      option.textContent = model;
-      return option;
-    }),
+    ...uniqueModels.map((model) => createOption(model, model)),
   );
 
   if (uniqueModels.length === 0) {
-    const option = document.createElement("option");
-    option.value = "";
-    option.textContent = "Load models or type manually";
-    elements.providerModelSelect.append(option);
+    elements.providerModelSelect.append(createOption("", "Load models or type manually"));
     return;
   }
 
@@ -331,43 +632,52 @@ function providerDraftFromForm() {
 }
 
 async function loadThreads(): Promise<void> {
-  const response = await fetch("/api/threads");
-  const payload = (await response.json()) as {
-    activeThreadId?: string;
-    threads: Array<{ id: string; title: string; messageCount: number }>;
-  };
+  try {
+    const payload = await apiJson<{
+      activeThreadId?: string;
+      threads: ThreadSummary[];
+    }>("/api/threads");
 
-  elements.threadSelect.replaceChildren(
-    ...payload.threads.map((thread) => {
-      const option = document.createElement("option");
-      option.value = thread.id;
-      option.textContent = `${thread.title} (${thread.messageCount})`;
-      return option;
-    }),
-  );
+    elements.threadSelect.replaceChildren(
+      createOption("", payload.threads.length > 0 ? "Select a thread" : "No threads in workspace"),
+      ...payload.threads.map((thread) => createOption(thread.id, `${thread.title} (${thread.messageCount})`)),
+    );
 
-  const activeThread = payload.threads.find((thread) => thread.id === payload.activeThreadId) ?? payload.threads[0];
-  state.activeThreadId = activeThread?.id;
+    const activeThread = payload.threads.find((thread) => thread.id === payload.activeThreadId) ?? payload.threads[0];
+    state.activeThreadId = activeThread?.id;
 
-  if (activeThread) {
-    elements.threadSelect.value = activeThread.id;
-    await loadThread(activeThread.id);
-  } else {
-    elements.threadHelp.textContent = "Create a thread to start persistent chat.";
+    if (activeThread) {
+      elements.threadSelect.value = activeThread.id;
+      await loadThread(activeThread.id);
+      return;
+    }
+
+    state.chatMessages = [{
+      role: "system",
+      content: state.activeWorkspaceId
+        ? "No thread in this workspace yet. Create a thread or send a chat message."
+        : "Create or select a workspace to scope new threads.",
+    }];
+    elements.threadHelp.textContent = state.activeWorkspaceId
+      ? "No threads in the active workspace."
+      : "Create/select a workspace before starting persistent chat.";
+    renderChatMessages();
+  } catch (error) {
+    elements.threadHelp.textContent = errorToMessage(error, "Failed to load threads.");
   }
 }
 
 async function createThread(): Promise<void> {
-  const response = await fetch("/api/threads", {
+  const payload = await apiJson<{ thread: { id: string } }>("/api/threads", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       title: "New Thread",
       providerId: state.activeProviderId,
       modelId: elements.providerModel.value,
+      workspaceId: state.activeWorkspaceId,
     }),
   });
-  const payload = (await response.json()) as { thread: { id: string } };
   state.activeThreadId = payload.thread.id;
   await loadThreads();
 }
@@ -382,10 +692,10 @@ async function renameSelectedThread(): Promise<void> {
   const title = globalThis.prompt("Thread name", selected)?.trim();
   if (!title) return;
 
-  await fetch(`/api/threads/${encodeURIComponent(state.activeThreadId)}`, {
+  await apiJson(`/api/threads/${encodeURIComponent(state.activeThreadId)}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ title }),
+    body: JSON.stringify({ title, workspaceId: state.activeWorkspaceId }),
   });
   await loadThreads();
 }
@@ -396,7 +706,7 @@ async function deleteSelectedThread(): Promise<void> {
     return;
   }
 
-  await fetch(`/api/threads/${encodeURIComponent(state.activeThreadId)}`, {
+  await apiJson(`/api/threads/${encodeURIComponent(state.activeThreadId)}`, {
     method: "DELETE",
   });
   state.activeThreadId = undefined;
@@ -408,16 +718,15 @@ async function deleteSelectedThread(): Promise<void> {
 async function loadThread(threadId: string): Promise<void> {
   if (!threadId) return;
 
-  const response = await fetch(`/api/threads/${encodeURIComponent(threadId)}/messages`);
-  const payload = (await response.json()) as {
-    thread: { id: string; title: string };
+  const payload = await apiJson<{
+    thread: { id: string; title: string; workspaceId?: string };
     messages: ChatUiMessage[];
-  };
+  }>(`/api/threads/${encodeURIComponent(threadId)}/messages`);
 
   state.activeThreadId = payload.thread.id;
   state.chatMessages = payload.messages.length > 0
     ? payload.messages
-    : [{ role: "system", content: "This thread has no messages yet." }];
+    : [{ role: "system", content: "This workspace thread has no messages yet." }];
   elements.threadHelp.textContent = `Active thread: ${payload.thread.title}`;
   renderChatMessages();
 }
@@ -437,41 +746,44 @@ async function sendChatFromForm(): Promise<void> {
 
   try {
     const threadId = state.activeThreadId;
-    const response = await fetch(
-      threadId ? `/api/threads/${encodeURIComponent(threadId)}/messages` : "/api/chat/send",
-      {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        message,
-        threadId,
-        providerId: state.activeProviderId,
-      }),
-      },
-    );
-    const payload = (await response.json()) as {
+    const payload = await apiJson<{
       error?: string;
       messages?: ChatUiMessage[];
       threadId?: string;
-    };
+    }>(
+      threadId ? `/api/threads/${encodeURIComponent(threadId)}/messages` : "/api/chat/send",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          message,
+          threadId,
+          providerId: state.activeProviderId,
+        }),
+      },
+    );
 
-    if (!response.ok || !payload.messages) {
+    if (!payload.messages) {
       throw new Error(payload.error ?? "Chat request failed.");
     }
 
     state.chatMessages = payload.messages;
     state.activeThreadId = payload.threadId ?? state.activeThreadId;
     await loadThreads();
+    await loadArtifacts();
   } catch (error) {
     state.chatMessages = [
       ...state.chatMessages,
       {
         role: "system",
-        content: error instanceof Error ? error.message : "Chat request failed.",
+        content: errorToMessage(error, "Chat request failed."),
       },
     ];
+    if (state.activeThreadId) {
+      await loadThread(state.activeThreadId).catch(() => undefined);
+    }
   } finally {
     elements.chatSendButton.disabled = false;
     renderChatMessages();
@@ -498,15 +810,18 @@ async function runDemoFromForm(): Promise<void> {
 
   try {
     state.current = await runDemoOnServer({ goal, executorChoice });
+    state.activeRunId = state.current.summary?.runId;
   } catch (error) {
     state.current = {
       ...state.current,
       phase: "failed",
-      error: error instanceof Error ? error.message : "Demo run failed.",
+      error: errorToMessage(error, "Demo run failed."),
     };
   } finally {
     elements.runButton.disabled = false;
     render(state.current);
+    await loadRuns();
+    await loadArtifacts();
   }
 }
 
@@ -514,7 +829,7 @@ async function runDemoOnServer(input: {
   goal: string;
   executorChoice: SpaceDemoExecutorChoice;
 }): Promise<SpaceDemoState> {
-  const response = await fetch("/api/demo/run", {
+  const payload = await apiJson<{ state?: SpaceDemoState; error?: string }>("/api/demo/run", {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -522,20 +837,203 @@ async function runDemoOnServer(input: {
     body: JSON.stringify(input),
   });
 
-  const payload = (await response.json()) as { state?: SpaceDemoState; error?: string };
-
-  if (!response.ok || !payload.state) {
+  if (!payload.state) {
     throw new Error(payload.error ?? "Local demo server failed.");
   }
 
   return payload.state;
 }
 
+async function loadArtifacts(): Promise<void> {
+  try {
+    const payload = await apiJson<{ artifacts: ArtifactSummary[] }>("/api/artifacts");
+    state.artifacts = payload.artifacts;
+    const selected = state.artifacts.find((artifact) => artifact.id === state.activeArtifactId) ?? state.artifacts[0];
+    state.activeArtifactId = selected?.id;
+
+    if (selected) {
+      await openArtifact(selected.id);
+      return;
+    }
+
+    state.activeArtifact = undefined;
+    renderArtifactLibrary();
+  } catch (error) {
+    elements.artifactHelp.textContent = errorToMessage(error, "Failed to load artifacts.");
+    renderArtifactLibrary();
+  }
+}
+
+async function openArtifact(artifactId: string): Promise<void> {
+  if (!artifactId) return;
+
+  try {
+    const payload = await apiJson<{ artifact?: ArtifactSummary }>(`/api/artifacts/${encodeURIComponent(artifactId)}`);
+    state.activeArtifact = payload.artifact;
+    state.activeArtifactId = payload.artifact?.id ?? artifactId;
+    renderArtifactLibrary();
+  } catch (error) {
+    elements.artifactHelp.textContent = errorToMessage(error, "Failed to open artifact.");
+  }
+}
+
+async function saveArtifactFromForm(): Promise<void> {
+  const title = elements.artifactTitleInput.value.trim();
+  if (!title) {
+    elements.artifactHelp.textContent = "Artifact title is required.";
+    return;
+  }
+
+  elements.artifactSaveButton.disabled = true;
+  try {
+    const payload = await apiJson<{ artifact: ArtifactSummary }>("/api/artifacts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        title,
+        kind: elements.artifactKind.value,
+        content: elements.artifactContent.value,
+        workspaceId: state.activeWorkspaceId,
+        threadId: state.activeThreadId,
+        source: "manual",
+      }),
+    });
+    state.activeArtifactId = payload.artifact.id;
+    elements.artifactTitleInput.value = "";
+    elements.artifactContent.value = "";
+    elements.artifactHelp.textContent = `Saved artifact: ${payload.artifact.title}`;
+    await loadArtifacts();
+  } catch (error) {
+    elements.artifactHelp.textContent = errorToMessage(error, "Failed to save artifact.");
+  } finally {
+    elements.artifactSaveButton.disabled = false;
+  }
+}
+
+async function deleteSelectedArtifact(): Promise<void> {
+  if (!state.activeArtifactId) {
+    elements.artifactHelp.textContent = "Select an artifact before deleting.";
+    return;
+  }
+
+  elements.artifactDeleteButton.disabled = true;
+  try {
+    await apiJson(`/api/artifacts/${encodeURIComponent(state.activeArtifactId)}`, {
+      method: "DELETE",
+    });
+    state.activeArtifactId = undefined;
+    state.activeArtifact = undefined;
+    elements.artifactHelp.textContent = "Artifact deleted.";
+    await loadArtifacts();
+  } catch (error) {
+    elements.artifactHelp.textContent = errorToMessage(error, "Failed to delete artifact.");
+  } finally {
+    elements.artifactDeleteButton.disabled = false;
+  }
+}
+
+function renderArtifactLibrary(): void {
+  elements.artifactSelect.replaceChildren(
+    createOption("", state.artifacts.length > 0 ? "Select an artifact" : "No artifacts saved"),
+    ...state.artifacts.map((artifact) => createOption(artifact.id, `${artifact.title} / ${artifact.source}`)),
+  );
+  elements.artifactSelect.value = state.activeArtifactId ?? "";
+
+  if (state.artifacts.length === 0) {
+    elements.artifactList.replaceChildren(createListItem("No saved artifacts in this workspace yet."));
+    elements.artifactPreview.textContent = "Saved artifact content will render here.";
+    elements.artifactHelp.textContent = "Save a note artifact, send a chat, or run a task.";
+    return;
+  }
+
+  elements.artifactList.replaceChildren(
+    ...state.artifacts.map((artifact) => createActionListItem({
+      id: artifact.id,
+      idName: "artifactId",
+      title: artifact.title,
+      meta: `${artifact.kind} / ${formatDate(artifact.updatedAt)}`,
+      pressed: artifact.id === state.activeArtifactId,
+      source: artifact.source,
+    })),
+  );
+
+  const activeArtifact = state.activeArtifact;
+  if (!activeArtifact) {
+    elements.artifactPreview.textContent = "Select an artifact to preview it.";
+    return;
+  }
+
+  elements.artifactHelp.textContent =
+    `Opened ${activeArtifact.source} artifact${activeArtifact.runId ? ` from run ${truncate(activeArtifact.runId, 24)}` : ""}.`;
+  elements.artifactPreview.textContent = activeArtifact.content || "Artifact has no preview content.";
+}
+
+async function loadRuns(): Promise<void> {
+  try {
+    const payload = await apiJson<{ runs: RunSummary[] }>("/api/runs");
+    state.runs = payload.runs;
+    const selected = state.runs.find((run) => run.id === state.activeRunId) ?? state.runs[0];
+    state.activeRunId = selected?.id;
+
+    if (selected) {
+      await openRun(selected.id);
+      return;
+    }
+
+    state.runEvents = [];
+    renderRunHistory();
+  } catch (error) {
+    elements.runHistoryHelp.textContent = errorToMessage(error, "Failed to load run history.");
+    renderRunHistory();
+  }
+}
+
+async function openRun(runId: string): Promise<void> {
+  if (!runId) return;
+
+  try {
+    const payload = await apiJson<{ events: RunEventSummary[] }>(`/api/runs/${encodeURIComponent(runId)}/events`);
+    state.activeRunId = runId;
+    state.runEvents = payload.events;
+    renderRunHistory();
+  } catch (error) {
+    elements.runHistoryHelp.textContent = errorToMessage(error, "Failed to load run events.");
+  }
+}
+
+function renderRunHistory(): void {
+  if (state.runs.length === 0) {
+    elements.runHistoryList.replaceChildren(createListItem("No persisted runs in this workspace yet."));
+    elements.runEventHistory.replaceChildren();
+    elements.runHistoryHelp.textContent = "Run the mock executor to create persisted run history.";
+    return;
+  }
+
+  elements.runHistoryList.replaceChildren(
+    ...state.runs.map((run) => createActionListItem({
+      id: run.id,
+      idName: "runId",
+      title: run.goal,
+      meta: `${run.executorChoice} / ${run.status} / ${formatDate(run.startedAt)}`,
+      pressed: run.id === state.activeRunId,
+      source: run.status,
+    })),
+  );
+
+  const activeRun = state.runs.find((run) => run.id === state.activeRunId);
+  elements.runHistoryHelp.textContent = activeRun
+    ? `Opened run ${truncate(activeRun.id, 24)}. Events: ${state.runEvents.length}.`
+    : "Select a run to inspect persisted events.";
+  elements.runEventHistory.replaceChildren(
+    ...state.runEvents.map((event) => createEventListItem(event.type, event.message)),
+  );
+}
+
 function render(nextState: SpaceDemoState): void {
   renderStatus(nextState);
   renderTranscript(nextState);
   renderEvents(nextState);
-  renderArtifacts(nextState);
+  renderRunOutput(nextState);
 }
 
 function renderChatMessages(): void {
@@ -569,38 +1067,78 @@ function renderTranscript(nextState: SpaceDemoState): void {
 
 function renderEvents(nextState: SpaceDemoState): void {
   elements.eventLog.replaceChildren(
-    ...nextState.events.map((event) => {
-      const item = document.createElement("li");
-      const type = document.createElement("span");
-      const message = document.createElement("span");
-
-      type.className = "event-type";
-      type.textContent = event.type;
-      message.textContent = event.message;
-      item.append(type, message);
-      return item;
-    }),
+    ...nextState.events.map((event) => createEventListItem(event.type, event.message)),
   );
 }
 
-function renderArtifacts(nextState: SpaceDemoState): void {
+function renderRunOutput(nextState: SpaceDemoState): void {
   if (nextState.artifacts.length === 0) {
-    elements.artifactList.replaceChildren(createListItem(nextState.shell.sections[2].emptyState));
-    elements.artifactPreview.textContent = "Artifacts will render here after a run completes.";
+    elements.runArtifactList.replaceChildren(createListItem(nextState.shell.sections[2].emptyState));
+    elements.runArtifactPreview.textContent = "Run artifacts will render here after a task completes.";
     return;
   }
 
-  elements.artifactList.replaceChildren(
+  elements.runArtifactList.replaceChildren(
     ...nextState.artifacts.map((artifact) => createListItem(`${artifact.title} (${artifact.kind})`)),
   );
-  elements.artifactPreview.textContent =
+  elements.runArtifactPreview.textContent =
     nextState.artifactContents[nextState.artifacts[0]?.id ?? ""] ?? "Artifact has no preview content.";
+}
+
+function createEventListItem(typeText: string, messageText: string): HTMLLIElement {
+  const item = document.createElement("li");
+  const type = document.createElement("span");
+  const message = document.createElement("span");
+
+  type.className = "event-type";
+  type.textContent = typeText;
+  message.textContent = messageText;
+  item.append(type, message);
+  return item;
+}
+
+function createActionListItem(input: {
+  id: string;
+  idName: "artifactId" | "runId";
+  title: string;
+  meta: string;
+  pressed: boolean;
+  source: string;
+}): HTMLLIElement {
+  const item = document.createElement("li");
+  const button = document.createElement("button");
+  const title = document.createElement("span");
+  const meta = document.createElement("span");
+  const badge = document.createElement("span");
+
+  button.type = "button";
+  button.className = "list-button";
+  button.dataset[input.idName] = input.id;
+  button.setAttribute("aria-pressed", input.pressed ? "true" : "false");
+  title.className = "item-title";
+  title.textContent = input.title;
+  meta.className = "item-meta";
+  meta.textContent = input.meta;
+  badge.className = "source-badge";
+  badge.dataset.source = input.source;
+  badge.textContent = input.source;
+
+  button.append(title, meta, badge);
+  item.append(button);
+  return item;
 }
 
 function createListItem(text: string): HTMLLIElement {
   const item = document.createElement("li");
   item.textContent = text;
   return item;
+}
+
+function createOption(value: string, text: string): HTMLOptionElement {
+  const option = document.createElement("option");
+  option.value = value;
+  option.textContent = text;
+  return option;
 }
 
 function getElement<T extends HTMLElement>(
@@ -631,4 +1169,34 @@ function renderProviderError(message: string): void {
   elements.providerStatus.textContent = "failed";
   elements.providerStatus.dataset.phase = "failed";
   elements.providerHelp.textContent = message;
+}
+
+async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, init);
+  const payload = await response.json().catch(() => ({})) as { error?: string };
+
+  if (!response.ok) {
+    throw new Error(payload.error ?? `Request failed with HTTP ${response.status}.`);
+  }
+
+  return payload as T;
+}
+
+function optionalFormValue(value: string): string | undefined {
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function errorToMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
+
+function formatDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString();
+}
+
+function truncate(value: string, maxLength: number): string {
+  return value.length > maxLength ? `${value.slice(0, maxLength - 3)}...` : value;
 }
