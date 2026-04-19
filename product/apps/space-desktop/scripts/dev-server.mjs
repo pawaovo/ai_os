@@ -60,6 +60,39 @@ let processRunner;
 let appStore;
 const runSessions = new Map();
 let automationInterval;
+const BUILT_IN_CAPABILITIES = [
+  {
+    id: "capability-workspace-summary",
+    title: "Workspace Summary",
+    description: "Create a concise summary of the current workspace, threads, artifacts, and trust state.",
+    kind: "local",
+    permissions: [
+      { category: "workspace-read", description: "Read the selected workspace metadata and path." },
+      { category: "artifact-read", description: "Read artifact titles in the active workspace." },
+    ],
+    defaultEnabled: true,
+  },
+  {
+    id: "capability-memory-brief",
+    title: "Memory Brief",
+    description: "Summarize saved memories for the current workspace and personal context.",
+    kind: "local",
+    permissions: [
+      { category: "memory-read", description: "Read saved personal and workspace memory objects." },
+    ],
+    defaultEnabled: true,
+  },
+  {
+    id: "capability-automation-overview",
+    title: "Automation Overview",
+    description: "Create a status brief of local automations and their recent runs.",
+    kind: "local",
+    permissions: [
+      { category: "automation-read", description: "Read local automation definitions and recent automation runs." },
+    ],
+    defaultEnabled: true,
+  },
+];
 
 async function handleRequest(request, response) {
   const requestUrl = new URL(request.url ?? "/", "http://localhost");
@@ -127,6 +160,26 @@ async function handleRequest(request, response) {
 
   if (request.method === "DELETE" && isMemoryPath(pathname)) {
     await handleDeleteMemory(response, memoryIdFromPath(pathname));
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/capabilities") {
+    await handleListCapabilities(response);
+    return;
+  }
+
+  if (request.method === "PATCH" && isCapabilityPath(pathname)) {
+    await handleUpdateCapability(request, response, capabilityIdFromPath(pathname));
+    return;
+  }
+
+  if (request.method === "POST" && isCapabilityRunPath(pathname)) {
+    await handleRunCapability(response, capabilityIdFromPath(pathname));
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/capability-runs") {
+    await handleListCapabilityRuns(response);
     return;
   }
 
@@ -405,6 +458,36 @@ async function handleCreateMemory(request, response) {
 async function handleDeleteMemory(response, memoryId) {
   appStore.deleteMemory(memoryId);
   writeJson(response, 200, appStore.listMemories(appStore.getSetting("activeWorkspaceId")));
+}
+
+async function handleListCapabilities(response) {
+  writeJson(response, 200, appStore.listCapabilities());
+}
+
+async function handleUpdateCapability(request, response, capabilityId) {
+  try {
+    const body = await readJsonBody(request);
+    const enabled = readRequiredBoolean(body.enabled, "enabled");
+    const capability = appStore.updateCapability(capabilityId, { enabled });
+    writeJson(response, 200, { capability });
+  } catch (error) {
+    writeJson(response, 400, { error: sanitizeErrorMessage(error) });
+  }
+}
+
+async function handleRunCapability(response, capabilityId) {
+  try {
+    const capability = appStore.getCapability(capabilityId);
+    if (!capability?.enabled) throw new Error("Capability is disabled or missing.");
+    const result = runLocalCapability(capability, appStore.getSetting("activeWorkspaceId"));
+    writeJson(response, 200, result);
+  } catch (error) {
+    writeJson(response, 400, { error: sanitizeErrorMessage(error) });
+  }
+}
+
+async function handleListCapabilityRuns(response) {
+  writeJson(response, 200, appStore.listCapabilityRuns(appStore.getSetting("activeWorkspaceId")));
 }
 
 async function handleListAutomations(response) {
@@ -848,6 +931,91 @@ function createAutomationResult(automation) {
       ? "Heartbeat follow-up is ready for review."
       : "Local automation ran and recorded this result.",
   ].join("\n");
+}
+
+function runLocalCapability(capability, workspaceId) {
+  const run = appStore.createCapabilityRun({
+    capabilityId: capability.id,
+    workspaceId,
+    status: "completed",
+    startedAt: nowIso(),
+  });
+  appStore.addCapabilityRunEvent({
+    capabilityRunId: run.id,
+    type: "capability.run.started",
+    message: `${capability.title} started.`,
+  });
+
+  const result = createCapabilityResult(capability, workspaceId);
+  const artifact = appStore.createArtifact({
+    title: `Capability result: ${capability.title}`,
+    kind: "report",
+    content: result,
+    workspaceId,
+    source: "capability",
+  });
+  const completed = appStore.updateCapabilityRun(run.id, {
+    status: "completed",
+    result,
+    artifactId: artifact.id,
+    completedAt: nowIso(),
+  });
+  appStore.addCapabilityRunEvent({
+    capabilityRunId: run.id,
+    type: "capability.run.completed",
+    message: `${capability.title} completed.`,
+  });
+
+  return {
+    capability,
+    run: completed,
+    artifact,
+  };
+}
+
+function createCapabilityResult(capability, workspaceId) {
+  const workspace = workspaceId ? appStore.getWorkspace(workspaceId) : undefined;
+
+  switch (capability.id) {
+    case "capability-workspace-summary": {
+      const threads = appStore.listThreads(workspaceId).threads;
+      const artifacts = appStore.listArtifacts(workspaceId).artifacts;
+      return [
+        "# Workspace Summary",
+        "",
+        `Workspace: ${workspace?.name ?? "No workspace selected"}`,
+        `Trust: ${workspace?.trustLevel ?? "strict"}`,
+        `Threads: ${threads.length}`,
+        `Artifacts: ${artifacts.length}`,
+      ].join("\n");
+    }
+    case "capability-memory-brief": {
+      const memories = appStore.listMemories(workspaceId).memories;
+      return [
+        "# Memory Brief",
+        "",
+        ...(memories.length > 0
+          ? memories.map((memory) => `- ${memory.title} [${memory.scope}/${memory.sensitivity}]`)
+          : ["No local memories saved."]),
+      ].join("\n");
+    }
+    case "capability-automation-overview": {
+      const automations = appStore.listAutomations(workspaceId).automations;
+      const runs = appStore.listAutomationRuns(workspaceId).runs;
+      return [
+        "# Automation Overview",
+        "",
+        `Automations: ${automations.length}`,
+        `Automation Runs: ${runs.length}`,
+        "",
+        ...(automations.length > 0
+          ? automations.map((automation) => `- ${automation.title} (${automation.kind} / ${automation.status})`)
+          : ["No automations configured."]),
+      ].join("\n");
+    }
+    default:
+      return `# ${capability.title}\n\nLocal capability executed.`;
+  }
 }
 
 async function listExecutorStatuses() {
@@ -1481,6 +1649,18 @@ function memoryIdFromPath(pathname) {
   return decodeURIComponent(pathname.split("/")[3] ?? "");
 }
 
+function isCapabilityPath(pathname) {
+  return /^\/api\/capabilities\/[^/]+$/.test(pathname);
+}
+
+function isCapabilityRunPath(pathname) {
+  return /^\/api\/capabilities\/[^/]+\/run$/.test(pathname);
+}
+
+function capabilityIdFromPath(pathname) {
+  return decodeURIComponent(pathname.split("/")[3] ?? "");
+}
+
 function isThreadPath(pathname) {
   return /^\/api\/threads\/[^/]+$/.test(pathname);
 }
@@ -1500,6 +1680,11 @@ function readRequiredString(value, field) {
 
 function readOptionalString(value) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function readRequiredBoolean(value, field) {
+  if (typeof value !== "boolean") throw new Error(`Missing required field: ${field}`);
+  return value;
 }
 
 function readOptionalPositiveNumber(value) {
@@ -1662,6 +1847,33 @@ class SqliteAppStore {
         updated_at TEXT NOT NULL,
         last_used_at TEXT
       );
+      CREATE TABLE IF NOT EXISTS capabilities (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        permissions_json TEXT NOT NULL,
+        enabled INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS capability_runs (
+        id TEXT PRIMARY KEY,
+        capability_id TEXT NOT NULL,
+        workspace_id TEXT,
+        status TEXT NOT NULL,
+        result TEXT,
+        artifact_id TEXT,
+        started_at TEXT NOT NULL,
+        completed_at TEXT
+      );
+      CREATE TABLE IF NOT EXISTS capability_run_events (
+        id TEXT PRIMARY KEY,
+        capability_run_id TEXT NOT NULL,
+        type TEXT NOT NULL,
+        message TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS automations (
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL,
@@ -1689,12 +1901,43 @@ class SqliteAppStore {
     this.addColumnIfMissing("threads", "workspace_id", "TEXT");
     this.addColumnIfMissing("workspaces", "trust_level", "TEXT NOT NULL DEFAULT 'strict'");
     this.addColumnIfMissing("approvals", "executor_choice", "TEXT NOT NULL DEFAULT 'mock'");
+    this.syncBuiltInCapabilities();
   }
 
   addColumnIfMissing(table, column, type) {
     const columns = this.db.prepare(`PRAGMA table_info(${table})`).all();
     if (columns.some((entry) => entry.name === column)) return;
     this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  }
+
+  syncBuiltInCapabilities() {
+    const timestamp = nowIso();
+    const statement = this.db.prepare(`
+      INSERT INTO capabilities (id, title, description, kind, permissions_json, enabled, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        title = excluded.title,
+        description = excluded.description,
+        kind = excluded.kind,
+        permissions_json = excluded.permissions_json,
+        updated_at = excluded.updated_at
+    `);
+
+    for (const capability of BUILT_IN_CAPABILITIES) {
+      const createdAt = this.db.prepare("SELECT created_at FROM capabilities WHERE id = ?").get(capability.id)?.created_at ?? timestamp;
+      const enabled = this.db.prepare("SELECT enabled FROM capabilities WHERE id = ?").get(capability.id)?.enabled
+        ?? (capability.defaultEnabled === false ? 0 : 1);
+      statement.run(
+        capability.id,
+        capability.title,
+        capability.description,
+        capability.kind,
+        JSON.stringify(capability.permissions),
+        enabled,
+        createdAt,
+        timestamp,
+      );
+    }
   }
 
   getSetting(key) {
@@ -2153,6 +2396,75 @@ class SqliteAppStore {
     }
   }
 
+  listCapabilities() {
+    const rows = this.db.prepare("SELECT * FROM capabilities ORDER BY title ASC").all();
+    return { capabilities: rows.map(capabilityRowToSummary) };
+  }
+
+  getCapability(id) {
+    const row = this.db.prepare("SELECT * FROM capabilities WHERE id = ?").get(id);
+    return row ? capabilityRowToSummary(row) : undefined;
+  }
+
+  updateCapability(id, input) {
+    const current = this.getCapability(id);
+    if (!current) throw new Error("Capability not found.");
+    this.db.prepare(`
+      UPDATE capabilities
+      SET enabled = ?, updated_at = ?
+      WHERE id = ?
+    `).run(input.enabled ? 1 : 0, nowIso(), id);
+    return this.getCapability(id);
+  }
+
+  createCapabilityRun(input) {
+    const id = randomUUID();
+    this.db.prepare(`
+      INSERT INTO capability_runs (
+        id, capability_id, workspace_id, status, result, artifact_id, started_at, completed_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      input.capabilityId,
+      input.workspaceId ?? null,
+      input.status,
+      input.result ?? null,
+      input.artifactId ?? null,
+      input.startedAt ?? nowIso(),
+      input.completedAt ?? null,
+    );
+    return this.getCapabilityRun(id);
+  }
+
+  updateCapabilityRun(id, input) {
+    this.db.prepare(`
+      UPDATE capability_runs
+      SET status = ?, result = COALESCE(?, result), artifact_id = COALESCE(?, artifact_id), completed_at = COALESCE(?, completed_at)
+      WHERE id = ?
+    `).run(input.status, input.result ?? null, input.artifactId ?? null, input.completedAt ?? null, id);
+    return this.getCapabilityRun(id);
+  }
+
+  getCapabilityRun(id) {
+    const row = this.db.prepare("SELECT * FROM capability_runs WHERE id = ?").get(id);
+    return row ? capabilityRunRowToSummary(row) : undefined;
+  }
+
+  addCapabilityRunEvent(input) {
+    this.db.prepare(`
+      INSERT INTO capability_run_events (id, capability_run_id, type, message, created_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(randomUUID(), input.capabilityRunId, input.type, input.message, input.createdAt ?? nowIso());
+  }
+
+  listCapabilityRuns(workspaceId) {
+    const rows = workspaceId
+      ? this.db.prepare("SELECT * FROM capability_runs WHERE workspace_id = ? ORDER BY started_at DESC").all(workspaceId)
+      : this.db.prepare("SELECT * FROM capability_runs ORDER BY started_at DESC").all();
+    return { runs: rows.map(capabilityRunRowToSummary) };
+  }
+
   createAutomation(input) {
     const id = randomUUID();
     const timestamp = nowIso();
@@ -2430,6 +2742,32 @@ function memoryRowToSummary(row) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     ...(row.last_used_at ? { lastUsedAt: row.last_used_at } : {}),
+  };
+}
+
+function capabilityRowToSummary(row) {
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description,
+    kind: row.kind,
+    permissions: JSON.parse(row.permissions_json),
+    enabled: Boolean(row.enabled),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function capabilityRunRowToSummary(row) {
+  return {
+    id: row.id,
+    capabilityId: row.capability_id,
+    ...(row.workspace_id ? { workspaceId: row.workspace_id } : {}),
+    status: row.status,
+    ...(row.result ? { result: row.result } : {}),
+    ...(row.artifact_id ? { artifactId: row.artifact_id } : {}),
+    startedAt: row.started_at,
+    ...(row.completed_at ? { completedAt: row.completed_at } : {}),
   };
 }
 

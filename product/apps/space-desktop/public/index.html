@@ -15,15 +15,15 @@
     </script>
   </head>
   <body>
-    <main class="space-workbench app-shell" data-layout="v0.7-local-memory-workbench">
+    <main class="space-workbench app-shell" data-layout="v0.8-capability-workbench">
       <header class="workbench-hero" aria-labelledby="app-title">
         <div>
-          <p class="eyebrow">AI OS / V0.7 local memory and personal context</p>
+          <p class="eyebrow">AI OS / V0.8 capability system</p>
           <h1 id="app-title">AI OS Space</h1>
         </div>
         <p class="hero-copy">
-          Work with persistent local memory so chats and tasks can reuse personal and project context
-          while still showing exactly when memory was used.
+          Use local capabilities to extend AI OS safely. Inspect permissions, enable or disable installed
+          capabilities, run them, and review execution history without opening the system up to arbitrary plugins.
         </p>
         <span id="active-workspace-label" class="status-pill" data-phase="idle">no workspace</span>
       </header>
@@ -37,6 +37,7 @@
         <button class="nav-button" type="button" data-page-target="artifacts">Artifacts</button>
         <button class="nav-button" type="button" data-page-target="approvals">Approvals</button>
         <button class="nav-button" type="button" data-page-target="memory">Memory</button>
+        <button class="nav-button" type="button" data-page-target="capabilities">Capabilities</button>
         <button class="nav-button" type="button" data-page-target="providers">Providers</button>
         <button class="nav-button" type="button" data-page-target="settings">Settings</button>
       </aside>
@@ -165,6 +166,16 @@
           <ul id="memory-list" class="action-list"></ul>
           <p id="memory-help" class="inline-help">Memories stay local and can be deleted at any time.</p>
         </section>
+
+        <section class="capability-panel panel page-section" data-pages="capabilities" aria-labelledby="capability-title">
+          <div class="panel-heading">
+            <p class="eyebrow">Capability</p>
+            <span class="mini-label">local registry</span>
+          </div>
+          <h2 id="capability-title">Installed Capabilities</h2>
+          <ul id="capability-list" class="action-list"></ul>
+          <p id="capability-help" class="inline-help">Capabilities stay local and expose declared permissions.</p>
+        </section>
       </aside>
 
       <section class="center-stage" aria-label="Chat and current run">
@@ -270,8 +281,23 @@
             <li><strong>Workspace Trust</strong><span>Change trust mode in the Workspace card.</span></li>
             <li><strong>Automation</strong><span>Create and pause local automations from the Automations page.</span></li>
             <li><strong>Memory</strong><span>Save personal or workspace context from the Memory page and review usage in chat or runs.</span></li>
+            <li><strong>Capabilities</strong><span>Inspect, enable, and run safe local capabilities from the Capabilities page.</span></li>
             <li><strong>Diagnostics</strong><span>Local server, SQLite, Keychain, and bundled resources are checked by tests and smoke runs.</span></li>
           </ul>
+        </section>
+
+        <section class="capability-detail-panel panel page-section" data-pages="capabilities" aria-labelledby="capability-detail-title">
+          <div class="panel-heading">
+            <p class="eyebrow">Capability Detail</p>
+            <span id="capability-status" class="mini-label">not selected</span>
+          </div>
+          <h2 id="capability-detail-title">Permission Contract</h2>
+          <p id="capability-description" class="inline-help">Select a capability to inspect its purpose and permissions.</p>
+          <ul id="capability-permission-list" class="action-list"></ul>
+          <div class="button-grid">
+            <button id="capability-toggle-button" type="button">Enable</button>
+            <button id="capability-run-button" type="button" class="secondary-button">Run Capability</button>
+          </div>
         </section>
       </section>
 
@@ -284,6 +310,16 @@
           <h2 id="memory-usage-title">Current Context</h2>
           <ul id="memory-usage-list" class="action-list"></ul>
           <p id="memory-usage-help" class="inline-help">When memory is injected into chat or runs, it appears here.</p>
+        </section>
+
+        <section class="capability-history-panel panel page-section" data-pages="capabilities" aria-labelledby="capability-history-title">
+          <div class="panel-heading">
+            <p class="eyebrow">Capability Runs</p>
+            <span class="mini-label">history</span>
+          </div>
+          <h2 id="capability-history-title">Execution History</h2>
+          <ul id="capability-run-list" class="action-list"></ul>
+          <p id="capability-run-help" class="inline-help">Capability execution history appears here.</p>
         </section>
 
         <section class="executor-status-panel panel page-section" data-pages="runs providers settings" aria-labelledby="executor-status-title">

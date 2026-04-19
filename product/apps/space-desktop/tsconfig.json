@@ -6,6 +6,7 @@
     "outDir": "dist"
   },
   "references": [
+    { "path": "../../packages/capability/capability-contract" },
     { "path": "../../packages/control/approval-core" },
     { "path": "../../packages/companion/companion-core" },
     { "path": "../../packages/control/control-plane" },

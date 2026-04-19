@@ -24,6 +24,7 @@
       "@ai-os/control-plane": ["packages/control/control-plane/src/index.ts"],
       "@ai-os/workspace-core": ["packages/workspace/workspace-core/src/index.ts"],
       "@ai-os/artifact-core": ["packages/workspace/artifact-core/src/index.ts"],
+      "@ai-os/capability-contract": ["packages/capability/capability-contract/src/index.ts"],
       "@ai-os/provider-protocol": ["packages/model-providers/provider-protocol/src/index.ts"],
       "@ai-os/provider-registry": ["packages/model-providers/provider-registry/src/index.ts"],
       "@ai-os/executor-protocol": ["packages/executors/executor-protocol/src/index.ts"],

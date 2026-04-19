@@ -139,7 +139,7 @@ test("createInitialSpaceDemoState exposes the visible local demo shell", () => {
   assert.equal(state.events[0].type, "space.ready");
 });
 
-test("space desktop V0.7 page exposes local memory controls", async () => {
+test("space desktop V0.8 page exposes capability controls", async () => {
   const html = await readFile(resolve(productRoot, "apps/space-desktop/public/index.html"), "utf8");
   const styles = await readFile(resolve(productRoot, "apps/space-desktop/public/styles.css"), "utf8");
 
@@ -148,9 +148,11 @@ test("space desktop V0.7 page exposes local memory controls", async () => {
   assert.doesNotMatch(html, /data-layout="v0\.5-approval-trust-workbench"/);
   assert.doesNotMatch(html, /data-layout="v0\.6-automation-workbench"/);
   assert.doesNotMatch(html, /data-layout="v0\.6\.1-product-shell"/);
-  assert.match(html, /data-layout="v0\.7-local-memory-workbench"/);
+  assert.doesNotMatch(html, /data-layout="v0\.7-local-memory-workbench"/);
+  assert.match(html, /data-layout="v0\.8-capability-workbench"/);
   assert.match(html, /class="app-nav"/);
   assert.match(html, /data-page-target="memory"/);
+  assert.match(html, /data-page-target="capabilities"/);
   assert.match(html, /data-page-target="settings"/);
   assert.match(html, /id="settings-title"/);
   assert.match(html, /id="memory-title"/);
@@ -159,6 +161,12 @@ test("space desktop V0.7 page exposes local memory controls", async () => {
   assert.match(html, /id="memory-sensitivity"/);
   assert.match(html, /id="memory-list"/);
   assert.match(html, /id="memory-usage-list"/);
+  assert.match(html, /id="capability-title"/);
+  assert.match(html, /id="capability-list"/);
+  assert.match(html, /id="capability-permission-list"/);
+  assert.match(html, /id="capability-toggle-button"/);
+  assert.match(html, /id="capability-run-button"/);
+  assert.match(html, /id="capability-run-list"/);
   assert.match(html, /id="workspace-select"/);
   assert.match(html, /id="workspace-trust-level"/);
   assert.match(html, /id="active-workspace-label"/);
@@ -778,6 +786,58 @@ test("space desktop V0.7 memories persist and are injected into chat and runs", 
   } finally {
     await appServer.stop();
     await providerServer.stop();
+    await rm(storageDir, { recursive: true, force: true });
+  }
+});
+
+test("space desktop V0.8 capabilities can be inspected, toggled, and run", async () => {
+  const storageDir = await mkdtemp(`${tmpdir()}/ai-os-v08-`);
+  const appPort = await getAvailablePort();
+  const appServer = startSpaceDesktopServer({
+    port: appPort,
+    storageDir,
+  });
+
+  try {
+    await waitForHttp(`http://127.0.0.1:${appPort}/`);
+
+    const workspace = await postJson(`http://127.0.0.1:${appPort}/api/workspaces`, {
+      name: "V0.8 Workspace",
+      path: storageDir,
+    });
+    assert.equal(workspace.workspace.name, "V0.8 Workspace");
+
+    const capabilities = await getJson(`http://127.0.0.1:${appPort}/api/capabilities`);
+    assert.equal(capabilities.capabilities.length >= 3, true);
+    const workspaceSummary = capabilities.capabilities.find((capability) => capability.id === "capability-workspace-summary");
+    assert.equal(workspaceSummary.enabled, true);
+    assert.equal(workspaceSummary.permissions.some((permission) => permission.category === "workspace-read"), true);
+
+    const disabled = await patchJson(`http://127.0.0.1:${appPort}/api/capabilities/${workspaceSummary.id}`, {
+      enabled: false,
+    });
+    assert.equal(disabled.capability.enabled, false);
+
+    const disabledRun = await postJsonAllowFailure(`http://127.0.0.1:${appPort}/api/capabilities/${workspaceSummary.id}/run`, {});
+    assert.equal(disabledRun.ok, false);
+    assert.match(disabledRun.payload.error, /disabled/i);
+
+    const enabledAgain = await patchJson(`http://127.0.0.1:${appPort}/api/capabilities/${workspaceSummary.id}`, {
+      enabled: true,
+    });
+    assert.equal(enabledAgain.capability.enabled, true);
+
+    const executed = await postJson(`http://127.0.0.1:${appPort}/api/capabilities/${workspaceSummary.id}/run`, {});
+    assert.equal(executed.run.status, "completed");
+    assert.equal(executed.artifact.source, "capability");
+
+    const capabilityRuns = await getJson(`http://127.0.0.1:${appPort}/api/capability-runs`);
+    assert.equal(capabilityRuns.runs.some((run) => run.capabilityId === workspaceSummary.id), true);
+
+    const artifacts = await getJson(`http://127.0.0.1:${appPort}/api/artifacts`);
+    assert.equal(artifacts.artifacts.some((artifact) => artifact.source === "capability"), true);
+  } finally {
+    await appServer.stop();
     await rm(storageDir, { recursive: true, force: true });
   }
 });

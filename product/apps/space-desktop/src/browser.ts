@@ -5,6 +5,7 @@ import {
 } from "./demo-runtime.js";
 import type { ChatUiMessage } from "./server-runtime.js";
 import type { ApprovalRecord, WorkspaceTrustLevel } from "@ai-os/approval-core";
+import type { CapabilityPermission, CapabilityRecord, CapabilityRunRecord } from "@ai-os/capability-contract";
 import type { MemoryRecord, MemoryScope, MemorySensitivity, RetrievedMemory } from "@ai-os/kernel-memory";
 
 type ProviderProtocol = "openai-compatible" | "anthropic-compatible";
@@ -102,6 +103,8 @@ interface AutomationRunSummary {
 
 interface MemorySummary extends MemoryRecord {}
 
+interface CapabilitySummary extends CapabilityRecord {}
+
 interface LiveRunState {
   runId: string;
   goal: string;
@@ -136,6 +139,8 @@ const state = {
   automations: [] as AutomationSummary[],
   automationRuns: [] as AutomationRunSummary[],
   memories: [] as MemorySummary[],
+  capabilities: [] as CapabilitySummary[],
+  capabilityRuns: [] as CapabilityRunRecord[],
   memoryUsage: [] as RetrievedMemory[],
   executorStatuses: [] as ExecutorStatusSummary[],
   liveRun: undefined as LiveRunState | undefined,
@@ -146,6 +151,7 @@ const state = {
   activeArtifactId: undefined as string | undefined,
   activeArtifact: undefined as ArtifactSummary | undefined,
   activeRunId: undefined as string | undefined,
+  activeCapabilityId: undefined as string | undefined,
   activePage: "space",
   chatMessages: [
     {
@@ -231,6 +237,15 @@ const elements = {
   memoryHelp: getElement("memory-help", HTMLElement),
   memoryUsageList: getElement("memory-usage-list", HTMLElement),
   memoryUsageHelp: getElement("memory-usage-help", HTMLElement),
+  capabilityList: getElement("capability-list", HTMLElement),
+  capabilityHelp: getElement("capability-help", HTMLElement),
+  capabilityStatus: getElement("capability-status", HTMLElement),
+  capabilityDescription: getElement("capability-description", HTMLElement),
+  capabilityPermissionList: getElement("capability-permission-list", HTMLElement),
+  capabilityToggleButton: getElement("capability-toggle-button", HTMLButtonElement),
+  capabilityRunButton: getElement("capability-run-button", HTMLButtonElement),
+  capabilityRunList: getElement("capability-run-list", HTMLElement),
+  capabilityRunHelp: getElement("capability-run-help", HTMLElement),
   automationForm: getElement("automation-form", HTMLFormElement),
   automationTitleInput: getElement("automation-title-input", HTMLInputElement),
   automationKind: getElement("automation-kind", HTMLSelectElement),
@@ -358,6 +373,24 @@ elements.memoryList.addEventListener("click", (event) => {
   if (target?.dataset.memoryId) void deleteMemory(target.dataset.memoryId);
 });
 
+elements.capabilityList.addEventListener("click", (event) => {
+  const target = event.target instanceof HTMLElement
+    ? event.target.closest<HTMLButtonElement>("button[data-capability-id]")
+    : null;
+  if (target?.dataset.capabilityId) {
+    state.activeCapabilityId = target.dataset.capabilityId;
+    renderCapabilities();
+  }
+});
+
+elements.capabilityToggleButton.addEventListener("click", () => {
+  void toggleSelectedCapability();
+});
+
+elements.capabilityRunButton.addEventListener("click", () => {
+  void runSelectedCapability();
+});
+
 elements.automationForm.addEventListener("submit", (event) => {
   event.preventDefault();
   void createAutomationFromForm();
@@ -420,6 +453,8 @@ async function initializeAppState(): Promise<void> {
   await loadAutomations();
   await loadAutomationRuns();
   await loadMemories();
+  await loadCapabilities();
+  await loadCapabilityRuns();
 }
 
 function setActivePage(page: string): void {
@@ -1392,6 +1427,112 @@ function renderMemoryUsage(): void {
   elements.memoryUsageHelp.textContent = `${state.memoryUsage.length} memory item${state.memoryUsage.length === 1 ? "" : "s"} injected into the current context.`;
 }
 
+async function loadCapabilities(): Promise<void> {
+  try {
+    const payload = await apiJson<{ capabilities: CapabilitySummary[] }>("/api/capabilities");
+    state.capabilities = payload.capabilities;
+    if (!state.activeCapabilityId && payload.capabilities.length > 0) {
+      state.activeCapabilityId = payload.capabilities[0]?.id;
+    }
+    renderCapabilities();
+  } catch (error) {
+    elements.capabilityHelp.textContent = errorToMessage(error, "Failed to load capabilities.");
+    renderCapabilities();
+  }
+}
+
+async function loadCapabilityRuns(): Promise<void> {
+  try {
+    const payload = await apiJson<{ runs: CapabilityRunRecord[] }>("/api/capability-runs");
+    state.capabilityRuns = payload.runs;
+    renderCapabilityRuns();
+  } catch (error) {
+    elements.capabilityRunHelp.textContent = errorToMessage(error, "Failed to load capability history.");
+    renderCapabilityRuns();
+  }
+}
+
+async function toggleSelectedCapability(): Promise<void> {
+  const capability = state.capabilities.find((item) => item.id === state.activeCapabilityId);
+  if (!capability) return;
+
+  const payload = await apiJson<{ capability: CapabilitySummary }>(`/api/capabilities/${encodeURIComponent(capability.id)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ enabled: !capability.enabled }),
+  });
+  state.capabilities = state.capabilities.map((item) => item.id === capability.id ? payload.capability : item);
+  renderCapabilities();
+}
+
+async function runSelectedCapability(): Promise<void> {
+  const capability = state.capabilities.find((item) => item.id === state.activeCapabilityId);
+  if (!capability) return;
+
+  await apiJson(`/api/capabilities/${encodeURIComponent(capability.id)}/run`, { method: "POST" });
+  await loadCapabilityRuns();
+  await loadArtifacts();
+}
+
+function renderCapabilities(): void {
+  if (state.capabilities.length === 0) {
+    elements.capabilityList.replaceChildren(createListItem("No local capabilities installed."));
+    elements.capabilityStatus.textContent = "not selected";
+    elements.capabilityDescription.textContent = "Select a capability to inspect its purpose and permissions.";
+    elements.capabilityPermissionList.replaceChildren();
+    return;
+  }
+
+  const activeCapability = state.capabilities.find((item) => item.id === state.activeCapabilityId) ?? state.capabilities[0];
+  state.activeCapabilityId = activeCapability?.id;
+  elements.capabilityList.replaceChildren(
+    ...state.capabilities.map((capability) => createActionListItem({
+      id: capability.id,
+      idName: "capabilityId",
+      title: capability.title,
+      meta: `${capability.kind} / ${capability.enabled ? "enabled" : "disabled"} / ${capability.permissions.length} permission${capability.permissions.length === 1 ? "" : "s"}`,
+      pressed: capability.id === activeCapability?.id,
+      source: capability.enabled ? "completed" : "paused",
+    })),
+  );
+
+  if (!activeCapability) return;
+  elements.capabilityStatus.textContent = activeCapability.enabled ? "enabled" : "disabled";
+  elements.capabilityDescription.textContent = activeCapability.description;
+  elements.capabilityPermissionList.replaceChildren(
+    ...activeCapability.permissions.map((permission) => createActionListItem({
+      id: `${activeCapability.id}-${permission.category}`,
+      idName: "capabilityId",
+      title: permission.category,
+      meta: permission.description,
+      pressed: false,
+      source: "low",
+    })),
+  );
+  elements.capabilityToggleButton.textContent = activeCapability.enabled ? "Disable" : "Enable";
+  elements.capabilityRunButton.disabled = !activeCapability.enabled;
+}
+
+function renderCapabilityRuns(): void {
+  if (state.capabilityRuns.length === 0) {
+    elements.capabilityRunList.replaceChildren(createListItem("No capability runs yet."));
+    elements.capabilityRunHelp.textContent = "Run a capability to create local execution history.";
+    return;
+  }
+
+  elements.capabilityRunList.replaceChildren(
+    ...state.capabilityRuns.map((run) => createActionListItem({
+      id: run.id,
+      idName: "runId",
+      title: run.capabilityId,
+      meta: `${run.status} / ${formatDate(run.startedAt)}${run.result ? ` / ${run.result}` : ""}`,
+      pressed: false,
+      source: run.status,
+    })),
+  );
+  elements.capabilityRunHelp.textContent = `${state.capabilityRuns.length} capability run${state.capabilityRuns.length === 1 ? "" : "s"} recorded.`;
+}
+
 function renderApprovalHistory(): void {
   if (state.approvals.length === 0) {
     elements.approvalHistoryList.replaceChildren(createListItem("No approval decisions in this workspace yet."));
@@ -1768,7 +1909,7 @@ function createEventListItem(typeText: string, messageText: string): HTMLLIEleme
 
 function createActionListItem(input: {
   id: string;
-  idName: "artifactId" | "runId" | "approvalId" | "memoryId";
+  idName: "artifactId" | "runId" | "approvalId" | "memoryId" | "capabilityId";
   title: string;
   meta: string;
   pressed: boolean;

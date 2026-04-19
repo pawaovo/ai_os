@@ -20,6 +20,7 @@ const workspacePackages = [
   ["apps/space-desktop", "space-desktop"],
   ["packages/companion/companion-core", "companion-core"],
   ["packages/control/approval-core", "approval-core"],
+  ["packages/capability/capability-contract", "capability-contract"],
   ["packages/control/control-plane", "control-plane"],
   ["packages/conversation/conversation-core", "conversation-core"],
   ["packages/conversation/conversation-runtime", "conversation-runtime"],
@@ -133,7 +134,7 @@ function createInfoPlist() {
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.7.0</string>
+  <string>0.8.0</string>
   <key>CFBundleVersion</key>
   <string>1</string>
   <key>LSMinimumSystemVersion</key>

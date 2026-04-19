@@ -15,6 +15,7 @@
     "typecheck": "tsc -b"
   },
   "dependencies": {
+    "@ai-os/capability-contract": "0.0.0",
     "@ai-os/companion-core": "0.0.0",
     "@ai-os/approval-core": "0.0.0",
     "@ai-os/control-plane": "0.0.0",
