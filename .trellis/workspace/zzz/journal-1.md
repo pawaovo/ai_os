@@ -397,3 +397,49 @@ Finished V0.2 UI controls for provider delete, model dropdown with manual fallba
 ### Next Steps
 
 - None - task complete
+
+
+## Session 12: Real app E2E validation and provider-flow fixes
+
+**Date**: 2026-04-20
+**Task**: Real app E2E validation and provider-flow fixes
+**Branch**: `codex/real-app-e2e-validation`
+
+### Summary
+
+(Add summary)
+
+### Main Changes
+
+| Area | Result |
+|------|--------|
+| Real E2E | Validated the packaged Electron app through real UI operations for workspace creation, provider save, model loading, doctor, chat, and run flows. |
+| Provider model UX | Fixed the bug where clicking `Models` silently replaced the current model value with the first returned model. |
+| Secret storage stability | Fixed a macOS packaged-app restart hang caused by Electron `safeStorage` decrypt on local ad-hoc rebuilds by using the existing Keychain path on macOS. |
+| Restart validation | Restarted the packaged app with the same isolated profile and confirmed readiness, saved provider preview, and real chat still worked after restart. |
+| Additional state validation | Verified memory creation, automation creation, automation tick, pending approval state, run history, and artifact persistence on the packaged-app backend. |
+
+**Key files**:
+- `product/apps/space-desktop/src/browser.ts`
+- `product/apps/space-desktop/scripts/dev-server.mjs`
+- `product/tests/space-desktop.test.mjs`
+- `.trellis/spec/backend/electron-desktop-shell.md`
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3f7d8027d57997d3b233ad304f073300c39e3f00` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

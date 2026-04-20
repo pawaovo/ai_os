@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 11
+- **Total Sessions**: 12
 - **Last Active**: 2026-04-20
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~399 | Active |
+| `journal-1.md` | ~445 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 12 | 2026-04-20 | Real app E2E validation and provider-flow fixes | `3f7d8027d57997d3b233ad304f073300c39e3f00` | `codex/real-app-e2e-validation` |
 | 11 | 2026-04-20 | Polish desktop usability and user guidance | `628fe5704a4dff8ea412ad888123b76fe6ef9249` | `codex/desktop-usability-polish` |
 | 10 | 2026-04-20 | Complete Electron cross-platform desktop shell | `bb0ea8073e78bddca490bec8cd6374e1188751b1` | `codex/electron-cross-platform-desktop` |
 | 9 | 2026-04-19 | V0.2 Polish Provider And Thread Controls | `7af83b9` | `main` |

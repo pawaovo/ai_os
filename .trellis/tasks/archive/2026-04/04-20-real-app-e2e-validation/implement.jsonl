@@ -1,0 +1,6 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend development guide"}
+{"file": ".trellis/spec/backend/electron-desktop-shell.md", "reason": "Packaged app E2E may surface Electron runtime contract issues."}
+{"file": ".trellis/spec/frontend/desktop-readiness-contract.md", "reason": "Real UI validation depends on readiness and install panels staying consistent."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "E2E issues may cross UI, server, and local storage boundaries."}
