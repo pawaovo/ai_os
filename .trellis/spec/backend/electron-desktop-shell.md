@@ -51,6 +51,7 @@ This scenario is cross-layer because one change fans out into package scripts, E
 | `AI_SPACE_DESKTOP_SHELL` | Electron main | `"electron"` | Switches install/readiness messaging and Electron-specific secret storage. |
 | `AI_SPACE_STORAGE_DIR` | launcher or Electron main | absolute directory path | Defaults to `app.getPath("userData")/profile` in Electron. |
 | `AI_SPACE_SECRET_BACKEND` | tests/dev only | optional `"file"` | Overrides normal secret-store selection for isolated tests. |
+| `x-ai-os-language` | browser request header | `en` or `zh-CN` | Lets the local server shape server-backed UI text to the selected language. |
 
 ### 3. Contracts
 
@@ -113,8 +114,15 @@ Contract details:
   - `buildCommand` must switch to `cd product && npm run package:win`
   - `openCommand` must point to `product\build\electron\win-unpacked\AI OS.exe`
 - `windowsCommand` must remain present even on macOS because the UI surfaces it as cross-platform packaging guidance.
+- `language` should be returned in readiness responses when the backend knows the persisted UI language, so the browser can stay in sync after reload.
 - When running outside Electron, `nodeRequired` must flip back to `true`, but install guidance should still point to the primary Electron product path.
-- `mode`, `nodeRequired`, `buildCommand`, `openCommand`, `windowsCommand`, and `note` are the contract points most likely to drift and must stay aligned with docs and renderer expectations.
+- `mode`, `nodeRequired`, `buildCommand`, `openCommand`, `windowsCommand`, `note`, and `language` are the contract points most likely to drift and must stay aligned with docs and renderer expectations.
+
+#### Language Setting Contract
+
+- `GET /api/settings/language` returns the persisted UI language.
+- `PATCH /api/settings/language` persists the current UI language.
+- The backend reads `x-ai-os-language` on requests and uses it for server-backed UI text where available, especially readiness and install guidance.
 
 ### 4. Validation & Error Matrix
 
@@ -123,6 +131,7 @@ Contract details:
 | Electron scripts missing or `main` points elsewhere | `validate-electron-config.mjs` fails | `npm run validate:electron` |
 | Packaged app resources drift from builder config | package config regression test fails | `node --test tests/*.test.mjs` |
 | Host-specific install path drifts from actual packaging output | readiness and docs show the wrong open path | `npm test` on the host plus manual packaging smoke |
+| UI language changes but server text stays in the old language | mixed-language dashboard after reload or refresh | bilingual smoke with `PATCH /api/settings/language` then `GET /api/app/readiness` |
 | Server never reaches readiness | Electron main exits with non-zero after wait loop | packaged smoke run stderr / exit code |
 | macOS Electron provider secret read happens after app rebuild | Keychain path remains responsive and avoids `safeStorage` main-process hangs | packaged app restart smoke with saved provider |
 | `safeStorage` is unavailable in non-macOS Electron session | provider secret read/write throws explicit error | manual provider save path |

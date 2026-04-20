@@ -56,6 +56,10 @@ const {
   normalizeMemorySensitivity,
   selectRelevantMemories,
 } = await import(pathToImportUrl(join(productRoot, "packages/kernel/kernel-memory/dist/index.js")));
+const {
+  normalizeAppLanguage,
+  translateApp,
+} = await import(pathToImportUrl(join(appRoot, "dist/i18n.js")));
 
 await mkdir(storageRoot, { recursive: true });
 
@@ -102,7 +106,17 @@ async function handleRequest(request, response) {
   const pathname = requestUrl.pathname;
 
   if (request.method === "GET" && pathname === "/api/app/readiness") {
-    await handleAppReadiness(response);
+    await handleAppReadiness(request, response);
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/settings/language") {
+    await handleGetLanguageSetting(response);
+    return;
+  }
+
+  if (request.method === "PATCH" && pathname === "/api/settings/language") {
+    await handleSetLanguageSetting(request, response);
     return;
   }
 
@@ -388,11 +402,35 @@ function buildProduct() {
   });
 }
 
-async function handleAppReadiness(response) {
-  writeJson(response, 200, await createAppReadinessSummary());
+function requestLanguage(request) {
+  const header = request.headers["x-ai-os-language"];
+  const value = Array.isArray(header) ? header[0] : header;
+  return normalizeAppLanguage(value ?? appStore.getSetting("uiLanguage"));
 }
 
-async function createAppReadinessSummary() {
+function serverT(language, key, variables = {}) {
+  return translateApp(language, key, variables);
+}
+
+async function handleAppReadiness(request, response) {
+  const language = requestLanguage(request);
+  writeJson(response, 200, await createAppReadinessSummary(language));
+}
+
+async function handleGetLanguageSetting(response) {
+  writeJson(response, 200, {
+    language: normalizeAppLanguage(appStore.getSetting("uiLanguage")),
+  });
+}
+
+async function handleSetLanguageSetting(request, response) {
+  const body = await readJsonBody(request);
+  const language = normalizeAppLanguage(body.language);
+  appStore.setSetting("uiLanguage", language);
+  writeJson(response, 200, { language });
+}
+
+async function createAppReadinessSummary(language) {
   const activeWorkspaceId = appStore.getSetting("activeWorkspaceId");
   const activeWorkspace = activeWorkspaceId ? appStore.getWorkspace(activeWorkspaceId) : undefined;
   const providerList = createProviderListResponse(await appStore.listProviders(), appStore.getSetting("activeProviderId"));
@@ -420,102 +458,126 @@ async function createAppReadinessSummary() {
   const checks = [
     createReadinessCheck({
       id: "workspace",
-      title: "Local Workspace",
+      title: serverT(language, "server.readiness.workspace.title"),
       ready: Boolean(activeWorkspace),
       readyDetail: activeWorkspace
-        ? `${activeWorkspace.name}${activeWorkspace.path ? ` at ${activeWorkspace.path}` : ""} / ${activeWorkspace.trustLevel}`
+        ? serverT(language, "server.readiness.workspace.ready", {
+            name: activeWorkspace.name,
+            path: activeWorkspace.path ? ` / ${activeWorkspace.path}` : "",
+            trust: serverT(language, `workspace.trust.${activeWorkspace.trustLevel}`),
+          })
         : "",
-      actionDetail: "Create or select a workspace to scope chat, runs, artifacts, memory, and automations.",
+      actionDetail: serverT(language, "server.readiness.workspace.action"),
       targetPage: "space",
     }),
     createReadinessCheck({
       id: "provider",
-      title: "Custom Provider",
+      title: serverT(language, "server.readiness.provider.title"),
       ready: Boolean(activeProvider),
       readyDetail: activeProvider
-        ? `${activeProvider.name} / ${activeProvider.protocol} / ${activeProvider.modelId}`
+        ? serverT(language, "server.readiness.provider.ready", {
+            name: activeProvider.name,
+            protocol: serverT(language, `provider.protocol.${activeProvider.protocol}`),
+            modelId: activeProvider.modelId,
+          })
         : "",
-      actionDetail: "Configure an OpenAI-compatible or Anthropic-compatible provider before daily chat.",
+      actionDetail: serverT(language, "server.readiness.provider.action"),
       targetPage: "providers",
     }),
     createReadinessCheck({
       id: "chat",
-      title: "Daily Chat",
+      title: serverT(language, "server.readiness.chat.title"),
       ready: Boolean(activeProvider),
       readyDetail: activeProvider
-        ? `${threads.length} thread${threads.length === 1 ? "" : "s"} ready; new threads can be created automatically.`
+        ? serverT(language, "server.readiness.chat.ready", {
+            threads: threads.length,
+          })
         : "",
-      actionDetail: "Save a provider, then send a message in Chat.",
+      actionDetail: serverT(language, "server.readiness.chat.action"),
       targetPage: "chat",
     }),
     createReadinessCheck({
       id: "executors",
-      title: "Code Executors",
+      title: serverT(language, "server.readiness.executors.title"),
       ready: Boolean(codexStatus?.available && claudeStatus?.available),
-      readyDetail: "Codex and Claude Code are available from the local machine.",
-      actionDetail: `Mock is available; Codex: ${codexStatus?.available ? "ready" : "needs setup"}; Claude Code: ${claudeStatus?.available ? "ready" : "needs setup"}.`,
+      readyDetail: serverT(language, "server.readiness.executors.ready"),
+      actionDetail: serverT(language, "server.readiness.executors.action", {
+        codex: codexStatus?.available ? serverT(language, "server.state.ready") : serverT(language, "server.state.setup"),
+        claude: claudeStatus?.available ? serverT(language, "server.state.ready") : serverT(language, "server.state.setup"),
+      }),
       targetPage: "runs",
       optional: true,
     }),
     createReadinessCheck({
       id: "approvals",
-      title: "Approval And Trust",
+      title: serverT(language, "server.readiness.approvals.title"),
       ready: true,
       readyDetail: pendingApprovals.length > 0
-        ? `${pendingApprovals.length} approval request${pendingApprovals.length === 1 ? "" : "s"} waiting.`
-        : "Approval history and workspace trust controls are available.",
+        ? serverT(language, "server.readiness.approvals.pending", { count: pendingApprovals.length })
+        : serverT(language, "server.readiness.approvals.ready"),
       actionDetail: "",
       targetPage: "approvals",
     }),
     createReadinessCheck({
       id: "artifacts",
-      title: "Artifacts",
+      title: serverT(language, "server.readiness.artifacts.title"),
       ready: artifacts.length > 0,
-      readyDetail: `${artifacts.length} artifact${artifacts.length === 1 ? "" : "s"} saved locally.`,
-      actionDetail: "Run a task, chat, or save a note artifact to build a local work record.",
+      readyDetail: serverT(language, "server.readiness.artifacts.ready", { count: artifacts.length }),
+      actionDetail: serverT(language, "server.readiness.artifacts.action"),
       targetPage: "artifacts",
       optional: true,
     }),
     createReadinessCheck({
       id: "automations",
-      title: "Automations",
+      title: serverT(language, "server.readiness.automations.title"),
       ready: automations.length > 0,
-      readyDetail: `${automations.length} automation${automations.length === 1 ? "" : "s"} configured; ${automationRuns.length} run${automationRuns.length === 1 ? "" : "s"} recorded.`,
-      actionDetail: "Create a one-off, scheduled, or heartbeat automation for proactive follow-up.",
+      readyDetail: serverT(language, "server.readiness.automations.ready", {
+        automations: automations.length,
+        runs: automationRuns.length,
+      }),
+      actionDetail: serverT(language, "server.readiness.automations.action"),
       targetPage: "automations",
       optional: true,
     }),
     createReadinessCheck({
       id: "memory",
-      title: "Local Memory",
+      title: serverT(language, "server.readiness.memory.title"),
       ready: memories.length > 0,
-      readyDetail: `${memories.length} memory item${memories.length === 1 ? "" : "s"} available for chat and runs.`,
-      actionDetail: "Save a personal or workspace memory to make future chat and runs more contextual.",
+      readyDetail: serverT(language, "server.readiness.memory.ready", { count: memories.length }),
+      actionDetail: serverT(language, "server.readiness.memory.action"),
       targetPage: "memory",
       optional: true,
     }),
     createReadinessCheck({
       id: "capabilities",
-      title: "Capabilities",
+      title: serverT(language, "server.readiness.capabilities.title"),
       ready: enabledCapabilities.length > 0,
-      readyDetail: `${enabledCapabilities.length}/${capabilities.length} local capabilities enabled; ${capabilityRuns.length} run${capabilityRuns.length === 1 ? "" : "s"} recorded.`,
-      actionDetail: "Enable at least one local capability before reuse.",
+      readyDetail: serverT(language, "server.readiness.capabilities.ready", {
+        enabled: enabledCapabilities.length,
+        total: capabilities.length,
+        runs: capabilityRuns.length,
+      }),
+      actionDetail: serverT(language, "server.readiness.capabilities.action"),
       targetPage: "capabilities",
     }),
     createReadinessCheck({
       id: "forge",
-      title: "AI Forge",
+      title: serverT(language, "server.readiness.forge.title"),
       ready: exportedRecipes.length > 0,
-      readyDetail: `${exportedRecipes.length} exported recipe${exportedRecipes.length === 1 ? "" : "s"}; ${recipeTests.length} validation run${recipeTests.length === 1 ? "" : "s"}.`,
+      readyDetail: serverT(language, "server.readiness.forge.ready", {
+        exported: exportedRecipes.length,
+        tests: recipeTests.length,
+      }),
       actionDetail: completedRuns.length > 0
-        ? "Create a recipe from a completed run, test it, then save it as a local capability."
-        : "Complete a run first, then convert it into a reusable recipe.",
+        ? serverT(language, "server.readiness.forge.action.completed")
+        : serverT(language, "server.readiness.forge.action.empty"),
       targetPage: "forge",
       optional: true,
     }),
   ];
 
   return {
+    language,
     version: APP_VERSION,
     releaseName: APP_RELEASE_NAME,
     layout: "v1.0-personal-ai-os",
@@ -553,7 +615,7 @@ async function createAppReadinessSummary() {
     },
     executors,
     checks,
-    nextActions: createNextActions(checks),
+    nextActions: createNextActions(checks, language),
     install: {
       mode: desktopShell === "electron" ? "electron-cross-platform" : "local-browser-server",
       ...createInstallGuidance(),
@@ -562,8 +624,8 @@ async function createAppReadinessSummary() {
       nodeRequired: desktopShell !== "electron",
       storageRoot,
       note: desktopShell === "electron"
-        ? "This local V1.0 build uses Electron as the product desktop shell for macOS and Windows."
-        : "This local V1.0 server is running without the Electron desktop shell. Package the Electron app below when you want the primary desktop experience.",
+        ? serverT(language, "server.install.note.electron")
+        : serverT(language, "server.install.note.local"),
     },
   };
 }
@@ -578,18 +640,21 @@ function createReadinessCheck(input) {
   };
 }
 
-function createNextActions(checks) {
+function createNextActions(checks, language) {
   const required = checks
     .filter((check) => check.status === "action")
-    .map((check) => `Open ${check.targetPage}: ${check.detail}`);
+    .map((check) => serverT(language, "server.next.open", {
+      page: serverT(language, `nav.${check.targetPage}`),
+      detail: check.detail,
+    }));
 
   if (required.length > 0) return required.slice(0, 4);
 
   return [
-    "Send a daily chat message from Chat.",
-    "Run a local task from Runs using mock, Codex, or Claude Code.",
-    "Save useful context in Memory.",
-    "Turn a successful run into a Forge recipe and local capability.",
+    serverT(language, "server.next.chat"),
+    serverT(language, "server.next.run"),
+    serverT(language, "server.next.memory"),
+    serverT(language, "server.next.forge"),
   ];
 }
 

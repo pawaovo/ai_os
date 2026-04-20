@@ -3,6 +3,13 @@ import {
   type SpaceDemoExecutorChoice,
   type SpaceDemoState,
 } from "./demo-runtime.js";
+import {
+  DEFAULT_APP_LANGUAGE,
+  normalizeAppLanguage,
+  translateApp,
+  translatedValuesForKey,
+  type AppLanguage,
+} from "./i18n.js";
 import type { ChatUiMessage } from "./server-runtime.js";
 import type { ApprovalRecord, WorkspaceTrustLevel } from "@ai-os/approval-core";
 import type { CapabilityPermission, CapabilityRecord, CapabilityRunRecord, RecipeRecord, RecipeTestRecord } from "@ai-os/capability-contract";
@@ -87,6 +94,7 @@ interface AppReadinessCheck {
 }
 
 interface AppReadinessSummary {
+  language?: AppLanguage;
   version: string;
   releaseName: string;
   layout: string;
@@ -194,6 +202,7 @@ interface LiveRunState {
 }
 
 const state = {
+  language: normalizeAppLanguage(globalThis.navigator.language, DEFAULT_APP_LANGUAGE),
   current: createInitialSpaceDemoState(),
   providers: [] as ProviderSummary[],
   workspaces: [] as WorkspaceSummary[],
@@ -363,12 +372,17 @@ const elements = {
   artifactList: getElement("artifact-list", HTMLElement),
   artifactPreview: getElement("artifact-preview", HTMLElement),
   artifactHelp: getElement("artifact-help", HTMLElement),
+  languageSelect: getElement("language-select", HTMLSelectElement),
 };
 
 elements.navButtons.forEach((button) => {
   button.addEventListener("click", () => {
     setActivePage(button.dataset.pageTarget ?? "space");
   });
+});
+
+elements.languageSelect.addEventListener("change", () => {
+  void saveLanguageSetting();
 });
 
 elements.appReadinessList.addEventListener("click", (event) => {
@@ -573,6 +587,8 @@ renderCurrentRunView();
 setActivePage(state.activePage);
 
 async function initializeAppState(): Promise<void> {
+  applyStaticTranslations();
+  await loadLanguageSetting();
   await loadWorkspaces();
   await loadExecutors();
   await loadProviders();
@@ -588,6 +604,406 @@ async function initializeAppState(): Promise<void> {
   await loadRecipes();
   await loadRecipeTests();
   await loadAppReadiness();
+}
+
+function t(key: string, variables: Record<string, string | number> = {}): string {
+  return translateApp(state.language, key, variables);
+}
+
+function translatedToken(value: string): string {
+  const key = `status.${value}`;
+  const translated = t(key);
+  if (translated !== key) return translated;
+  const sourceKey = `source.${value}`;
+  const translatedSource = t(sourceKey);
+  return translatedSource !== sourceKey ? translatedSource : value;
+}
+
+function applyStaticTranslations(): void {
+  document.documentElement.lang = state.language;
+  document.title = t("meta.title");
+  elements.languageSelect.value = state.language;
+
+  setText(".workbench-hero .eyebrow", t("hero.eyebrow"));
+  setText("#app-title", t("hero.title"));
+  setText(".workbench-hero .hero-copy", t("hero.copy"));
+  setText(".app-nav .eyebrow", t("nav.eyebrow"));
+  setNavText("start", t("nav.start"));
+  setNavText("space", t("nav.space"));
+  setNavText("chat", t("nav.chat"));
+  setNavText("runs", t("nav.runs"));
+  setNavText("automations", t("nav.automations"));
+  setNavText("artifacts", t("nav.artifacts"));
+  setNavText("approvals", t("nav.approvals"));
+  setNavText("memory", t("nav.memory"));
+  setNavText("capabilities", t("nav.capabilities"));
+  setNavText("forge", t("nav.forge"));
+  setNavText("providers", t("nav.providers"));
+  setNavText("settings", t("nav.settings"));
+
+  setText(".readiness-panel .eyebrow", t("readiness.eyebrow"));
+  setText("#readiness-title", t("readiness.title"));
+  if (!state.appReadiness) {
+    elements.appReadinessHelp.textContent = t("readiness.help.default");
+  }
+
+  setText(".workspace-panel .eyebrow", t("workspace.eyebrow"));
+  setText(".workspace-panel .mini-label", t("workspace.mini"));
+  setText("#workspace-title", t("workspace.title"));
+  setControlLabel(elements.workspaceSelect, t("workspace.saved"));
+  setControlLabel(elements.workspaceName, t("workspace.name"));
+  setControlLabel(elements.workspacePath, t("workspace.path"));
+  setPlaceholder(elements.workspacePath, t("workspace.path.placeholder"));
+  setControlLabel(elements.workspaceTrustLevel, t("workspace.trust"));
+  setOptionText(elements.workspaceTrustLevel, "strict", t("workspace.trust.strict"));
+  setOptionText(elements.workspaceTrustLevel, "trusted-local-writes", t("workspace.trust.trusted-local-writes"));
+  elements.workspaceSaveButton.textContent = t("workspace.button.create");
+  elements.workspaceUpdateButton.textContent = t("workspace.button.update");
+  elements.workspaceDeleteButton.textContent = t("workspace.button.delete");
+
+  setText(".threads-panel .eyebrow", t("threads.eyebrow"));
+  setText(".threads-panel .mini-label", t("threads.mini"));
+  setText("#threads-title", t("threads.title"));
+  elements.threadNewButton.textContent = t("threads.button.new");
+  elements.threadRenameButton.textContent = t("threads.button.rename");
+  elements.threadDeleteButton.textContent = t("threads.button.delete");
+
+  setText(".automation-panel .eyebrow", t("automation.eyebrow"));
+  setText(".automation-panel .mini-label", t("automation.mini"));
+  setText("#automation-title", t("automation.title"));
+  setControlLabel(elements.automationTitleInput, t("automation.form.title"));
+  setControlLabel(elements.automationKind, t("automation.form.kind"));
+  setControlLabel(elements.automationIntervalInput, t("automation.form.interval"));
+  setControlLabel(elements.automationPrompt, t("automation.form.prompt"));
+  syncLocalizedInputValue(elements.automationTitleInput, "automation.title.default");
+  syncLocalizedInputValue(elements.automationPrompt, "automation.prompt.default");
+  setOptionText(elements.automationKind, "one-off", t("automation.kind.one-off"));
+  setOptionText(elements.automationKind, "scheduled", t("automation.kind.scheduled"));
+  setOptionText(elements.automationKind, "heartbeat", t("automation.kind.heartbeat"));
+  elements.automationSaveButton.textContent = t("automation.button.create");
+  elements.automationTickButton.textContent = t("automation.button.tick");
+  if (state.automations.length === 0 && !elements.automationHelp.dataset.dynamic) {
+    elements.automationHelp.textContent = t("automation.help.default");
+  }
+
+  setText(".memory-panel .eyebrow", t("memory.eyebrow"));
+  setText(".memory-panel .mini-label", t("memory.mini"));
+  setText("#memory-title", t("memory.title"));
+  setControlLabel(elements.memoryTitleInput, t("memory.form.title"));
+  setControlLabel(elements.memoryScope, t("memory.form.scope"));
+  setControlLabel(elements.memorySensitivity, t("memory.form.sensitivity"));
+  setControlLabel(elements.memoryContent, t("memory.form.content"));
+  syncLocalizedInputValue(elements.memoryTitleInput, "memory.title.default");
+  syncLocalizedInputValue(elements.memoryContent, "memory.content.default");
+  setOptionText(elements.memoryScope, "personal", t("memory.scope.personal"));
+  setOptionText(elements.memoryScope, "workspace", t("memory.scope.workspace"));
+  setOptionText(elements.memorySensitivity, "low", t("memory.sensitivity.low"));
+  setOptionText(elements.memorySensitivity, "medium", t("memory.sensitivity.medium"));
+  setOptionText(elements.memorySensitivity, "high", t("memory.sensitivity.high"));
+  elements.memorySaveButton.textContent = t("memory.button.save");
+  if (state.memories.length === 0 && !elements.memoryHelp.dataset.dynamic) {
+    elements.memoryHelp.textContent = t("memory.help.default");
+  }
+
+  setText(".capability-panel .eyebrow", t("capability.eyebrow"));
+  setText(".capability-panel .mini-label", t("capability.mini"));
+  setText("#capability-title", t("capability.title"));
+  if (state.capabilities.length === 0 && !elements.capabilityHelp.dataset.dynamic) {
+    elements.capabilityHelp.textContent = t("capability.help.default");
+  }
+
+  setText(".forge-panel .eyebrow", t("forge.eyebrow"));
+  setText(".forge-panel .mini-label", t("forge.mini"));
+  setText("#forge-title", t("forge.title"));
+  setControlLabel(elements.forgeRunSelect, t("forge.form.run"));
+  elements.forgeCreateButton.textContent = t("forge.button.create");
+  if (!elements.forgeHelp.dataset.dynamic) {
+    elements.forgeHelp.textContent = t("forge.help.default");
+  }
+
+  setText(".start-panel .eyebrow", t("start.eyebrow"));
+  setText(".start-panel .mini-label", t("start.mini"));
+  setText("#start-title", t("start.title"));
+  setText(".start-copy", t("start.copy"));
+  setMetricLabel(0, t("start.metrics.threads"));
+  setMetricLabel(1, t("start.metrics.runs"));
+  setMetricLabel(2, t("start.metrics.artifacts"));
+  setMetricLabel(3, t("start.metrics.capabilities"));
+  setText(".start-panel h3", t("start.recommended"));
+
+  setText(".chat-panel .eyebrow", t("chat.eyebrow"));
+  setText(".chat-panel .mini-label", t("chat.mini"));
+  setText("#chat-title", t("chat.title"));
+  setText("label[for='chat-input']", t("chat.form.message"));
+  syncLocalizedInputValue(elements.chatInput, "chat.input.default");
+  elements.chatSendButton.textContent = t("chat.button.send");
+
+  setText(".executor-panel .eyebrow", t("run.eyebrow"));
+  setText("#executor-title", t("run.title"));
+  setText("label[for='goal-input']", t("run.form.goal"));
+  syncLocalizedInputValue(elements.input, "run.goal.default");
+  setControlLabel(elements.executorTimeoutInput, t("run.form.timeout"));
+  setText("label[for='executor-select']", t("run.form.executor"));
+  setOptionText(elements.executor, "mock", t("run.executor.mock"));
+  setOptionText(elements.executor, "codex", t("run.executor.codex"));
+  setOptionText(elements.executor, "claude-code", t("run.executor.claude-code"));
+  elements.runButton.textContent = t("run.button.run");
+  elements.runCancelButton.textContent = t("run.button.cancel");
+
+  setText(".approval-panel .eyebrow", t("approval.eyebrow"));
+  setText("#approval-title", t("approval.title"));
+  setApprovalGridLabel(0, t("approval.category"));
+  setApprovalGridLabel(1, t("approval.risk"));
+  setApprovalGridLabel(2, t("approval.action"));
+  setApprovalGridLabel(3, t("approval.decision"));
+  setApprovalGridLabel(4, t("approval.resolved"));
+  elements.approvalGrantButton.textContent = t("approval.button.grant");
+  elements.approvalRejectButton.textContent = t("approval.button.reject");
+  if (!state.liveRun?.pendingApproval) {
+    elements.approvalReason.textContent = t("approval.reason.default");
+  }
+
+  setText(".run-output-panel .eyebrow", t("run-output.eyebrow"));
+  setText(".run-output-panel .mini-label", t("run-output.mini"));
+  setText("#run-output-title", t("run-output.title"));
+  setRunOutputHeading(0, t("run-output.transcript"));
+  setRunOutputHeading(1, t("run-output.events"));
+  setRunOutputHeading(2, t("run-output.artifacts"));
+
+  setText(".settings-panel .eyebrow", t("settings.eyebrow"));
+  setText(".settings-panel .mini-label", t("settings.mini"));
+  setText("#settings-title", t("settings.title"));
+  setControlLabel(elements.languageSelect, t("language.label"));
+  setOptionText(elements.languageSelect, "en", t("language.en"));
+  setOptionText(elements.languageSelect, "zh-CN", t("language.zh-CN"));
+  renderSettingsList();
+
+  setText(".capability-detail-panel .eyebrow", t("capability-detail.eyebrow"));
+  setText("#capability-detail-title", t("capability-detail.title"));
+  if (!state.activeCapabilityId) {
+    elements.capabilityDescription.textContent = t("capability-detail.help.default");
+  }
+  elements.capabilityRunButton.textContent = t("capability-detail.button.run");
+
+  setText(".recipe-editor-panel .eyebrow", t("recipe-editor.eyebrow"));
+  setText("#recipe-editor-title", t("recipe-editor.title"));
+  setControlLabel(elements.recipeTitleInput, t("recipe-editor.form.title"));
+  setControlLabel(elements.recipePromptInput, t("recipe-editor.form.prompt"));
+  setControlLabel(elements.recipeInputSpec, t("recipe-editor.form.inputSpec"));
+  setControlLabel(elements.recipeOutputSpec, t("recipe-editor.form.outputSpec"));
+  elements.recipeSaveButton.textContent = t("recipe-editor.button.save");
+  elements.recipeTestButton.textContent = t("recipe-editor.button.test");
+
+  setText(".install-panel .eyebrow", t("install.eyebrow"));
+  setText("#install-title", t("install.title"));
+  if (!state.appReadiness) {
+    elements.installHelp.textContent = t("install.help.default");
+  }
+
+  setText(".memory-usage-panel .eyebrow", t("memory-usage.eyebrow"));
+  setText(".memory-usage-panel .mini-label", t("memory-usage.mini"));
+  setText("#memory-usage-title", t("memory-usage.title"));
+  if (state.memoryUsage.length === 0) {
+    elements.memoryUsageHelp.textContent = t("memory-usage.help.default");
+  }
+
+  setText(".capability-history-panel .eyebrow", t("capability-history.eyebrow"));
+  setText(".capability-history-panel .mini-label", t("capability-history.mini"));
+  setText("#capability-history-title", t("capability-history.title"));
+  if (state.capabilityRuns.length === 0) {
+    elements.capabilityRunHelp.textContent = t("capability-history.help.default");
+  }
+
+  setText(".recipe-test-history-panel .eyebrow", t("recipe-test-history.eyebrow"));
+  setText(".recipe-test-history-panel .mini-label", t("recipe-test-history.mini"));
+  setText("#recipe-test-history-title", t("recipe-test-history.title"));
+  if (state.recipeTests.length === 0) {
+    elements.recipeTestHelp.textContent = t("recipe-test-history.help.default");
+  }
+
+  setText(".executor-status-panel .eyebrow", t("executor-status.eyebrow"));
+  setText(".executor-status-panel .mini-label", t("executor-status.mini"));
+  setText("#executor-status-title", t("executor-status.title"));
+  if (state.executorStatuses.length === 0) {
+    elements.executorStatusHelp.textContent = t("executor-status.help.default");
+  }
+
+  setText(".provider-panel .eyebrow", t("provider.eyebrow"));
+  setText("#provider-title", t("provider.title"));
+  setControlLabel(elements.providerSelect, t("provider.form.saved"));
+  setControlLabel(elements.providerName, t("provider.form.name"));
+  setControlLabel(elements.providerProtocol, t("provider.form.protocol"));
+  setControlLabel(elements.providerBaseUrl, t("provider.form.baseUrl"));
+  setControlLabel(elements.providerModelSelect, t("provider.form.model"));
+  setControlLabel(elements.providerModel, t("provider.form.manualModel"));
+  setControlLabel(elements.providerApiKey, t("provider.form.apiKey"));
+  setPlaceholder(elements.providerBaseUrl, t("provider.form.baseUrl.placeholder"));
+  setPlaceholder(elements.providerModel, t("provider.form.manualModel.placeholder"));
+  setPlaceholder(elements.providerApiKey, t("provider.form.apiKey.placeholder"));
+  setOptionText(elements.providerProtocol, "openai-compatible", t("provider.protocol.openai-compatible"));
+  setOptionText(elements.providerProtocol, "anthropic-compatible", t("provider.protocol.anthropic-compatible"));
+  elements.providerSaveButton.textContent = t("provider.button.save");
+  elements.providerTestButton.textContent = t("provider.button.doctor");
+  elements.providerModelsButton.textContent = t("provider.button.models");
+  elements.providerDeleteButton.textContent = t("provider.button.delete");
+  if (!state.activeProviderId && !elements.providerHelp.dataset.dynamic) {
+    elements.providerHelp.textContent = t("provider.help.default");
+  }
+
+  setText(".run-history-panel .eyebrow", t("run-history.eyebrow"));
+  setText(".run-history-panel .mini-label", t("run-history.mini"));
+  setText("#run-history-title", t("run-history.title"));
+  if (state.runs.length === 0) {
+    elements.runHistoryHelp.textContent = t("run-history.help.default");
+  }
+
+  setText(".approval-history-panel .eyebrow", t("approval-history.eyebrow"));
+  setText(".approval-history-panel .mini-label", t("approval-history.mini"));
+  setText("#approval-history-title", t("approval-history.title"));
+  if (state.approvals.length === 0) {
+    elements.approvalHistoryHelp.textContent = t("approval-history.help.default");
+  }
+
+  setText(".automation-history-panel .eyebrow", t("automation-history.eyebrow"));
+  setText(".automation-history-panel .mini-label", t("automation-history.mini"));
+  setText("#automation-history-title", t("automation-history.title"));
+  if (state.automationRuns.length === 0) {
+    elements.automationRunHelp.textContent = t("automation-history.help.default");
+  }
+
+  setText(".artifact-panel .eyebrow", t("artifact.eyebrow"));
+  setText(".artifact-panel .mini-label", t("artifact.mini"));
+  setText("#artifact-title", t("artifact.title"));
+  elements.artifactOpenButton.textContent = t("artifact.button.open");
+  elements.artifactDeleteButton.textContent = t("artifact.button.delete");
+  setControlLabel(elements.artifactTitleInput, t("artifact.form.title"));
+  setPlaceholder(elements.artifactTitleInput, t("artifact.form.title.placeholder"));
+  setControlLabel(elements.artifactKind, t("artifact.form.kind"));
+  setOptionText(elements.artifactKind, "markdown", t("artifact.form.kind.markdown"));
+  setOptionText(elements.artifactKind, "text", t("artifact.form.kind.text"));
+  setOptionText(elements.artifactKind, "report", t("artifact.form.kind.report"));
+  setControlLabel(elements.artifactContent, t("artifact.form.content"));
+  setPlaceholder(elements.artifactContent, t("artifact.form.content.placeholder"));
+  elements.artifactSaveButton.textContent = t("artifact.button.save");
+  if (!state.activeArtifactId && state.artifacts.length === 0 && !elements.artifactHelp.dataset.dynamic) {
+    elements.artifactHelp.textContent = t("artifact.help.default");
+    elements.artifactPreview.textContent = t("artifact.preview.default");
+  }
+}
+
+function setText(selector: string, text: string): void {
+  const element = document.querySelector<HTMLElement>(selector);
+  if (element) element.textContent = text;
+}
+
+function setNavText(pageTarget: string, text: string): void {
+  const button = elements.navButtons.find((item) => item.dataset.pageTarget === pageTarget);
+  if (button) button.textContent = text;
+}
+
+function setControlLabel(control: HTMLElement, text: string): void {
+  const label = control.closest("label");
+  if (!label) return;
+  const textNode = Array.from(label.childNodes).find((node) => node.nodeType === Node.TEXT_NODE);
+  if (textNode) {
+    textNode.textContent = `${text}\n`;
+  }
+}
+
+function setPlaceholder(control: HTMLInputElement | HTMLTextAreaElement, value: string): void {
+  control.placeholder = value;
+}
+
+function setOptionText(select: HTMLSelectElement, value: string, text: string): void {
+  const option = Array.from(select.options).find((entry) => entry.value === value);
+  if (option) option.textContent = text;
+}
+
+function setMetricLabel(index: number, text: string): void {
+  const metric = document.querySelectorAll<HTMLElement>(".metric-grid div span")[index];
+  if (metric) metric.textContent = text;
+}
+
+function setApprovalGridLabel(index: number, text: string): void {
+  const label = document.querySelectorAll<HTMLElement>(".approval-detail-grid span")[index * 2];
+  if (label) label.textContent = text;
+}
+
+function setRunOutputHeading(index: number, text: string): void {
+  const heading = document.querySelectorAll<HTMLElement>(".run-output-panel h3")[index];
+  if (heading) heading.textContent = text;
+}
+
+function renderSettingsList(): void {
+  const list = document.querySelector<HTMLElement>(".settings-list");
+  if (!list) return;
+  const entries = [
+    ["settings.item.start.title", "settings.item.start.detail"],
+    ["settings.item.providers.title", "settings.item.providers.detail"],
+    ["settings.item.executors.title", "settings.item.executors.detail"],
+    ["settings.item.workspaceTrust.title", "settings.item.workspaceTrust.detail"],
+    ["settings.item.automation.title", "settings.item.automation.detail"],
+    ["settings.item.memory.title", "settings.item.memory.detail"],
+    ["settings.item.capabilities.title", "settings.item.capabilities.detail"],
+    ["settings.item.install.title", "settings.item.install.detail"],
+  ] as const;
+
+  list.replaceChildren(
+    ...entries.map(([titleKey, detailKey]) => {
+      const item = document.createElement("li");
+      const strong = document.createElement("strong");
+      const span = document.createElement("span");
+      strong.textContent = t(titleKey);
+      span.textContent = t(detailKey);
+      item.append(strong, span);
+      return item;
+    }),
+  );
+}
+
+function syncLocalizedInputValue(control: HTMLInputElement | HTMLTextAreaElement, key: string): void {
+  const knownValues = translatedValuesForKey(key);
+  if (control.value.trim().length === 0 || knownValues.includes(control.value)) {
+    control.value = t(key);
+  }
+}
+
+async function loadLanguageSetting(): Promise<void> {
+  try {
+    const payload = await apiJson<{ language?: string }>("/api/settings/language");
+    state.language = normalizeAppLanguage(payload.language, state.language);
+  } catch {
+    state.language = normalizeAppLanguage(state.language);
+  }
+  applyStaticTranslations();
+}
+
+async function saveLanguageSetting(): Promise<void> {
+  const nextLanguage = normalizeAppLanguage(elements.languageSelect.value, state.language);
+  state.language = nextLanguage;
+  applyStaticTranslations();
+  await apiJson("/api/settings/language", {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ language: nextLanguage }),
+  });
+  await refreshWorkspaceScopedData();
+  await loadProviders();
+  await loadExecutors();
+  await loadThreads();
+  await loadRuns();
+  await loadApprovals();
+  await loadAutomations();
+  await loadAutomationRuns();
+  await loadMemories();
+  await loadCapabilities();
+  await loadCapabilityRuns();
+  await loadRecipes();
+  await loadRecipeTests();
+  await loadArtifacts();
+  await loadAppReadiness();
+  renderChatMessages();
+  renderCurrentRunView();
 }
 
 function setActivePage(page: string): void {
@@ -619,7 +1035,7 @@ async function loadExecutors(): Promise<void> {
     state.executorStatuses = payload.executors;
     renderExecutorStatuses();
   } catch (error) {
-    elements.executorStatusHelp.textContent = errorToMessage(error, "Failed to load executor status.");
+    elements.executorStatusHelp.textContent = errorToMessage(error, t("dynamic.executor.loadFailed"));
     renderExecutorStatuses();
   }
 }
@@ -627,25 +1043,31 @@ async function loadExecutors(): Promise<void> {
 async function loadAppReadiness(): Promise<void> {
   try {
     state.appReadiness = await apiJson<AppReadinessSummary>("/api/app/readiness");
+    if (state.appReadiness.language) {
+      state.language = normalizeAppLanguage(state.appReadiness.language, state.language);
+      applyStaticTranslations();
+    }
     renderAppReadiness();
   } catch (error) {
-    elements.appReadinessStatus.textContent = "failed";
-    elements.appReadinessList.replaceChildren(createListItem(errorToMessage(error, "Failed to load readiness.")));
-    elements.startActionList.replaceChildren(createListItem("Open Settings and verify the local server is running."));
-    elements.installHelp.textContent = "Readiness endpoint did not respond.";
+    elements.appReadinessStatus.textContent = translatedToken("failed");
+    elements.appReadinessList.replaceChildren(createListItem(errorToMessage(error, t("dynamic.readiness.loadFailed"))));
+    elements.startActionList.replaceChildren(createListItem(t("dynamic.readiness.openSettings")));
+    elements.installHelp.textContent = t("dynamic.readiness.endpointFailed");
   }
 }
 
 function renderAppReadiness(): void {
   const readiness = state.appReadiness;
   if (!readiness) {
-    elements.appReadinessStatus.textContent = "checking";
+    elements.appReadinessStatus.textContent = t("dynamic.readiness.checking");
     return;
   }
 
   const actionCount = readiness.checks.filter((check) => check.status === "action").length;
   const readyCount = readiness.checks.filter((check) => check.status === "ready").length;
-  elements.appReadinessStatus.textContent = actionCount > 0 ? `${actionCount} action${actionCount === 1 ? "" : "s"}` : "ready";
+  elements.appReadinessStatus.textContent = actionCount > 0
+    ? t("dynamic.readiness.actionCount", { count: actionCount })
+    : translatedToken("ready");
   elements.appReadinessList.replaceChildren(
     ...readiness.checks.map((check) => createReadinessListItem(check)),
   );
@@ -661,41 +1083,41 @@ function renderAppReadiness(): void {
   elements.installStatusList.replaceChildren(
     createReadinessListItem({
       id: "install-build",
-      title: "Build Command",
+      title: t("dynamic.install.build"),
       status: "ready",
       detail: readiness.install.buildCommand,
       targetPage: "settings",
     }),
     createReadinessListItem({
       id: "install-open",
-      title: "Open Command",
+      title: t("dynamic.install.open"),
       status: "ready",
       detail: readiness.install.openCommand,
       targetPage: "settings",
     }),
     createReadinessListItem({
       id: "install-windows",
-      title: "Windows Packaging",
+      title: t("dynamic.install.windows"),
       status: "optional",
       detail: readiness.install.windowsCommand,
       targetPage: "settings",
     }),
     createReadinessListItem({
       id: "install-signing",
-      title: "Signing",
+      title: t("dynamic.install.signing"),
       status: readiness.install.signed && readiness.install.notarized ? "ready" : "optional",
       detail: readiness.install.signed && readiness.install.notarized
-        ? "Signed and notarized."
-        : "Unsigned local build. Use documented local install path for V1.0.",
+        ? t("dynamic.install.signed")
+        : t("dynamic.install.unsigned"),
       targetPage: "settings",
     }),
     createReadinessListItem({
       id: "install-node",
-      title: "Node Runtime",
+      title: t("dynamic.install.node"),
       status: readiness.install.nodeRequired ? "optional" : "ready",
       detail: readiness.install.nodeRequired
-        ? "Node must be available on PATH when running the local server outside Electron."
-        : "Electron provides the packaged desktop runtime.",
+        ? t("dynamic.install.nodeRequired")
+        : t("dynamic.install.nodeBundled"),
       targetPage: "settings",
     }),
   );
@@ -704,7 +1126,7 @@ function renderAppReadiness(): void {
 
 function renderExecutorStatuses(): void {
   if (state.executorStatuses.length === 0) {
-    elements.executorStatusList.replaceChildren(createListItem("Executor doctor has not run yet."));
+    elements.executorStatusList.replaceChildren(createListItem(t("dynamic.executor.noDoctor")));
     return;
   }
 
@@ -731,7 +1153,7 @@ async function loadWorkspaces(): Promise<void> {
     state.activeWorkspaceId = payload.activeWorkspaceId;
     renderWorkspaces();
   } catch (error) {
-    elements.workspaceHelp.textContent = errorToMessage(error, "Failed to load workspaces.");
+    elements.workspaceHelp.textContent = errorToMessage(error, t("dynamic.workspace.loadFailed"));
     state.activeWorkspaceId = undefined;
     renderWorkspaces();
   }
@@ -740,7 +1162,7 @@ async function loadWorkspaces(): Promise<void> {
 async function createWorkspaceFromForm(): Promise<void> {
   const name = elements.workspaceName.value.trim();
   if (!name) {
-    elements.workspaceHelp.textContent = "Workspace name is required.";
+    elements.workspaceHelp.textContent = t("dynamic.workspace.nameRequired");
     return;
   }
 
@@ -757,10 +1179,10 @@ async function createWorkspaceFromForm(): Promise<void> {
     });
     state.activeWorkspaceId = payload.workspace.id;
     state.activeThreadId = undefined;
-    elements.workspaceHelp.textContent = `Workspace created: ${payload.workspace.name}`;
+    elements.workspaceHelp.textContent = t("dynamic.workspace.created", { name: payload.workspace.name });
     await refreshWorkspaceScopedData();
   } catch (error) {
-    elements.workspaceHelp.textContent = errorToMessage(error, "Failed to create workspace.");
+    elements.workspaceHelp.textContent = errorToMessage(error, t("dynamic.workspace.createFailed"));
   } finally {
     elements.workspaceSaveButton.disabled = false;
   }
@@ -783,13 +1205,13 @@ async function selectWorkspaceFromList(): Promise<void> {
     state.activeThreadId = undefined;
     await refreshWorkspaceScopedData();
   } catch (error) {
-    elements.workspaceHelp.textContent = errorToMessage(error, "Failed to select workspace.");
+    elements.workspaceHelp.textContent = errorToMessage(error, t("dynamic.workspace.selectFailed"));
   }
 }
 
 async function updateSelectedWorkspace(): Promise<void> {
   if (!state.activeWorkspaceId) {
-    elements.workspaceHelp.textContent = "Select a workspace before updating it.";
+    elements.workspaceHelp.textContent = t("dynamic.workspace.selectBeforeUpdate");
     return;
   }
 
@@ -807,10 +1229,10 @@ async function updateSelectedWorkspace(): Promise<void> {
         }),
       },
     );
-    elements.workspaceHelp.textContent = `Workspace updated: ${payload.workspace.name}`;
+    elements.workspaceHelp.textContent = t("dynamic.workspace.updated", { name: payload.workspace.name });
     await refreshWorkspaceScopedData();
   } catch (error) {
-    elements.workspaceHelp.textContent = errorToMessage(error, "Failed to update workspace.");
+    elements.workspaceHelp.textContent = errorToMessage(error, t("dynamic.workspace.updateFailed"));
   } finally {
     elements.workspaceUpdateButton.disabled = false;
   }
@@ -818,7 +1240,7 @@ async function updateSelectedWorkspace(): Promise<void> {
 
 async function deleteSelectedWorkspace(): Promise<void> {
   if (!state.activeWorkspaceId) {
-    elements.workspaceHelp.textContent = "Select a workspace before deleting it.";
+    elements.workspaceHelp.textContent = t("dynamic.workspace.selectBeforeDelete");
     return;
   }
 
@@ -832,10 +1254,10 @@ async function deleteSelectedWorkspace(): Promise<void> {
     state.activeThreadId = undefined;
     state.activeArtifactId = undefined;
     state.activeRunId = undefined;
-    elements.workspaceHelp.textContent = "Workspace deleted. Select or create another workspace.";
+    elements.workspaceHelp.textContent = t("dynamic.workspace.deleted");
     await refreshWorkspaceScopedData();
   } catch (error) {
-    elements.workspaceHelp.textContent = errorToMessage(error, "Failed to delete workspace.");
+    elements.workspaceHelp.textContent = errorToMessage(error, t("dynamic.workspace.deleteFailed"));
   } finally {
     elements.workspaceDeleteButton.disabled = false;
   }
@@ -859,7 +1281,7 @@ async function refreshWorkspaceScopedData(): Promise<void> {
 function renderWorkspaces(): void {
   const activeWorkspace = getActiveWorkspace();
   const options = [
-    createOption("", state.workspaces.length > 0 ? "Select a workspace" : "No workspaces saved"),
+    createOption("", state.workspaces.length > 0 ? t("dynamic.workspace.selectOption") : t("dynamic.workspace.noneSaved")),
     ...state.workspaces.map((workspace) => createOption(workspace.id, workspace.name)),
   ];
 
@@ -871,14 +1293,14 @@ function renderWorkspaces(): void {
     elements.activeWorkspaceLabel.textContent = activeWorkspace.name;
     elements.activeWorkspaceLabel.dataset.phase = "completed";
     elements.workspaceHelp.textContent =
-      `${activeWorkspace.name}${activeWorkspace.path ? ` at ${activeWorkspace.path}` : ""} / trust: ${activeWorkspace.trustLevel}`;
+      `${activeWorkspace.name}${activeWorkspace.path ? ` / ${activeWorkspace.path}` : ""} / ${t("dynamic.workspace.trust")} ${activeWorkspace.trustLevel}`;
     return;
   }
 
-  elements.activeWorkspaceLabel.textContent = "no workspace";
+  elements.activeWorkspaceLabel.textContent = t("dynamic.workspace.noneActive");
   elements.activeWorkspaceLabel.dataset.phase = "idle";
   if (state.workspaces.length === 0) {
-    elements.workspaceHelp.textContent = "Create a workspace to scope threads, runs, and artifacts.";
+    elements.workspaceHelp.textContent = t("dynamic.workspace.createToScope");
   }
 }
 
@@ -905,25 +1327,27 @@ async function loadProviders(): Promise<void> {
     state.activeProviderId = activeProvider?.id;
 
     elements.providerSelect.replaceChildren(
-      createOption("", payload.providers.length > 0 ? "Select a provider" : "No providers saved"),
+      createOption("", payload.providers.length > 0 ? t("dynamic.provider.selectOption") : t("dynamic.provider.noneSaved")),
       ...payload.providers.map((provider) => createOption(provider.id ?? "", `${provider.name} / ${provider.modelId}`)),
     );
     elements.providerSelect.value = activeProvider?.id ?? "";
 
     if (activeProvider) {
       fillProviderForm(activeProvider);
-      elements.providerStatus.textContent = "configured";
+      elements.providerStatus.textContent = translatedToken("configured");
       elements.providerStatus.dataset.phase = "completed";
-      elements.providerHelp.textContent = `Saved provider loaded. API key: ${activeProvider.apiKeyPreview}`;
+      elements.providerHelp.textContent = t("dynamic.provider.loaded", { preview: activeProvider.apiKeyPreview });
+      elements.providerHelp.dataset.dynamic = "true";
       setModelOptions([activeProvider.modelId], activeProvider.modelId);
     } else {
-      elements.providerStatus.textContent = "not configured";
+      elements.providerStatus.textContent = translatedToken("not-configured");
       elements.providerStatus.dataset.phase = "idle";
-      elements.providerHelp.textContent = "Save a provider before chatting.";
+      elements.providerHelp.textContent = t("dynamic.provider.saveBeforeChat");
+      elements.providerHelp.dataset.dynamic = "true";
       setModelOptions([], "");
     }
   } catch (error) {
-    renderProviderError(errorToMessage(error, "Failed to load provider settings."));
+    renderProviderError(errorToMessage(error, t("dynamic.provider.loadFailed")));
   }
 }
 
@@ -935,9 +1359,10 @@ async function selectProviderFromList(): Promise<void> {
   state.activeProviderId = provider.id;
   fillProviderForm(provider);
   await saveModelSelection(provider.id, provider.modelId);
-  elements.providerStatus.textContent = "configured";
+  elements.providerStatus.textContent = translatedToken("configured");
   elements.providerStatus.dataset.phase = "completed";
-  elements.providerHelp.textContent = `Active provider: ${provider.name}`;
+  elements.providerHelp.textContent = t("dynamic.provider.active", { name: provider.name });
+  elements.providerHelp.dataset.dynamic = "true";
   await loadProviders();
 }
 
@@ -951,7 +1376,7 @@ function fillProviderForm(provider: ProviderSummary): void {
 
 async function saveProviderFromForm(): Promise<void> {
   elements.providerSaveButton.disabled = true;
-  elements.providerStatus.textContent = "saving";
+  elements.providerStatus.textContent = translatedToken("saving");
   elements.providerStatus.dataset.phase = "running";
 
   try {
@@ -974,13 +1399,14 @@ async function saveProviderFromForm(): Promise<void> {
 
     state.activeProviderId = payload.provider?.id ?? state.activeProviderId;
     elements.providerApiKey.value = "";
-    elements.providerStatus.textContent = "configured";
+    elements.providerStatus.textContent = translatedToken("configured");
     elements.providerStatus.dataset.phase = "completed";
-    elements.providerHelp.textContent = `Provider saved locally. API key: ${payload.provider?.apiKeyPreview ?? "saved"}`;
+    elements.providerHelp.textContent = t("dynamic.provider.saved", { preview: payload.provider?.apiKeyPreview ?? "saved" });
+    elements.providerHelp.dataset.dynamic = "true";
     await loadProviders();
     await loadAppReadiness();
   } catch (error) {
-    renderProviderError(errorToMessage(error, "Failed to save provider settings."));
+    renderProviderError(errorToMessage(error, t("dynamic.provider.saveFailed")));
   } finally {
     elements.providerSaveButton.disabled = false;
   }
@@ -988,7 +1414,7 @@ async function saveProviderFromForm(): Promise<void> {
 
 async function deleteSelectedProvider(): Promise<void> {
   if (!state.activeProviderId) {
-    renderProviderError("Select a provider before deleting.");
+    renderProviderError(t("dynamic.provider.selectBeforeDelete"));
     return;
   }
 
@@ -999,13 +1425,13 @@ async function deleteSelectedProvider(): Promise<void> {
     });
     state.activeProviderId = undefined;
     elements.providerApiKey.value = "";
-    elements.providerName.value = "Local OpenAI-Compatible";
+    elements.providerName.value = t("dynamic.provider.defaultName");
     elements.providerBaseUrl.value = "";
     elements.providerModel.value = "";
     await loadProviders();
     await loadAppReadiness();
   } catch (error) {
-    renderProviderError(errorToMessage(error, "Failed to delete provider."));
+    renderProviderError(errorToMessage(error, t("dynamic.provider.deleteFailed")));
   } finally {
     elements.providerDeleteButton.disabled = false;
   }
@@ -1013,7 +1439,7 @@ async function deleteSelectedProvider(): Promise<void> {
 
 async function testProviderFromForm(): Promise<void> {
   elements.providerTestButton.disabled = true;
-  elements.providerStatus.textContent = "testing";
+  elements.providerStatus.textContent = translatedToken("testing");
   elements.providerStatus.dataset.phase = "running";
 
   try {
@@ -1023,12 +1449,13 @@ async function testProviderFromForm(): Promise<void> {
       body: JSON.stringify(providerDraftFromForm()),
     });
 
-    elements.providerStatus.textContent = payload.available ? "healthy" : "failed";
+    elements.providerStatus.textContent = payload.available ? translatedToken("healthy") : translatedToken("failed");
     elements.providerStatus.dataset.phase = payload.available ? "completed" : "failed";
-    elements.providerHelp.textContent = `${payload.message}${payload.models.length ? ` Models: ${payload.models.slice(0, 5).join(", ")}` : ""}`;
+    elements.providerHelp.textContent = `${payload.message}${payload.models.length ? ` ${t("dynamic.provider.modelsLabel")} ${payload.models.slice(0, 5).join(", ")}` : ""}`;
+    elements.providerHelp.dataset.dynamic = "true";
     setModelOptions(payload.models, elements.providerModel.value);
   } catch (error) {
-    renderProviderError(errorToMessage(error, "Provider Doctor failed."));
+    renderProviderError(errorToMessage(error, t("dynamic.provider.doctorFailed")));
   } finally {
     elements.providerTestButton.disabled = false;
   }
@@ -1036,7 +1463,7 @@ async function testProviderFromForm(): Promise<void> {
 
 async function loadModelsForSelectedProvider(): Promise<void> {
   if (!state.activeProviderId) {
-    renderProviderError("Save or select a provider before loading models.");
+    renderProviderError(t("dynamic.provider.saveBeforeModels"));
     return;
   }
 
@@ -1050,10 +1477,11 @@ async function loadModelsForSelectedProvider(): Promise<void> {
       throw new Error(payload.message);
     }
 
-    elements.providerHelp.textContent = `Loaded models: ${payload.models.slice(0, 8).join(", ")}`;
+    elements.providerHelp.textContent = `${t("dynamic.provider.loadedModels")} ${payload.models.slice(0, 8).join(", ")}`;
+    elements.providerHelp.dataset.dynamic = "true";
     setModelOptions(payload.models, elements.providerModel.value);
   } catch (error) {
-    renderProviderError(errorToMessage(error, "Failed to load models."));
+    renderProviderError(errorToMessage(error, t("dynamic.provider.modelsFailed")));
   } finally {
     elements.providerModelsButton.disabled = false;
   }
@@ -1064,7 +1492,7 @@ async function saveModelSelectionFromForm(): Promise<void> {
   try {
     await saveModelSelection(state.activeProviderId, elements.providerModel.value);
   } catch (error) {
-    renderProviderError(errorToMessage(error, "Failed to save model selection."));
+    renderProviderError(errorToMessage(error, t("dynamic.provider.modelSelectionFailed")));
   }
 }
 
@@ -1080,7 +1508,7 @@ function setModelOptions(models: string[], selectedModel: string): void {
   const uniqueModels = [...new Set(models.filter(Boolean))];
 
   elements.providerModelSelect.replaceChildren(
-    createOption("", "Load models or type manually"),
+    createOption("", t("dynamic.provider.modelSelectPlaceholder")),
     ...uniqueModels.map((model) => createOption(model, model)),
   );
 
@@ -1110,7 +1538,7 @@ async function loadThreads(): Promise<void> {
     }>("/api/threads");
 
     elements.threadSelect.replaceChildren(
-      createOption("", payload.threads.length > 0 ? "Select a thread" : "No threads in workspace"),
+      createOption("", payload.threads.length > 0 ? t("dynamic.thread.selectOption") : t("dynamic.thread.noneSaved")),
       ...payload.threads.map((thread) => createOption(thread.id, `${thread.title} (${thread.messageCount})`)),
     );
 
@@ -1126,15 +1554,15 @@ async function loadThreads(): Promise<void> {
     state.chatMessages = [{
       role: "system",
       content: state.activeWorkspaceId
-        ? "No thread in this workspace yet. Create a thread or send a chat message."
-        : "Create or select a workspace to scope new threads.",
+        ? t("dynamic.thread.noneInWorkspace")
+        : t("dynamic.thread.createWorkspaceFirst"),
     }];
     elements.threadHelp.textContent = state.activeWorkspaceId
-      ? "No threads in the active workspace."
-      : "Create/select a workspace before starting persistent chat.";
+      ? t("dynamic.thread.noneActiveWorkspace")
+      : t("dynamic.thread.createWorkspaceBeforeChat");
     renderChatMessages();
   } catch (error) {
-    elements.threadHelp.textContent = errorToMessage(error, "Failed to load threads.");
+    elements.threadHelp.textContent = errorToMessage(error, t("dynamic.thread.loadFailed"));
   }
 }
 
@@ -1143,7 +1571,7 @@ async function createThread(): Promise<void> {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      title: "New Thread",
+      title: t("threads.button.new"),
       providerId: state.activeProviderId,
       modelId: elements.providerModel.value,
       workspaceId: state.activeWorkspaceId,
@@ -1156,12 +1584,12 @@ async function createThread(): Promise<void> {
 
 async function renameSelectedThread(): Promise<void> {
   if (!state.activeThreadId) {
-    elements.threadHelp.textContent = "Create or select a thread before renaming.";
+    elements.threadHelp.textContent = t("dynamic.thread.selectBeforeRename");
     return;
   }
 
-  const selected = elements.threadSelect.selectedOptions[0]?.textContent?.replace(/\s+\(\d+\)$/, "") ?? "Thread";
-  const title = globalThis.prompt("Thread name", selected)?.trim();
+  const selected = elements.threadSelect.selectedOptions[0]?.textContent?.replace(/\s+\(\d+\)$/, "") ?? t("dynamic.thread.defaultName");
+  const title = globalThis.prompt(t("dynamic.thread.promptName"), selected)?.trim();
   if (!title) return;
 
   await apiJson(`/api/threads/${encodeURIComponent(state.activeThreadId)}`, {
@@ -1175,7 +1603,7 @@ async function renameSelectedThread(): Promise<void> {
 
 async function deleteSelectedThread(): Promise<void> {
   if (!state.activeThreadId) {
-    elements.threadHelp.textContent = "Create or select a thread before deleting.";
+    elements.threadHelp.textContent = t("dynamic.thread.selectBeforeDelete");
     return;
   }
 
@@ -1183,7 +1611,7 @@ async function deleteSelectedThread(): Promise<void> {
     method: "DELETE",
   });
   state.activeThreadId = undefined;
-  state.chatMessages = [{ role: "system", content: "Thread deleted. Create a new thread to continue." }];
+  state.chatMessages = [{ role: "system", content: t("dynamic.thread.deleted") }];
   renderChatMessages();
   await loadThreads();
   await loadAppReadiness();
@@ -1200,8 +1628,8 @@ async function loadThread(threadId: string): Promise<void> {
   state.activeThreadId = payload.thread.id;
   state.chatMessages = payload.messages.length > 0
     ? payload.messages
-    : [{ role: "system", content: "This workspace thread has no messages yet." }];
-  elements.threadHelp.textContent = `Active thread: ${payload.thread.title}`;
+    : [{ role: "system", content: t("dynamic.thread.empty") }];
+  elements.threadHelp.textContent = t("dynamic.thread.active", { title: payload.thread.title });
   renderChatMessages();
 }
 
@@ -1241,7 +1669,7 @@ async function sendChatFromForm(): Promise<void> {
     );
 
     if (!payload.messages) {
-      throw new Error(payload.error ?? "Chat request failed.");
+      throw new Error(payload.error ?? t("dynamic.chat.failed"));
     }
 
     state.chatMessages = payload.messages;
@@ -1256,7 +1684,7 @@ async function sendChatFromForm(): Promise<void> {
       ...state.chatMessages,
       {
         role: "system",
-        content: errorToMessage(error, "Chat request failed."),
+        content: errorToMessage(error, t("dynamic.chat.failed")),
       },
     ];
     if (state.activeThreadId) {
@@ -1274,7 +1702,7 @@ async function runDemoFromForm(): Promise<void> {
   const timeoutMs = readTimeoutMs();
 
   if (!goal) {
-    elements.runSummary.textContent = "Enter a goal before starting the run.";
+    elements.runSummary.textContent = t("dynamic.run.enterGoal");
     return;
   }
 
@@ -1302,8 +1730,8 @@ async function runDemoFromForm(): Promise<void> {
     await loadAppReadiness();
     startRunPolling(payload.run.id);
   } catch (error) {
-    elements.runSummary.textContent = errorToMessage(error, "Failed to start executor run.");
-    elements.statusPill.textContent = "failed";
+    elements.runSummary.textContent = errorToMessage(error, t("dynamic.run.startFailed"));
+    elements.statusPill.textContent = translatedToken("failed");
     elements.statusPill.dataset.phase = "failed";
   } finally {
     elements.runButton.disabled = false;
@@ -1312,7 +1740,7 @@ async function runDemoFromForm(): Promise<void> {
 
 async function cancelActiveRun(): Promise<void> {
   if (!state.activeRunId) {
-    elements.runSummary.textContent = "No active run to cancel.";
+    elements.runSummary.textContent = t("dynamic.run.noActive");
     return;
   }
 
@@ -1329,13 +1757,13 @@ async function cancelActiveRun(): Promise<void> {
     await loadApprovals();
     await loadAppReadiness();
   } catch (error) {
-    elements.runSummary.textContent = errorToMessage(error, "Failed to cancel run.");
+    elements.runSummary.textContent = errorToMessage(error, t("dynamic.run.cancelFailed"));
   }
 }
 
 async function resolveActiveApproval(decision: "grant" | "reject"): Promise<void> {
   if (!state.activeRunId || !state.liveRun?.pendingApproval) {
-    elements.approvalReason.textContent = "No pending approval request.";
+    elements.approvalReason.textContent = t("dynamic.approval.nonePending");
     return;
   }
 
@@ -1360,7 +1788,7 @@ async function resolveActiveApproval(decision: "grant" | "reject"): Promise<void
     await loadApprovals();
     await loadAppReadiness();
   } catch (error) {
-    elements.approvalReason.textContent = errorToMessage(error, "Failed to resolve approval.");
+    elements.approvalReason.textContent = errorToMessage(error, t("dynamic.approval.resolveFailed"));
   } finally {
     elements.approvalGrantButton.disabled = false;
     elements.approvalRejectButton.disabled = false;
@@ -1418,7 +1846,7 @@ async function loadArtifacts(): Promise<void> {
     state.activeArtifact = undefined;
     renderArtifactLibrary();
   } catch (error) {
-    elements.artifactHelp.textContent = errorToMessage(error, "Failed to load artifacts.");
+    elements.artifactHelp.textContent = errorToMessage(error, t("dynamic.artifact.loadFailed"));
     renderArtifactLibrary();
   }
 }
@@ -1432,14 +1860,14 @@ async function openArtifact(artifactId: string): Promise<void> {
     state.activeArtifactId = payload.artifact?.id ?? artifactId;
     renderArtifactLibrary();
   } catch (error) {
-    elements.artifactHelp.textContent = errorToMessage(error, "Failed to open artifact.");
+    elements.artifactHelp.textContent = errorToMessage(error, t("dynamic.artifact.openFailed"));
   }
 }
 
 async function saveArtifactFromForm(): Promise<void> {
   const title = elements.artifactTitleInput.value.trim();
   if (!title) {
-    elements.artifactHelp.textContent = "Artifact title is required.";
+    elements.artifactHelp.textContent = t("dynamic.artifact.titleRequired");
     return;
   }
 
@@ -1460,11 +1888,11 @@ async function saveArtifactFromForm(): Promise<void> {
     state.activeArtifactId = payload.artifact.id;
     elements.artifactTitleInput.value = "";
     elements.artifactContent.value = "";
-    elements.artifactHelp.textContent = `Saved artifact: ${payload.artifact.title}`;
+    elements.artifactHelp.textContent = t("dynamic.artifact.saved", { title: payload.artifact.title });
     await loadArtifacts();
     await loadAppReadiness();
   } catch (error) {
-    elements.artifactHelp.textContent = errorToMessage(error, "Failed to save artifact.");
+    elements.artifactHelp.textContent = errorToMessage(error, t("dynamic.artifact.saveFailed"));
   } finally {
     elements.artifactSaveButton.disabled = false;
   }
@@ -1472,7 +1900,7 @@ async function saveArtifactFromForm(): Promise<void> {
 
 async function deleteSelectedArtifact(): Promise<void> {
   if (!state.activeArtifactId) {
-    elements.artifactHelp.textContent = "Select an artifact before deleting.";
+    elements.artifactHelp.textContent = t("dynamic.artifact.selectBeforeDelete");
     return;
   }
 
@@ -1483,11 +1911,11 @@ async function deleteSelectedArtifact(): Promise<void> {
     });
     state.activeArtifactId = undefined;
     state.activeArtifact = undefined;
-    elements.artifactHelp.textContent = "Artifact deleted.";
+    elements.artifactHelp.textContent = t("dynamic.artifact.deleted");
     await loadArtifacts();
     await loadAppReadiness();
   } catch (error) {
-    elements.artifactHelp.textContent = errorToMessage(error, "Failed to delete artifact.");
+    elements.artifactHelp.textContent = errorToMessage(error, t("dynamic.artifact.deleteFailed"));
   } finally {
     elements.artifactDeleteButton.disabled = false;
   }
@@ -1495,15 +1923,15 @@ async function deleteSelectedArtifact(): Promise<void> {
 
 function renderArtifactLibrary(): void {
   elements.artifactSelect.replaceChildren(
-    createOption("", state.artifacts.length > 0 ? "Select an artifact" : "No artifacts saved"),
+    createOption("", state.artifacts.length > 0 ? t("dynamic.artifact.selectOption") : t("dynamic.artifact.noneSaved")),
     ...state.artifacts.map((artifact) => createOption(artifact.id, `${artifact.title} / ${artifact.source}`)),
   );
   elements.artifactSelect.value = state.activeArtifactId ?? "";
 
   if (state.artifacts.length === 0) {
-    elements.artifactList.replaceChildren(createListItem("No saved artifacts in this workspace yet."));
-    elements.artifactPreview.textContent = "Saved artifact content will render here.";
-    elements.artifactHelp.textContent = "Save a note artifact, send a chat, or run a task.";
+    elements.artifactList.replaceChildren(createListItem(t("dynamic.artifact.noneInWorkspace")));
+    elements.artifactPreview.textContent = t("artifact.preview.default");
+    elements.artifactHelp.textContent = t("dynamic.artifact.saveNoteOrRun");
     return;
   }
 
@@ -1520,13 +1948,13 @@ function renderArtifactLibrary(): void {
 
   const activeArtifact = state.activeArtifact;
   if (!activeArtifact) {
-    elements.artifactPreview.textContent = "Select an artifact to preview it.";
+    elements.artifactPreview.textContent = t("dynamic.artifact.selectToPreview");
     return;
   }
 
   elements.artifactHelp.textContent =
-    `Opened ${activeArtifact.source} artifact${activeArtifact.runId ? ` from run ${truncate(activeArtifact.runId, 24)}` : ""}.`;
-  elements.artifactPreview.textContent = activeArtifact.content || "Artifact has no preview content.";
+    t("dynamic.artifact.opened", { source: activeArtifact.source }) + (activeArtifact.runId ? ` / ${truncate(activeArtifact.runId, 24)}` : "");
+  elements.artifactPreview.textContent = activeArtifact.content || t("dynamic.artifact.noPreview");
 }
 
 async function loadRuns(): Promise<void> {
@@ -1545,7 +1973,7 @@ async function loadRuns(): Promise<void> {
     state.runEvents = [];
     renderRunHistory();
   } catch (error) {
-    elements.runHistoryHelp.textContent = errorToMessage(error, "Failed to load run history.");
+    elements.runHistoryHelp.textContent = errorToMessage(error, t("dynamic.runHistory.loadFailed"));
     renderRunHistory();
   }
 }
@@ -1553,7 +1981,7 @@ async function loadRuns(): Promise<void> {
 function renderForgeRunOptions(): void {
   const completedRuns = state.runs.filter((run) => run.status === "completed");
   elements.forgeRunSelect.replaceChildren(
-    createOption("", completedRuns.length > 0 ? "Select a completed run" : "No completed runs"),
+    createOption("", completedRuns.length > 0 ? t("dynamic.forge.selectCompleted") : t("dynamic.forge.noneCompleted")),
     ...completedRuns.map((run) => createOption(run.id, `${run.goal} / ${formatDate(run.startedAt)}`)),
   );
 }
@@ -1564,7 +1992,7 @@ async function loadApprovals(): Promise<void> {
     state.approvals = payload.approvals;
     renderApprovalHistory();
   } catch (error) {
-    elements.approvalHistoryHelp.textContent = errorToMessage(error, "Failed to load approval history.");
+    elements.approvalHistoryHelp.textContent = errorToMessage(error, t("dynamic.approvalHistory.loadFailed"));
     renderApprovalHistory();
   }
 }
@@ -1576,7 +2004,7 @@ async function loadMemories(): Promise<void> {
     renderMemories();
     renderMemoryUsage();
   } catch (error) {
-    elements.memoryHelp.textContent = errorToMessage(error, "Failed to load memories.");
+    elements.memoryHelp.textContent = errorToMessage(error, t("dynamic.memory.loadFailed"));
     renderMemories();
   }
 }
@@ -1585,7 +2013,7 @@ async function createMemoryFromForm(): Promise<void> {
   const title = elements.memoryTitleInput.value.trim();
   const content = elements.memoryContent.value.trim();
   if (!title || !content) {
-    elements.memoryHelp.textContent = "Memory title and content are required.";
+    elements.memoryHelp.textContent = t("dynamic.memory.required");
     return;
   }
 
@@ -1601,11 +2029,11 @@ async function createMemoryFromForm(): Promise<void> {
         sensitivity: elements.memorySensitivity.value as MemorySensitivity,
       }),
     });
-    elements.memoryHelp.textContent = "Memory saved locally.";
+    elements.memoryHelp.textContent = t("dynamic.memory.saved");
     await loadMemories();
     await loadAppReadiness();
   } catch (error) {
-    elements.memoryHelp.textContent = errorToMessage(error, "Failed to save memory.");
+    elements.memoryHelp.textContent = errorToMessage(error, t("dynamic.memory.saveFailed"));
   } finally {
     elements.memorySaveButton.disabled = false;
   }
@@ -1621,13 +2049,13 @@ async function deleteMemory(memoryId: string): Promise<void> {
     await loadMemories();
     await loadAppReadiness();
   } catch (error) {
-    elements.memoryHelp.textContent = errorToMessage(error, "Failed to delete memory.");
+    elements.memoryHelp.textContent = errorToMessage(error, t("dynamic.memory.deleteFailed"));
   }
 }
 
 function renderMemories(): void {
   if (state.memories.length === 0) {
-    elements.memoryList.replaceChildren(createListItem("No local memories saved yet."));
+    elements.memoryList.replaceChildren(createListItem(t("dynamic.memory.noneSaved")));
     return;
   }
 
@@ -1642,7 +2070,7 @@ function renderMemories(): void {
       button.type = "button";
       button.className = "secondary-button";
       button.dataset.memoryId = memory.id;
-      button.textContent = "Delete";
+      button.textContent = t("workspace.button.delete");
       item.append(content, button);
       return item;
     }),
@@ -1651,8 +2079,8 @@ function renderMemories(): void {
 
 function renderMemoryUsage(): void {
   if (state.memoryUsage.length === 0) {
-    elements.memoryUsageList.replaceChildren(createListItem("No memory used in the current chat or run."));
-    elements.memoryUsageHelp.textContent = "When memory is injected into chat or runs, it appears here.";
+    elements.memoryUsageList.replaceChildren(createListItem(t("dynamic.memoryUsage.none")));
+    elements.memoryUsageHelp.textContent = t("memory-usage.help.default");
     return;
   }
 
@@ -1666,7 +2094,7 @@ function renderMemoryUsage(): void {
       source: memory.sensitivity,
     })),
   );
-  elements.memoryUsageHelp.textContent = `${state.memoryUsage.length} memory item${state.memoryUsage.length === 1 ? "" : "s"} injected into the current context.`;
+  elements.memoryUsageHelp.textContent = t("dynamic.memoryUsage.injectedCount", { count: state.memoryUsage.length });
 }
 
 async function loadCapabilities(): Promise<void> {
@@ -1678,7 +2106,7 @@ async function loadCapabilities(): Promise<void> {
     }
     renderCapabilities();
   } catch (error) {
-    elements.capabilityHelp.textContent = errorToMessage(error, "Failed to load capabilities.");
+    elements.capabilityHelp.textContent = errorToMessage(error, t("dynamic.capability.loadFailed"));
     renderCapabilities();
   }
 }
@@ -1689,7 +2117,7 @@ async function loadCapabilityRuns(): Promise<void> {
     state.capabilityRuns = payload.runs;
     renderCapabilityRuns();
   } catch (error) {
-    elements.capabilityRunHelp.textContent = errorToMessage(error, "Failed to load capability history.");
+    elements.capabilityRunHelp.textContent = errorToMessage(error, t("dynamic.capabilityHistory.loadFailed"));
     renderCapabilityRuns();
   }
 }
@@ -1720,9 +2148,9 @@ async function runSelectedCapability(): Promise<void> {
 
 function renderCapabilities(): void {
   if (state.capabilities.length === 0) {
-    elements.capabilityList.replaceChildren(createListItem("No local capabilities installed."));
-    elements.capabilityStatus.textContent = "not selected";
-    elements.capabilityDescription.textContent = "Select a capability to inspect its purpose and permissions.";
+    elements.capabilityList.replaceChildren(createListItem(t("dynamic.capability.noneInstalled")));
+    elements.capabilityStatus.textContent = t("dynamic.capability.notSelected");
+    elements.capabilityDescription.textContent = t("capability-detail.help.default");
     elements.capabilityPermissionList.replaceChildren();
     return;
   }
@@ -1741,7 +2169,7 @@ function renderCapabilities(): void {
   );
 
   if (!activeCapability) return;
-  elements.capabilityStatus.textContent = activeCapability.enabled ? "enabled" : "disabled";
+  elements.capabilityStatus.textContent = activeCapability.enabled ? translatedToken("enabled") : translatedToken("disabled");
   elements.capabilityDescription.textContent = activeCapability.description;
   elements.capabilityPermissionList.replaceChildren(
     ...activeCapability.permissions.map((permission) => createActionListItem({
@@ -1753,14 +2181,14 @@ function renderCapabilities(): void {
       source: "low",
     })),
   );
-  elements.capabilityToggleButton.textContent = activeCapability.enabled ? "Disable" : "Enable";
+  elements.capabilityToggleButton.textContent = activeCapability.enabled ? t("capability-detail.button.disable") : t("capability-detail.button.enable");
   elements.capabilityRunButton.disabled = !activeCapability.enabled;
 }
 
 function renderCapabilityRuns(): void {
   if (state.capabilityRuns.length === 0) {
-    elements.capabilityRunList.replaceChildren(createListItem("No capability runs yet."));
-    elements.capabilityRunHelp.textContent = "Run a capability to create local execution history.";
+    elements.capabilityRunList.replaceChildren(createListItem(t("dynamic.capabilityHistory.none")));
+    elements.capabilityRunHelp.textContent = t("dynamic.capabilityHistory.runToCreate");
     return;
   }
 
@@ -1769,12 +2197,12 @@ function renderCapabilityRuns(): void {
       id: run.id,
       idName: "runId",
       title: run.capabilityId,
-      meta: `${run.status} / ${formatDate(run.startedAt)}${run.result ? ` / ${run.result}` : ""}`,
+      meta: `${translatedToken(run.status)} / ${formatDate(run.startedAt)}${run.result ? ` / ${localizeKnownText(run.result)}` : ""}`,
       pressed: false,
       source: run.status,
     })),
   );
-  elements.capabilityRunHelp.textContent = `${state.capabilityRuns.length} capability run${state.capabilityRuns.length === 1 ? "" : "s"} recorded.`;
+  elements.capabilityRunHelp.textContent = t("dynamic.capabilityHistory.count", { count: state.capabilityRuns.length });
 }
 
 async function loadRecipes(): Promise<void> {
@@ -1786,7 +2214,7 @@ async function loadRecipes(): Promise<void> {
     }
     renderRecipes();
   } catch (error) {
-    elements.forgeHelp.textContent = errorToMessage(error, "Failed to load recipes.");
+    elements.forgeHelp.textContent = errorToMessage(error, t("dynamic.recipe.loadFailed"));
     renderRecipes();
   }
 }
@@ -1797,7 +2225,7 @@ async function loadRecipeTests(): Promise<void> {
     state.recipeTests = payload.tests;
     renderRecipeTests();
   } catch (error) {
-    elements.recipeTestHelp.textContent = errorToMessage(error, "Failed to load recipe tests.");
+    elements.recipeTestHelp.textContent = errorToMessage(error, t("dynamic.recipeTests.loadFailed"));
     renderRecipeTests();
   }
 }
@@ -1805,7 +2233,7 @@ async function loadRecipeTests(): Promise<void> {
 async function createRecipeFromSelectedRun(): Promise<void> {
   const runId = elements.forgeRunSelect.value;
   if (!runId) {
-    elements.forgeHelp.textContent = "Select a completed run first.";
+    elements.forgeHelp.textContent = t("dynamic.forge.selectRunFirst");
     return;
   }
 
@@ -1845,7 +2273,7 @@ async function testSelectedRecipe(): Promise<void> {
   const payload = await apiJson<{ test: RecipeTestSummary }>(`/api/recipes/${encodeURIComponent(recipe.id)}/test`, {
     method: "POST",
   });
-  elements.recipeTestPreview.textContent = payload.test.result ?? "Recipe test completed.";
+  elements.recipeTestPreview.textContent = payload.test.result ?? t("dynamic.recipeTests.completed");
   await loadRecipes();
   await loadRecipeTests();
   await loadAppReadiness();
@@ -1868,8 +2296,8 @@ async function exportSelectedRecipe(): Promise<void> {
 
 function renderRecipes(): void {
   if (state.recipes.length === 0) {
-    elements.recipeList.replaceChildren(createListItem("No recipes yet. Create one from a completed run."));
-    elements.recipeStatus.textContent = "not selected";
+    elements.recipeList.replaceChildren(createListItem(t("dynamic.recipe.none")));
+    elements.recipeStatus.textContent = t("dynamic.recipe.notSelected");
     elements.recipeTitleInput.value = "";
     elements.recipePromptInput.value = "";
     elements.recipeInputSpec.value = "";
@@ -1877,7 +2305,7 @@ function renderRecipes(): void {
     elements.recipeSaveButton.disabled = true;
     elements.recipeTestButton.disabled = true;
     elements.recipeExportButton.disabled = true;
-    elements.recipeExportButton.textContent = "Save As Capability";
+    elements.recipeExportButton.textContent = t("recipe-editor.button.export");
     return;
   }
 
@@ -1888,14 +2316,14 @@ function renderRecipes(): void {
       id: recipe.id,
       idName: "recipeId",
       title: recipe.title,
-      meta: `${recipe.capabilityId ? "exported" : "draft"} / ${recipe.lastTestedAt ? `tested ${formatDate(recipe.lastTestedAt)}` : "not tested"}`,
+      meta: `${recipe.capabilityId ? translatedToken("exported") : translatedToken("draft")} / ${recipe.lastTestedAt ? `${t("dynamic.recipe.tested")} ${formatDate(recipe.lastTestedAt)}` : t("dynamic.recipe.notTested")}`,
       pressed: recipe.id === activeRecipe?.id,
       source: recipe.capabilityId ? "completed" : "running",
     })),
   );
 
   if (!activeRecipe) return;
-  elements.recipeStatus.textContent = activeRecipe.capabilityId ? "exported" : "draft";
+  elements.recipeStatus.textContent = activeRecipe.capabilityId ? translatedToken("exported") : translatedToken("draft");
   elements.recipeTitleInput.value = activeRecipe.title;
   elements.recipePromptInput.value = activeRecipe.prompt;
   elements.recipeInputSpec.value = activeRecipe.inputSpec;
@@ -1903,13 +2331,13 @@ function renderRecipes(): void {
   elements.recipeSaveButton.disabled = false;
   elements.recipeTestButton.disabled = false;
   elements.recipeExportButton.disabled = false;
-  elements.recipeExportButton.textContent = activeRecipe.capabilityId ? "Update Capability" : "Save As Capability";
+  elements.recipeExportButton.textContent = activeRecipe.capabilityId ? t("recipe-editor.button.exportUpdate") : t("recipe-editor.button.export");
 }
 
 function renderRecipeTests(): void {
   if (state.recipeTests.length === 0) {
-    elements.recipeTestList.replaceChildren(createListItem("No recipe validation runs yet."));
-    elements.recipeTestHelp.textContent = "Test a recipe to validate it locally.";
+    elements.recipeTestList.replaceChildren(createListItem(t("dynamic.recipeTests.none")));
+    elements.recipeTestHelp.textContent = t("dynamic.recipeTests.testToValidate");
     return;
   }
 
@@ -1918,12 +2346,12 @@ function renderRecipeTests(): void {
       id: test.id,
       idName: "recipeTestId",
       title: test.status,
-      meta: `${test.result ?? "No result"} / ${formatDate(test.startedAt)}`,
+      meta: `${test.result ?? t("dynamic.recipeTests.noResult")} / ${formatDate(test.startedAt)}`,
       pressed: false,
       source: test.status,
     })),
   );
-  elements.recipeTestHelp.textContent = `${state.recipeTests.length} recipe test${state.recipeTests.length === 1 ? "" : "s"} recorded.`;
+  elements.recipeTestHelp.textContent = t("dynamic.recipeTests.count", { count: state.recipeTests.length });
 }
 
 function getActiveRecipe(): RecipeSummary | undefined {
@@ -1932,8 +2360,8 @@ function getActiveRecipe(): RecipeSummary | undefined {
 
 function renderApprovalHistory(): void {
   if (state.approvals.length === 0) {
-    elements.approvalHistoryList.replaceChildren(createListItem("No approval decisions in this workspace yet."));
-    elements.approvalHistoryHelp.textContent = "Risk decisions will appear after executor tasks request approval.";
+    elements.approvalHistoryList.replaceChildren(createListItem(t("dynamic.approvalHistory.none")));
+    elements.approvalHistoryHelp.textContent = t("dynamic.approvalHistory.help");
     return;
   }
 
@@ -1942,13 +2370,13 @@ function renderApprovalHistory(): void {
       id: approval.approvalId,
       idName: "approvalId",
       title: `${approval.category} / ${approval.riskLevel}`,
-      meta: `${approval.status}${approval.decision ? `:${approval.decision}` : ""} / ${approval.resolvedAt ? formatDate(approval.resolvedAt) : "pending"} / ${approval.requestedAction}`,
+      meta: `${translatedToken(approval.status)}${approval.decision ? `:${translatedToken(approval.decision)}` : ""} / ${approval.resolvedAt ? formatDate(approval.resolvedAt) : translatedToken("pending")} / ${approval.requestedAction}`,
       pressed: state.liveRun?.pendingApproval?.approvalId === approval.approvalId,
       source: approval.status,
     })),
   );
 
-  elements.approvalHistoryHelp.textContent = `${state.approvals.length} approval record${state.approvals.length === 1 ? "" : "s"} in this workspace.`;
+  elements.approvalHistoryHelp.textContent = t("dynamic.approvalHistory.count", { count: state.approvals.length });
 }
 
 async function loadAutomations(): Promise<void> {
@@ -1957,7 +2385,7 @@ async function loadAutomations(): Promise<void> {
     state.automations = payload.automations;
     renderAutomations();
   } catch (error) {
-    elements.automationHelp.textContent = errorToMessage(error, "Failed to load automations.");
+    elements.automationHelp.textContent = errorToMessage(error, t("dynamic.automation.loadFailed"));
     renderAutomations();
   }
 }
@@ -1968,7 +2396,7 @@ async function loadAutomationRuns(): Promise<void> {
     state.automationRuns = payload.runs;
     renderAutomationRuns();
   } catch (error) {
-    elements.automationRunHelp.textContent = errorToMessage(error, "Failed to load automation runs.");
+    elements.automationRunHelp.textContent = errorToMessage(error, t("dynamic.automationHistory.loadFailed"));
     renderAutomationRuns();
   }
 }
@@ -1977,7 +2405,7 @@ async function createAutomationFromForm(): Promise<void> {
   const title = elements.automationTitleInput.value.trim();
   const prompt = elements.automationPrompt.value.trim();
   if (!title || !prompt) {
-    elements.automationHelp.textContent = "Automation title and prompt are required.";
+    elements.automationHelp.textContent = t("dynamic.automation.required");
     return;
   }
 
@@ -1993,11 +2421,11 @@ async function createAutomationFromForm(): Promise<void> {
         intervalMs: readAutomationIntervalMs(),
       }),
     });
-    elements.automationHelp.textContent = "Automation created. It will run locally when due.";
+    elements.automationHelp.textContent = t("dynamic.automation.created");
     await loadAutomations();
     await loadAppReadiness();
   } catch (error) {
-    elements.automationHelp.textContent = errorToMessage(error, "Failed to create automation.");
+    elements.automationHelp.textContent = errorToMessage(error, t("dynamic.automation.createFailed"));
   } finally {
     elements.automationSaveButton.disabled = false;
   }
@@ -2007,14 +2435,14 @@ async function runAutomationTick(): Promise<void> {
   elements.automationTickButton.disabled = true;
   try {
     const payload = await apiJson<{ runs: AutomationRunSummary[] }>("/api/automations/tick", { method: "POST" });
-    elements.automationHelp.textContent = `Ran ${payload.runs.length} due automation${payload.runs.length === 1 ? "" : "s"}.`;
+    elements.automationHelp.textContent = t("dynamic.automation.ranDue", { count: payload.runs.length });
     await loadAutomations();
     await loadAutomationRuns();
     await loadApprovals();
     await loadArtifacts();
     await loadAppReadiness();
   } catch (error) {
-    elements.automationHelp.textContent = errorToMessage(error, "Failed to run due automations.");
+    elements.automationHelp.textContent = errorToMessage(error, t("dynamic.automation.tickFailed"));
   } finally {
     elements.automationTickButton.disabled = false;
   }
@@ -2034,13 +2462,13 @@ async function handleAutomationAction(automationId: string, action: string): Pro
     await loadAutomations();
     await loadAppReadiness();
   } catch (error) {
-    elements.automationHelp.textContent = errorToMessage(error, "Failed to update automation.");
+    elements.automationHelp.textContent = errorToMessage(error, t("dynamic.automation.updateFailed"));
   }
 }
 
 function renderAutomations(): void {
   if (state.automations.length === 0) {
-    elements.automationList.replaceChildren(createListItem("No automations in this workspace yet."));
+    elements.automationList.replaceChildren(createListItem(t("dynamic.automation.none")));
     return;
   }
 
@@ -2052,17 +2480,17 @@ function renderAutomations(): void {
       const deleteButton = document.createElement("button");
 
       title.className = "list-button";
-      title.textContent = `${automation.title} / ${automation.kind} / ${automation.status} / next ${automation.nextRunAt ? formatDate(automation.nextRunAt) : "none"}`;
+      title.textContent = `${automation.title} / ${automation.kind} / ${translatedToken(automation.status)} / ${t("dynamic.automation.next")} ${automation.nextRunAt ? formatDate(automation.nextRunAt) : t("dynamic.none")}`;
       pauseButton.type = "button";
       pauseButton.className = "secondary-button";
       pauseButton.dataset.automationId = automation.id;
       pauseButton.dataset.automationAction = automation.status === "active" ? "pause" : "resume";
-      pauseButton.textContent = automation.status === "active" ? "Pause" : "Resume";
+      pauseButton.textContent = automation.status === "active" ? t("dynamic.automation.pause") : t("dynamic.automation.resume");
       deleteButton.type = "button";
       deleteButton.className = "secondary-button";
       deleteButton.dataset.automationId = automation.id;
       deleteButton.dataset.automationAction = "delete";
-      deleteButton.textContent = "Delete";
+      deleteButton.textContent = t("workspace.button.delete");
       item.append(title, pauseButton, deleteButton);
       return item;
     }),
@@ -2071,8 +2499,8 @@ function renderAutomations(): void {
 
 function renderAutomationRuns(): void {
   if (state.automationRuns.length === 0) {
-    elements.automationRunList.replaceChildren(createListItem("No automation runs yet."));
-    elements.automationRunHelp.textContent = "Run due automations to create local proactive results.";
+    elements.automationRunList.replaceChildren(createListItem(t("dynamic.automationHistory.none")));
+    elements.automationRunHelp.textContent = t("dynamic.automationHistory.runToCreate");
     return;
   }
 
@@ -2081,12 +2509,12 @@ function renderAutomationRuns(): void {
       id: run.id,
       idName: "runId",
       title: run.status,
-      meta: `${run.result ?? "No result yet"} / ${formatDate(run.startedAt)}`,
+      meta: `${run.result ?? t("dynamic.automationHistory.noResult")} / ${formatDate(run.startedAt)}`,
       pressed: false,
       source: run.status,
     })),
   );
-  elements.automationRunHelp.textContent = `${state.automationRuns.length} automation run${state.automationRuns.length === 1 ? "" : "s"} recorded.`;
+  elements.automationRunHelp.textContent = t("dynamic.automationHistory.count", { count: state.automationRuns.length });
 }
 
 async function openRun(runId: string): Promise<void> {
@@ -2115,15 +2543,15 @@ async function openRun(runId: string): Promise<void> {
     renderRunHistory();
     renderCurrentRunView();
   } catch (error) {
-    elements.runHistoryHelp.textContent = errorToMessage(error, "Failed to load run events.");
+    elements.runHistoryHelp.textContent = errorToMessage(error, t("dynamic.runHistory.eventsFailed"));
   }
 }
 
 function renderRunHistory(): void {
   if (state.runs.length === 0) {
-    elements.runHistoryList.replaceChildren(createListItem("No persisted runs in this workspace yet."));
+    elements.runHistoryList.replaceChildren(createListItem(t("dynamic.runHistory.none")));
     elements.runEventHistory.replaceChildren();
-    elements.runHistoryHelp.textContent = "Run the mock executor to create persisted run history.";
+    elements.runHistoryHelp.textContent = t("dynamic.runHistory.runMock");
     return;
   }
 
@@ -2132,7 +2560,7 @@ function renderRunHistory(): void {
       id: run.id,
       idName: "runId",
       title: run.goal,
-      meta: `${run.executorChoice} / ${run.status} / ${formatDate(run.startedAt)}`,
+      meta: `${run.executorChoice} / ${translatedToken(run.status)} / ${formatDate(run.startedAt)}`,
       pressed: run.id === state.activeRunId,
       source: run.status,
     })),
@@ -2140,8 +2568,8 @@ function renderRunHistory(): void {
 
   const activeRun = state.runs.find((run) => run.id === state.activeRunId);
   elements.runHistoryHelp.textContent = activeRun
-    ? `Opened run ${truncate(activeRun.id, 24)}. Events: ${state.runEvents.length}.`
-    : "Select a run to inspect persisted events.";
+    ? t("dynamic.runHistory.opened", { id: truncate(activeRun.id, 24), count: state.runEvents.length })
+    : t("dynamic.runHistory.selectRun");
   elements.runEventHistory.replaceChildren(
     ...state.runEvents.map((event) => createEventListItem(event.type, event.message)),
   );
@@ -2195,17 +2623,23 @@ function renderCurrentRunView(): void {
 
   const latestEvent = liveRun.events.at(-1);
   const phase = liveRun.status;
-  elements.statusPill.textContent = phase;
+  elements.statusPill.textContent = translatedToken(phase);
   elements.statusPill.dataset.phase = phase;
-  elements.runSummary.textContent = liveRun.pendingApproval?.reason
-    ?? latestEvent?.message
-    ?? `${liveRun.executorChoice} run is ${liveRun.status}.`;
+  elements.runSummary.textContent = localizeKnownText(
+    liveRun.pendingApproval?.reason
+      ?? latestEvent?.message
+      ?? t("dynamic.run.statusSummary", { executor: liveRun.executorChoice, status: translatedToken(liveRun.status) }),
+  );
   elements.missionMeta.textContent =
-    `Run ${truncate(liveRun.runId, 28)} / Executor ${liveRun.executorChoice}${liveRun.timeoutMs ? ` / Timeout ${liveRun.timeoutMs}ms` : ""}`;
+    t("dynamic.run.meta", {
+      id: truncate(liveRun.runId, 28),
+      executor: liveRun.executorChoice,
+      timeout: liveRun.timeoutMs ? ` / ${t("run.form.timeout")} ${liveRun.timeoutMs}ms` : "",
+    });
   elements.transcript.replaceChildren(
     ...(liveRun.stream.length > 0
-      ? liveRun.stream.map((line) => createListItem(line))
-      : [createListItem("No stream output yet.")]),
+      ? liveRun.stream.map((line) => createListItem(localizeKnownText(line)))
+      : [createListItem(t("dynamic.run.noStream"))]),
   );
   elements.eventLog.replaceChildren(
     ...liveRun.events.map((event) => createEventListItem(event.type, event.message)),
@@ -2213,11 +2647,11 @@ function renderCurrentRunView(): void {
   elements.runArtifactList.replaceChildren(
     ...(liveRun.artifacts.length > 0
       ? liveRun.artifacts.map((artifact) => createListItem(`${artifact.title} (${artifact.kind})`))
-      : [createListItem("Artifacts will appear when this run produces them.")]),
+      : [createListItem(t("dynamic.run.artifactsPending"))]),
   );
   elements.runArtifactPreview.textContent = liveRun.artifacts.length > 0
-    ? liveRun.artifactContents[liveRun.artifacts[0]?.id ?? ""] ?? "Artifact has no preview content."
-    : "Run artifacts will render here after a task completes.";
+    ? liveRun.artifactContents[liveRun.artifacts[0]?.id ?? ""] ?? t("dynamic.artifact.noPreview")
+    : t("run-output.preview.default");
   renderApprovalPanel(liveRun.pendingApproval);
   state.memoryUsage = liveRun.memoryUsage ?? [];
   renderMemoryUsage();
@@ -2227,14 +2661,14 @@ function renderCurrentRunView(): void {
 
 function renderApprovalPanel(approval: LiveRunState["pendingApproval"]): void {
   elements.approvalPanel.dataset.active = approval ? "true" : "false";
-  elements.approvalStatus.textContent = approval ? "pending" : "no request";
-  elements.approvalCategory.textContent = approval?.category ?? "none";
-  elements.approvalRiskLevel.textContent = approval?.riskLevel ?? "none";
+  elements.approvalStatus.textContent = approval ? translatedToken("pending") : translatedToken("no-request");
+  elements.approvalCategory.textContent = approval?.category ?? t("dynamic.none");
+  elements.approvalRiskLevel.textContent = approval?.riskLevel ?? t("dynamic.none");
   elements.approvalRiskLevel.dataset.riskLevel = approval?.riskLevel ?? "";
-  elements.approvalRequestedAction.textContent = approval?.requestedAction ?? "none";
-  elements.approvalDecision.textContent = approval?.decision ?? (approval ? "pending" : "none");
-  elements.approvalResolvedAt.textContent = approval?.resolvedAt ? formatDate(approval.resolvedAt) : "not resolved";
-  elements.approvalReason.textContent = approval?.reason ?? "Runs that require approval will pause here.";
+  elements.approvalRequestedAction.textContent = approval?.requestedAction ?? t("dynamic.none");
+  elements.approvalDecision.textContent = approval?.decision ? translatedToken(approval.decision) : (approval ? translatedToken("pending") : t("dynamic.none"));
+  elements.approvalResolvedAt.textContent = approval?.resolvedAt ? formatDate(approval.resolvedAt) : t("dynamic.approval.notResolved");
+  elements.approvalReason.textContent = approval?.reason ?? t("approval.reason.default");
   elements.approvalGrantButton.disabled = !approval;
   elements.approvalRejectButton.disabled = !approval;
 }
@@ -2249,7 +2683,10 @@ function render(nextState: SpaceDemoState): void {
 function renderChatMessages(): void {
   elements.chatMessages.replaceChildren(
     ...state.chatMessages.map((message) => {
-      const item = createListItem(message.content);
+      const content = message.role === "system" && translatedValuesForKey("dynamic.chat.initialPrompt").includes(message.content)
+        ? t("dynamic.chat.initialPrompt")
+        : message.content;
+      const item = createListItem(content);
       item.dataset.role = message.role;
       return item;
     }),
@@ -2258,20 +2695,20 @@ function renderChatMessages(): void {
 
 function renderStatus(nextState: SpaceDemoState): void {
   const runSection = nextState.shell.sections[1];
-  const statusLabel = nextState.error ?? runSection.summary;
+  const statusLabel = localizeKnownText(nextState.error ?? runSection.summary);
 
-  elements.statusPill.textContent = nextState.phase;
+  elements.statusPill.textContent = translatedToken(nextState.phase);
   elements.statusPill.dataset.phase = nextState.phase;
   elements.runSummary.textContent = statusLabel;
   elements.missionMeta.textContent = nextState.summary
-    ? `Mission ${nextState.summary.missionId} / Run ${nextState.summary.runId} / Executor ${nextState.executorChoice}`
-    : `Executor ${nextState.executorChoice} / waiting for a goal`;
+    ? t("dynamic.run.missionMeta", { missionId: nextState.summary.missionId, runId: nextState.summary.runId, executor: nextState.executorChoice })
+    : t("dynamic.run.waitingForGoal", { executor: nextState.executorChoice });
 }
 
 function renderTranscript(nextState: SpaceDemoState): void {
   const chatSection = nextState.shell.sections[0];
   elements.transcript.replaceChildren(
-    ...chatSection.transcriptPreview.map((line) => createListItem(line)),
+    ...chatSection.transcriptPreview.map((line) => createListItem(localizeKnownText(line))),
   );
 }
 
@@ -2284,7 +2721,7 @@ function renderEvents(nextState: SpaceDemoState): void {
 function renderRunOutput(nextState: SpaceDemoState): void {
   if (nextState.artifacts.length === 0) {
     elements.runArtifactList.replaceChildren(createListItem(nextState.shell.sections[2].emptyState));
-    elements.runArtifactPreview.textContent = "Run artifacts will render here after a task completes.";
+    elements.runArtifactPreview.textContent = t("run-output.preview.default");
     return;
   }
 
@@ -2292,7 +2729,7 @@ function renderRunOutput(nextState: SpaceDemoState): void {
     ...nextState.artifacts.map((artifact) => createListItem(`${artifact.title} (${artifact.kind})`)),
   );
   elements.runArtifactPreview.textContent =
-    nextState.artifactContents[nextState.artifacts[0]?.id ?? ""] ?? "Artifact has no preview content.";
+    nextState.artifactContents[nextState.artifacts[0]?.id ?? ""] ?? t("dynamic.artifact.noPreview");
 }
 
 function createEventListItem(typeText: string, messageText: string): HTMLLIElement {
@@ -2302,7 +2739,7 @@ function createEventListItem(typeText: string, messageText: string): HTMLLIEleme
 
   type.className = "event-type";
   type.textContent = typeText;
-  message.textContent = messageText;
+  message.textContent = localizeKnownText(messageText);
   item.append(type, message);
   return item;
 }
@@ -2317,14 +2754,14 @@ function createReadinessListItem(input: AppReadinessCheck): HTMLLIElement {
   button.type = "button";
   button.className = "list-button readiness-list-item";
   button.dataset.readinessTarget = input.targetPage;
-  button.setAttribute("aria-label", `Open ${input.targetPage} for ${input.title}`);
+  button.setAttribute("aria-label", `${t("artifact.button.open")} ${input.targetPage} / ${input.title}`);
   title.className = "item-title";
   title.textContent = input.title;
   meta.className = "item-meta";
   meta.textContent = input.detail;
   badge.className = "source-badge";
   badge.dataset.source = input.status;
-  badge.textContent = input.status;
+  badge.textContent = translatedToken(input.status);
 
   button.append(title, meta, badge);
   item.append(button);
@@ -2355,7 +2792,7 @@ function createActionListItem(input: {
   meta.textContent = input.meta;
   badge.className = "source-badge";
   badge.dataset.source = input.source;
-  badge.textContent = input.source;
+  badge.textContent = translatedToken(input.source);
 
   button.append(title, meta, badge);
   item.append(button);
@@ -2414,13 +2851,16 @@ function isTerminalStatus(status: string): boolean {
 }
 
 function renderProviderError(message: string): void {
-  elements.providerStatus.textContent = "failed";
+  elements.providerStatus.textContent = translatedToken("failed");
   elements.providerStatus.dataset.phase = "failed";
   elements.providerHelp.textContent = message;
+  elements.providerHelp.dataset.dynamic = "true";
 }
 
 async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
+  const headers = new Headers(init?.headers ?? {});
+  headers.set("x-ai-os-language", state.language);
+  const response = await fetch(url, { ...init, headers });
   const payload = await response.json().catch(() => ({})) as { error?: string };
 
   if (!response.ok) {
@@ -2436,13 +2876,40 @@ function optionalFormValue(value: string): string | undefined {
 }
 
 function errorToMessage(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback;
+  return localizeKnownText(error instanceof Error ? error.message : fallback);
+}
+
+function localizeKnownText(text: string): string {
+  if (translatedValuesForKey("dynamic.chat.initialPrompt").includes(text)) return t("dynamic.chat.initialPrompt");
+  if (text === "Provider connection succeeded.") return t("dynamic.provider.connectionSucceeded");
+  if (text.startsWith("Provider connection succeeded. Models:")) {
+    return `${t("dynamic.provider.connectionSucceeded")} ${t("dynamic.provider.modelsLabel")} ${text.replace("Provider connection succeeded. Models:", "").trim()}`;
+  }
+  if (text.startsWith("Loaded models:")) {
+    return `${t("dynamic.provider.loadedModels")} ${text.replace("Loaded models:", "").trim()}`;
+  }
+  if (text === "Selected workspace path does not exist or is not a directory.") {
+    return t("dynamic.run.workspacePathMissing");
+  }
+  if (text === "Configure a model provider before chatting.") {
+    return t("dynamic.provider.saveBeforeChat");
+  }
+  if (text === "Mock executor prepared artifact previews.") {
+    return t("dynamic.mock.preparedArtifacts");
+  }
+  if (text.startsWith("Mock executor attached to ")) {
+    return `${t("dynamic.mock.attached")} ${text.replace("Mock executor attached to ", "")}`;
+  }
+  if (text === "Mock workflow completed.") {
+    return t("dynamic.mock.completed");
+  }
+  return text;
 }
 
 function formatDate(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString();
+  return date.toLocaleString(state.language);
 }
 
 function truncate(value: string, maxLength: number): string {
