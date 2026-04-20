@@ -80,7 +80,8 @@ This scenario is cross-layer because one change fans out into package scripts, E
 #### Secret-Store Selection Contract
 
 - `AI_SPACE_SECRET_BACKEND=file` wins first and is test-only.
-- When running inside Electron, `dev-server.mjs` must use `ElectronSafeStorageSecretStore`.
+- On macOS, `dev-server.mjs` must use `KeychainSecretStore` even inside Electron, because local ad-hoc Electron rebuilds can block the main process while decrypting `safeStorage` secrets.
+- When running inside Electron on non-macOS platforms, `dev-server.mjs` must use `ElectronSafeStorageSecretStore`.
 - When running on Windows outside Electron, `dev-server.mjs` must use `WindowsProtectedFileSecretStore`.
 - Otherwise the desktop dev server falls back to the existing macOS keychain-backed store.
 
@@ -123,7 +124,8 @@ Contract details:
 | Packaged app resources drift from builder config | package config regression test fails | `node --test tests/*.test.mjs` |
 | Host-specific install path drifts from actual packaging output | readiness and docs show the wrong open path | `npm test` on the host plus manual packaging smoke |
 | Server never reaches readiness | Electron main exits with non-zero after wait loop | packaged smoke run stderr / exit code |
-| `safeStorage` is unavailable in Electron session | provider secret read/write throws explicit error | manual provider save path |
+| macOS Electron provider secret read happens after app rebuild | Keychain path remains responsive and avoids `safeStorage` main-process hangs | packaged app restart smoke with saved provider |
+| `safeStorage` is unavailable in non-macOS Electron session | provider secret read/write throws explicit error | manual provider save path |
 | External URL navigation occurs | in-app navigation is denied, URL opens externally | manual smoke click path |
 | `AI_SPACE_DESKTOP_SHELL` is not set | readiness install payload regresses to local-browser-server mode | `/api/app/readiness` smoke assertion |
 

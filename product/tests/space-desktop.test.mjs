@@ -286,11 +286,14 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(electronConfig, /product\/node_modules\/@ai-os/);
   assert.match(devServer, /ElectronSafeStorageSecretStore/);
   assert.match(devServer, /WindowsProtectedFileSecretStore/);
+  assert.match(devServer, /process\.platform === "darwin"\) return new KeychainSecretStore/);
   assert.match(devServer, /resolveMacElectronAppPath/);
   assert.match(devServer, /win-unpacked/);
   assert.match(devServer, /safeStorage/);
   assert.match(browserSource, /Windows Packaging/);
   assert.match(browserSource, /windowsCommand/);
+  assert.match(browserSource, /createOption\(\"\", \"Load models or type manually\"\)/);
+  assert.doesNotMatch(browserSource, /elements\.providerModel\.value = payload\.models\[0\]/);
   assert.match(electronAfterPack, /package\.json/);
   assert.match(electronAfterPack, /copyFile/);
 });

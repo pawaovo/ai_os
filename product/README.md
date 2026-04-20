@@ -12,7 +12,7 @@ The current V1.0 product includes:
 
 - Electron desktop shell for macOS and Windows
 - local SQLite-backed product state
-- local secret storage through Electron `safeStorage`, macOS Keychain, or Windows protected files
+- local secret storage through macOS Keychain, Electron `safeStorage`, or Windows protected files
 - provider-backed chat through OpenAI-compatible and Anthropic-compatible APIs
 - local workspaces, threads, runs, approvals, artifacts, automations, memory, capabilities, and Forge recipes
 - mock, Codex CLI, and Claude Code CLI executor paths
@@ -110,8 +110,8 @@ Provider metadata, workspaces, threads, messages, runs, approvals, automations, 
 
 Provider API keys are stored separately from normal browser-visible state:
 
-- Electron: OS-backed `safeStorage`
-- Non-Electron macOS development: Keychain
+- macOS Electron and non-Electron development: Keychain
+- Other Electron builds: OS-backed `safeStorage`
 - Non-Electron Windows development: protected local files
 - Test override: `AI_SPACE_SECRET_BACKEND=file`
 

@@ -14,7 +14,7 @@ Electron is now the primary product path:
 - Electron renderer loads the existing AI OS browser UI from the local server.
 - The existing local AI OS server is imported inside the Electron main process, so packaged Electron builds do not require a separately installed Node runtime.
 - Renderer security defaults are locked down: `nodeIntegration: false`, `contextIsolation: true`, `sandbox: true`, and `webSecurity: true`.
-- Electron builds use OS-backed `safeStorage` for provider secrets. Non-Electron macOS development uses Keychain; Windows non-Electron development uses user-scoped DPAPI-protected files.
+- macOS builds use Keychain for provider secrets. Other Electron builds use OS-backed `safeStorage`; Windows non-Electron development uses user-scoped DPAPI-protected files.
 
 User data stays local by default:
 

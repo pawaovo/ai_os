@@ -3385,6 +3385,7 @@ function messageRowToUi(row) {
 
 function createSecretStore(root) {
   if (process.env.AI_SPACE_SECRET_BACKEND === "file") return new FileSecretStore(join(root, "secrets.json"));
+  if (process.platform === "darwin") return new KeychainSecretStore("AI OS Space Demo Provider");
   if (process.versions.electron) return new ElectronSafeStorageSecretStore(join(root, "electron-secrets.json"));
   if (process.platform === "win32") return new WindowsProtectedFileSecretStore(join(root, "windows-secrets"));
   return new KeychainSecretStore("AI OS Space Demo Provider");

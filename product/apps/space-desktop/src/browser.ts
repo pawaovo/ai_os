@@ -1052,11 +1052,6 @@ async function loadModelsForSelectedProvider(): Promise<void> {
 
     elements.providerHelp.textContent = `Loaded models: ${payload.models.slice(0, 8).join(", ")}`;
     setModelOptions(payload.models, elements.providerModel.value);
-    if (payload.models.length > 0) {
-      elements.providerModel.value = payload.models[0] ?? elements.providerModel.value;
-      elements.providerModelSelect.value = elements.providerModel.value;
-      await saveModelSelectionFromForm();
-    }
   } catch (error) {
     renderProviderError(errorToMessage(error, "Failed to load models."));
   } finally {
@@ -1085,15 +1080,15 @@ function setModelOptions(models: string[], selectedModel: string): void {
   const uniqueModels = [...new Set(models.filter(Boolean))];
 
   elements.providerModelSelect.replaceChildren(
+    createOption("", "Load models or type manually"),
     ...uniqueModels.map((model) => createOption(model, model)),
   );
 
   if (uniqueModels.length === 0) {
-    elements.providerModelSelect.append(createOption("", "Load models or type manually"));
     return;
   }
 
-  elements.providerModelSelect.value = uniqueModels.includes(selectedModel) ? selectedModel : uniqueModels[0] ?? "";
+  elements.providerModelSelect.value = uniqueModels.includes(selectedModel) ? selectedModel : "";
 }
 
 function providerDraftFromForm() {
