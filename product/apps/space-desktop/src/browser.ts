@@ -619,6 +619,72 @@ function translatedToken(value: string): string {
   return translatedSource !== sourceKey ? translatedSource : value;
 }
 
+function translateKeyOrFallback(key: string, fallback: string): string {
+  const translated = t(key);
+  return translated === key ? fallback : translated;
+}
+
+function localizeExecutorChoice(value: string): string {
+  switch (value) {
+    case "mock":
+      return t("run.executor.mock");
+    case "codex":
+      return t("run.executor.codex");
+    case "claude-code":
+      return t("run.executor.claude-code");
+    default:
+      return value;
+  }
+}
+
+function localizeWorkspaceTrustLevel(value: string): string {
+  return translateKeyOrFallback(`workspace.trust.${value}`, value);
+}
+
+function localizeAutomationKind(value: string): string {
+  return translateKeyOrFallback(`automation.kind.${value}`, value);
+}
+
+function localizeArtifactKind(value: string): string {
+  return translateKeyOrFallback(`artifact.form.kind.${value}`, value);
+}
+
+function localizeArtifactSource(value: string): string {
+  return translateKeyOrFallback(`dynamic.artifact.source.${value}`, value);
+}
+
+function localizeCapabilityKind(value: string): string {
+  return translateKeyOrFallback(`dynamic.capability.kind.${value}`, value);
+}
+
+function localizeCapabilityPermissionCategory(value: string): string {
+  return translateKeyOrFallback(`dynamic.capability.permission.${value}`, value);
+}
+
+function localizeApprovalCategory(value: string): string {
+  return translateKeyOrFallback(`dynamic.approval.category.${value}`, value);
+}
+
+function localizePageTarget(value: string): string {
+  switch (value) {
+    case "start":
+    case "space":
+    case "chat":
+    case "runs":
+    case "automations":
+    case "artifacts":
+    case "approvals":
+    case "memory":
+    case "capabilities":
+    case "forge":
+    case "providers":
+    case "settings":
+      return t(`nav.${value}`);
+    default:
+      return value;
+  }
+}
+
 function applyStaticTranslations(): void {
   document.documentElement.lang = state.language;
   document.title = t("meta.title");
@@ -682,7 +748,7 @@ function applyStaticTranslations(): void {
   setOptionText(elements.automationKind, "heartbeat", t("automation.kind.heartbeat"));
   elements.automationSaveButton.textContent = t("automation.button.create");
   elements.automationTickButton.textContent = t("automation.button.tick");
-  if (state.automations.length === 0 && !elements.automationHelp.dataset.dynamic) {
+  if (!elements.automationHelp.dataset.dynamic) {
     elements.automationHelp.textContent = t("automation.help.default");
   }
 
@@ -701,14 +767,14 @@ function applyStaticTranslations(): void {
   setOptionText(elements.memorySensitivity, "medium", t("memory.sensitivity.medium"));
   setOptionText(elements.memorySensitivity, "high", t("memory.sensitivity.high"));
   elements.memorySaveButton.textContent = t("memory.button.save");
-  if (state.memories.length === 0 && !elements.memoryHelp.dataset.dynamic) {
+  if (!elements.memoryHelp.dataset.dynamic) {
     elements.memoryHelp.textContent = t("memory.help.default");
   }
 
   setText(".capability-panel .eyebrow", t("capability.eyebrow"));
   setText(".capability-panel .mini-label", t("capability.mini"));
   setText("#capability-title", t("capability.title"));
-  if (state.capabilities.length === 0 && !elements.capabilityHelp.dataset.dynamic) {
+  if (!elements.capabilityHelp.dataset.dynamic) {
     elements.capabilityHelp.textContent = t("capability.help.default");
   }
 
@@ -824,7 +890,7 @@ function applyStaticTranslations(): void {
   setText(".executor-status-panel .eyebrow", t("executor-status.eyebrow"));
   setText(".executor-status-panel .mini-label", t("executor-status.mini"));
   setText("#executor-status-title", t("executor-status.title"));
-  if (state.executorStatuses.length === 0) {
+  if (!elements.executorStatusHelp.dataset.dynamic) {
     elements.executorStatusHelp.textContent = t("executor-status.help.default");
   }
 
@@ -842,6 +908,7 @@ function applyStaticTranslations(): void {
   setPlaceholder(elements.providerApiKey, t("provider.form.apiKey.placeholder"));
   setOptionText(elements.providerProtocol, "openai-compatible", t("provider.protocol.openai-compatible"));
   setOptionText(elements.providerProtocol, "anthropic-compatible", t("provider.protocol.anthropic-compatible"));
+  syncLocalizedInputValue(elements.providerName, "dynamic.provider.defaultName");
   elements.providerSaveButton.textContent = t("provider.button.save");
   elements.providerTestButton.textContent = t("provider.button.doctor");
   elements.providerModelsButton.textContent = t("provider.button.models");
@@ -1071,8 +1138,13 @@ function renderAppReadiness(): void {
   elements.appReadinessList.replaceChildren(
     ...readiness.checks.map((check) => createReadinessListItem(check)),
   );
-  elements.appReadinessHelp.textContent =
-    `${readiness.releaseName} ${readiness.version}: ${readyCount}/${readiness.checks.length} systems ready. Data root: ${readiness.storageRoot}`;
+  elements.appReadinessHelp.textContent = t("dynamic.readiness.summary", {
+    releaseName: localizeKnownText(readiness.releaseName),
+    version: readiness.version,
+    readyCount,
+    totalCount: readiness.checks.length,
+    storageRoot: readiness.storageRoot,
+  });
   elements.metricThreadCount.textContent = String(readiness.counts.threads);
   elements.metricRunCount.textContent = String(readiness.counts.runs);
   elements.metricArtifactCount.textContent = String(readiness.counts.artifacts);
@@ -1134,8 +1206,8 @@ function renderExecutorStatuses(): void {
     ...state.executorStatuses.map((status) => createActionListItem({
       id: status.choice,
       idName: "runId",
-      title: status.choice,
-      meta: status.message,
+      title: localizeExecutorChoice(status.choice),
+      meta: localizeKnownText(status.message),
       pressed: status.choice === elements.executor.value,
       source: status.available ? "completed" : "failed",
     })),
@@ -1292,8 +1364,11 @@ function renderWorkspaces(): void {
     fillWorkspaceForm(activeWorkspace);
     elements.activeWorkspaceLabel.textContent = activeWorkspace.name;
     elements.activeWorkspaceLabel.dataset.phase = "completed";
-    elements.workspaceHelp.textContent =
-      `${activeWorkspace.name}${activeWorkspace.path ? ` / ${activeWorkspace.path}` : ""} / ${t("dynamic.workspace.trust")} ${activeWorkspace.trustLevel}`;
+    elements.workspaceHelp.textContent = t("dynamic.workspace.active", {
+      name: activeWorkspace.name,
+      path: activeWorkspace.path ? ` / ${activeWorkspace.path}` : "",
+      trustLabel: localizeWorkspaceTrustLevel(activeWorkspace.trustLevel),
+    });
     return;
   }
 
@@ -1401,7 +1476,9 @@ async function saveProviderFromForm(): Promise<void> {
     elements.providerApiKey.value = "";
     elements.providerStatus.textContent = translatedToken("configured");
     elements.providerStatus.dataset.phase = "completed";
-    elements.providerHelp.textContent = t("dynamic.provider.saved", { preview: payload.provider?.apiKeyPreview ?? "saved" });
+    elements.providerHelp.textContent = t("dynamic.provider.saved", {
+      preview: payload.provider?.apiKeyPreview ?? t("dynamic.provider.previewSaved"),
+    });
     elements.providerHelp.dataset.dynamic = "true";
     await loadProviders();
     await loadAppReadiness();
@@ -1924,7 +2001,7 @@ async function deleteSelectedArtifact(): Promise<void> {
 function renderArtifactLibrary(): void {
   elements.artifactSelect.replaceChildren(
     createOption("", state.artifacts.length > 0 ? t("dynamic.artifact.selectOption") : t("dynamic.artifact.noneSaved")),
-    ...state.artifacts.map((artifact) => createOption(artifact.id, `${artifact.title} / ${artifact.source}`)),
+    ...state.artifacts.map((artifact) => createOption(artifact.id, `${artifact.title} / ${localizeArtifactSource(artifact.source)}`)),
   );
   elements.artifactSelect.value = state.activeArtifactId ?? "";
 
@@ -1940,7 +2017,7 @@ function renderArtifactLibrary(): void {
       id: artifact.id,
       idName: "artifactId",
       title: artifact.title,
-      meta: `${artifact.kind} / ${formatDate(artifact.updatedAt)}`,
+      meta: `${localizeArtifactKind(artifact.kind)} / ${formatDate(artifact.updatedAt)}`,
       pressed: artifact.id === state.activeArtifactId,
       source: artifact.source,
     })),
@@ -1953,7 +2030,7 @@ function renderArtifactLibrary(): void {
   }
 
   elements.artifactHelp.textContent =
-    t("dynamic.artifact.opened", { source: activeArtifact.source }) + (activeArtifact.runId ? ` / ${truncate(activeArtifact.runId, 24)}` : "");
+    t("dynamic.artifact.opened", { source: localizeArtifactSource(activeArtifact.source) }) + (activeArtifact.runId ? ` / ${truncate(activeArtifact.runId, 24)}` : "");
   elements.artifactPreview.textContent = activeArtifact.content || t("dynamic.artifact.noPreview");
 }
 
@@ -2066,7 +2143,8 @@ function renderMemories(): void {
       const button = document.createElement("button");
 
       content.className = "list-button";
-      content.textContent = `${memory.title} / ${memory.scope} / ${memory.sensitivity}${memory.lastUsedAt ? ` / used ${formatDate(memory.lastUsedAt)}` : ""}`;
+      content.textContent =
+        `${memory.title} / ${translateKeyOrFallback(`memory.scope.${memory.scope}`, memory.scope)} / ${translatedToken(memory.sensitivity)}${memory.lastUsedAt ? ` / ${t("dynamic.memory.usedAt", { date: formatDate(memory.lastUsedAt) })}` : ""}`;
       button.type = "button";
       button.className = "secondary-button";
       button.dataset.memoryId = memory.id;
@@ -2088,8 +2166,8 @@ function renderMemoryUsage(): void {
     ...state.memoryUsage.map((memory) => createActionListItem({
       id: memory.memoryId,
       idName: "memoryId",
-      title: `${memory.title} / ${memory.scope}`,
-      meta: `${memory.sensitivity} / score ${memory.score.toFixed(1)} / ${memory.content}`,
+      title: `${memory.title} / ${translateKeyOrFallback(`memory.scope.${memory.scope}`, memory.scope)}`,
+      meta: `${translatedToken(memory.sensitivity)} / ${t("dynamic.memoryUsage.score", { score: memory.score.toFixed(1) })} / ${memory.content}`,
       pressed: false,
       source: memory.sensitivity,
     })),
@@ -2162,7 +2240,7 @@ function renderCapabilities(): void {
       id: capability.id,
       idName: "capabilityId",
       title: capability.title,
-      meta: `${capability.kind} / ${capability.enabled ? "enabled" : "disabled"} / ${capability.permissions.length} permission${capability.permissions.length === 1 ? "" : "s"}`,
+      meta: `${localizeCapabilityKind(capability.kind)} / ${translatedToken(capability.enabled ? "enabled" : "disabled")} / ${t("dynamic.capability.permissionCount", { count: capability.permissions.length })}`,
       pressed: capability.id === activeCapability?.id,
       source: capability.enabled ? "completed" : "paused",
     })),
@@ -2170,13 +2248,13 @@ function renderCapabilities(): void {
 
   if (!activeCapability) return;
   elements.capabilityStatus.textContent = activeCapability.enabled ? translatedToken("enabled") : translatedToken("disabled");
-  elements.capabilityDescription.textContent = activeCapability.description;
+  elements.capabilityDescription.textContent = localizeKnownText(activeCapability.description);
   elements.capabilityPermissionList.replaceChildren(
     ...activeCapability.permissions.map((permission) => createActionListItem({
       id: `${activeCapability.id}-${permission.category}`,
       idName: "capabilityId",
-      title: permission.category,
-      meta: permission.description,
+      title: localizeCapabilityPermissionCategory(permission.category),
+      meta: localizeKnownText(permission.description),
       pressed: false,
       source: "low",
     })),
@@ -2345,8 +2423,8 @@ function renderRecipeTests(): void {
     ...state.recipeTests.map((test) => createActionListItem({
       id: test.id,
       idName: "recipeTestId",
-      title: test.status,
-      meta: `${test.result ?? t("dynamic.recipeTests.noResult")} / ${formatDate(test.startedAt)}`,
+      title: translatedToken(test.status),
+      meta: `${test.result ? localizeKnownText(test.result) : t("dynamic.recipeTests.noResult")} / ${formatDate(test.startedAt)}`,
       pressed: false,
       source: test.status,
     })),
@@ -2369,7 +2447,7 @@ function renderApprovalHistory(): void {
     ...state.approvals.map((approval) => createActionListItem({
       id: approval.approvalId,
       idName: "approvalId",
-      title: `${approval.category} / ${approval.riskLevel}`,
+      title: `${localizeApprovalCategory(approval.category)} / ${translatedToken(approval.riskLevel)}`,
       meta: `${translatedToken(approval.status)}${approval.decision ? `:${translatedToken(approval.decision)}` : ""} / ${approval.resolvedAt ? formatDate(approval.resolvedAt) : translatedToken("pending")} / ${approval.requestedAction}`,
       pressed: state.liveRun?.pendingApproval?.approvalId === approval.approvalId,
       source: approval.status,
@@ -2480,7 +2558,8 @@ function renderAutomations(): void {
       const deleteButton = document.createElement("button");
 
       title.className = "list-button";
-      title.textContent = `${automation.title} / ${automation.kind} / ${translatedToken(automation.status)} / ${t("dynamic.automation.next")} ${automation.nextRunAt ? formatDate(automation.nextRunAt) : t("dynamic.none")}`;
+      title.textContent =
+        `${automation.title} / ${localizeAutomationKind(automation.kind)} / ${translatedToken(automation.status)} / ${t("dynamic.automation.next")} ${automation.nextRunAt ? formatDate(automation.nextRunAt) : t("dynamic.none")}`;
       pauseButton.type = "button";
       pauseButton.className = "secondary-button";
       pauseButton.dataset.automationId = automation.id;
@@ -2508,8 +2587,8 @@ function renderAutomationRuns(): void {
     ...state.automationRuns.map((run) => createActionListItem({
       id: run.id,
       idName: "runId",
-      title: run.status,
-      meta: `${run.result ?? t("dynamic.automationHistory.noResult")} / ${formatDate(run.startedAt)}`,
+      title: translatedToken(run.status),
+      meta: `${run.result ? localizeKnownText(run.result) : t("dynamic.automationHistory.noResult")} / ${formatDate(run.startedAt)}`,
       pressed: false,
       source: run.status,
     })),
@@ -2560,7 +2639,7 @@ function renderRunHistory(): void {
       id: run.id,
       idName: "runId",
       title: run.goal,
-      meta: `${run.executorChoice} / ${translatedToken(run.status)} / ${formatDate(run.startedAt)}`,
+      meta: `${localizeExecutorChoice(run.executorChoice)} / ${translatedToken(run.status)} / ${formatDate(run.startedAt)}`,
       pressed: run.id === state.activeRunId,
       source: run.status,
     })),
@@ -2633,7 +2712,7 @@ function renderCurrentRunView(): void {
   elements.missionMeta.textContent =
     t("dynamic.run.meta", {
       id: truncate(liveRun.runId, 28),
-      executor: liveRun.executorChoice,
+      executor: localizeExecutorChoice(liveRun.executorChoice),
       timeout: liveRun.timeoutMs ? ` / ${t("run.form.timeout")} ${liveRun.timeoutMs}ms` : "",
     });
   elements.transcript.replaceChildren(
@@ -2646,7 +2725,7 @@ function renderCurrentRunView(): void {
   );
   elements.runArtifactList.replaceChildren(
     ...(liveRun.artifacts.length > 0
-      ? liveRun.artifacts.map((artifact) => createListItem(`${artifact.title} (${artifact.kind})`))
+      ? liveRun.artifacts.map((artifact) => createListItem(`${artifact.title} (${localizeArtifactKind(artifact.kind)})`))
       : [createListItem(t("dynamic.run.artifactsPending"))]),
   );
   elements.runArtifactPreview.textContent = liveRun.artifacts.length > 0
@@ -2662,8 +2741,8 @@ function renderCurrentRunView(): void {
 function renderApprovalPanel(approval: LiveRunState["pendingApproval"]): void {
   elements.approvalPanel.dataset.active = approval ? "true" : "false";
   elements.approvalStatus.textContent = approval ? translatedToken("pending") : translatedToken("no-request");
-  elements.approvalCategory.textContent = approval?.category ?? t("dynamic.none");
-  elements.approvalRiskLevel.textContent = approval?.riskLevel ?? t("dynamic.none");
+  elements.approvalCategory.textContent = approval?.category ? localizeApprovalCategory(approval.category) : t("dynamic.none");
+  elements.approvalRiskLevel.textContent = approval?.riskLevel ? translatedToken(approval.riskLevel) : t("dynamic.none");
   elements.approvalRiskLevel.dataset.riskLevel = approval?.riskLevel ?? "";
   elements.approvalRequestedAction.textContent = approval?.requestedAction ?? t("dynamic.none");
   elements.approvalDecision.textContent = approval?.decision ? translatedToken(approval.decision) : (approval ? translatedToken("pending") : t("dynamic.none"));
@@ -2683,9 +2762,7 @@ function render(nextState: SpaceDemoState): void {
 function renderChatMessages(): void {
   elements.chatMessages.replaceChildren(
     ...state.chatMessages.map((message) => {
-      const content = message.role === "system" && translatedValuesForKey("dynamic.chat.initialPrompt").includes(message.content)
-        ? t("dynamic.chat.initialPrompt")
-        : message.content;
+      const content = message.role === "system" ? localizeKnownText(message.content) : message.content;
       const item = createListItem(content);
       item.dataset.role = message.role;
       return item;
@@ -2701,8 +2778,12 @@ function renderStatus(nextState: SpaceDemoState): void {
   elements.statusPill.dataset.phase = nextState.phase;
   elements.runSummary.textContent = statusLabel;
   elements.missionMeta.textContent = nextState.summary
-    ? t("dynamic.run.missionMeta", { missionId: nextState.summary.missionId, runId: nextState.summary.runId, executor: nextState.executorChoice })
-    : t("dynamic.run.waitingForGoal", { executor: nextState.executorChoice });
+    ? t("dynamic.run.missionMeta", {
+      missionId: nextState.summary.missionId,
+      runId: nextState.summary.runId,
+      executor: localizeExecutorChoice(nextState.executorChoice),
+    })
+    : t("dynamic.run.waitingForGoal", { executor: localizeExecutorChoice(nextState.executorChoice) });
 }
 
 function renderTranscript(nextState: SpaceDemoState): void {
@@ -2726,7 +2807,7 @@ function renderRunOutput(nextState: SpaceDemoState): void {
   }
 
   elements.runArtifactList.replaceChildren(
-    ...nextState.artifacts.map((artifact) => createListItem(`${artifact.title} (${artifact.kind})`)),
+    ...nextState.artifacts.map((artifact) => createListItem(`${artifact.title} (${localizeArtifactKind(artifact.kind)})`)),
   );
   elements.runArtifactPreview.textContent =
     nextState.artifactContents[nextState.artifacts[0]?.id ?? ""] ?? t("dynamic.artifact.noPreview");
@@ -2754,7 +2835,7 @@ function createReadinessListItem(input: AppReadinessCheck): HTMLLIElement {
   button.type = "button";
   button.className = "list-button readiness-list-item";
   button.dataset.readinessTarget = input.targetPage;
-  button.setAttribute("aria-label", `${t("artifact.button.open")} ${input.targetPage} / ${input.title}`);
+  button.setAttribute("aria-label", `${t("artifact.button.open")} ${localizePageTarget(input.targetPage)} / ${input.title}`);
   title.className = "item-title";
   title.textContent = input.title;
   meta.className = "item-meta";
@@ -2864,7 +2945,7 @@ async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
   const payload = await response.json().catch(() => ({})) as { error?: string };
 
   if (!response.ok) {
-    throw new Error(payload.error ?? `Request failed with HTTP ${response.status}.`);
+    throw new Error(payload.error ?? t("dynamic.http.failed", { status: response.status }));
   }
 
   return payload as T;
@@ -2881,12 +2962,36 @@ function errorToMessage(error: unknown, fallback: string): string {
 
 function localizeKnownText(text: string): string {
   if (translatedValuesForKey("dynamic.chat.initialPrompt").includes(text)) return t("dynamic.chat.initialPrompt");
+  if (text === "Personal AI OS") return t("hero.title");
   if (text === "Provider connection succeeded.") return t("dynamic.provider.connectionSucceeded");
   if (text.startsWith("Provider connection succeeded. Models:")) {
     return `${t("dynamic.provider.connectionSucceeded")} ${t("dynamic.provider.modelsLabel")} ${text.replace("Provider connection succeeded. Models:", "").trim()}`;
   }
+  if (text === "Ready.") return t("dynamic.executor.ready");
+  if (text === "Unavailable.") return t("dynamic.executor.unavailable");
+  if (text === "Deterministic local demo executor.") {
+    return t("dynamic.executor.mockDemo");
+  }
   if (text.startsWith("Loaded models:")) {
     return `${t("dynamic.provider.loadedModels")} ${text.replace("Loaded models:", "").trim()}`;
+  }
+  if (text.startsWith("Codex command not found: ")) {
+    return t("dynamic.executor.commandMissing.codex", {
+      command: text.replace("Codex command not found: ", "").trim(),
+    });
+  }
+  if (text.startsWith("Claude Code command not found: ")) {
+    return t("dynamic.executor.commandMissing.claude-code", {
+      command: text.replace("Claude Code command not found: ", "").trim(),
+    });
+  }
+  if (text === "Deterministic workflow mock executor.") {
+    return t("dynamic.executor.mockReady");
+  }
+  if (text.startsWith("Executor available: ")) {
+    return t("dynamic.executor.available", {
+      available: text.endsWith("true") ? translatedToken("ready") : translatedToken("failed"),
+    });
   }
   if (text === "Selected workspace path does not exist or is not a directory.") {
     return t("dynamic.run.workspacePathMissing");
@@ -2894,14 +2999,79 @@ function localizeKnownText(text: string): string {
   if (text === "Configure a model provider before chatting.") {
     return t("dynamic.provider.saveBeforeChat");
   }
+  if (text === "Executor demo run failed.") {
+    return t("dynamic.run.error.executorFailed");
+  }
+  if (text === "Codex run interrupted.") {
+    return t("dynamic.run.interrupted.codex");
+  }
+  if (text === "Claude Code run interrupted.") {
+    return t("dynamic.run.interrupted.claude-code");
+  }
   if (text === "Mock executor prepared artifact previews.") {
     return t("dynamic.mock.preparedArtifacts");
   }
   if (text.startsWith("Mock executor attached to ")) {
     return `${t("dynamic.mock.attached")} ${text.replace("Mock executor attached to ", "")}`;
   }
+  if (text === "Approval granted. Continuing mock workflow.") {
+    return t("dynamic.mock.approvalGranted");
+  }
   if (text === "Mock workflow completed.") {
     return t("dynamic.mock.completed");
+  }
+  if (text === "Executor requested approval during the run.") {
+    return t("dynamic.approval.reason.executorRequested");
+  }
+  if (text === "Create a concise summary of the current workspace, threads, artifacts, and trust state.") {
+    return t("dynamic.capability.description.workspaceSummary");
+  }
+  if (text === "Summarize saved memories for the current workspace and personal context.") {
+    return t("dynamic.capability.description.memorySummary");
+  }
+  if (text === "Create a status brief of local automations and their recent runs.") {
+    return t("dynamic.capability.description.automationBrief");
+  }
+  if (text === "Read the selected workspace metadata and path.") {
+    return t("dynamic.capability.permissionDescription.workspaceReadSelected");
+  }
+  if (text === "Read the active workspace while replaying the recipe.") {
+    return t("dynamic.capability.permissionDescription.workspaceReadReplay");
+  }
+  if (text === "Read artifact titles in the active workspace.") {
+    return t("dynamic.capability.permissionDescription.artifactReadActive");
+  }
+  if (text === "Read artifacts created by the source workflow.") {
+    return t("dynamic.capability.permissionDescription.artifactReadSource");
+  }
+  if (text === "Read saved personal and workspace memory objects.") {
+    return t("dynamic.capability.permissionDescription.memoryReadSaved");
+  }
+  if (text === "Read local automation definitions and recent automation runs.") {
+    return t("dynamic.capability.permissionDescription.automationReadLocal");
+  }
+  if (text.startsWith("Network or external-send action requested from ")) {
+    return t("dynamic.approval.reason.network", {
+      workspace: text.replace("Network or external-send action requested from ", "").replace(/\.$/, ""),
+    });
+  }
+  if (text.startsWith("Shell or install command requested in ")) {
+    return t("dynamic.approval.reason.shell-command", {
+      workspace: text.replace("Shell or install command requested in ", "").replace(/\.$/, ""),
+    });
+  }
+  if (text.startsWith("File mutation requested in ")) {
+    return t("dynamic.approval.reason.file-write", {
+      workspace: text.replace("File mutation requested in ", "").replace(/\.$/, ""),
+    });
+  }
+  const executorMatch = /^(codex|claude-code) will run against (.+)\.$/.exec(text);
+  if (executorMatch) {
+    const [, executor = "", workspace = ""] = executorMatch;
+    return t("dynamic.approval.reason.code-executor", {
+      executor: localizeExecutorChoice(executor),
+      workspace,
+    });
   }
   return text;
 }

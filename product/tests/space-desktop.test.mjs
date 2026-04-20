@@ -297,6 +297,9 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(browserSource, /x-ai-os-language/);
   assert.match(browserSource, /loadLanguageSetting/);
   assert.match(browserSource, /saveLanguageSetting/);
+  assert.match(browserSource, /localizeExecutorChoice/);
+  assert.match(browserSource, /localizeApprovalCategory/);
+  assert.match(browserSource, /dynamic\.readiness\.summary/);
   assert.match(browserSource, /dynamic\.install\.windows/);
   assert.match(browserSource, /windowsCommand/);
   assert.match(browserSource, /dynamic\.provider\.modelSelectPlaceholder/);
@@ -304,6 +307,8 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(i18nSource, /"language\.zh-CN": "中文"/);
   assert.match(i18nSource, /"nav\.start": "开始"/);
   assert.match(i18nSource, /"nav\.start": "Start"/);
+  assert.match(i18nSource, /"dynamic\.approval\.reason\.file-write":/);
+  assert.match(i18nSource, /"dynamic\.capability\.permission\.workspace-read":/);
   assert.match(electronAfterPack, /package\.json/);
   assert.match(electronAfterPack, /copyFile/);
 });
@@ -1122,6 +1127,17 @@ test("space desktop V1.0 readiness summarizes local setup without leaking secret
     assert.equal(ready.checks.some((check) => check.id === "memory" && check.status === "ready"), true);
     assert.equal(ready.checks.some((check) => check.id === "automations" && check.status === "ready"), true);
     assert.equal(ready.nextActions.length > 0, true);
+
+    await patchJson(`http://127.0.0.1:${appPort}/api/settings/language`, {
+      language: "zh-CN",
+    });
+    const localized = await getJson(`http://127.0.0.1:${appPort}/api/app/readiness`, {
+      "x-ai-os-language": "zh-CN",
+    });
+    assert.equal(localized.language, "zh-CN");
+    assert.equal(localized.checks.some((check) => check.id === "workspace" && check.title === "本地工作空间"), true);
+    assert.equal(localized.checks.some((check) => check.id === "provider" && check.title === "自定义提供方"), true);
+    assert.match(localized.install.note, /当前本地 V1\.0/);
   } finally {
     await appServer.stop();
     await rm(storageDir, { recursive: true, force: true });
@@ -1391,8 +1407,8 @@ async function waitForLiveRun(port, runId, predicate) {
   throw new Error(`Timed out waiting for live run ${runId}: ${JSON.stringify(lastLive)}`);
 }
 
-async function getJson(url) {
-  const response = await fetch(url);
+async function getJson(url, headers = undefined) {
+  const response = await fetch(url, headers ? { headers } : undefined);
   assert.equal(response.ok, true);
   return response.json();
 }

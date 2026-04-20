@@ -57,6 +57,7 @@ interface AppReadinessSummary {
 - Start and Settings must also show the Windows package command emitted by `install.windowsCommand`.
 - `Settings` must expose a user-selectable language control with English and Chinese options.
 - Switching language must update both static page copy and major dynamic UI copy without requiring a manual page rebuild.
+- Language switching must also update user-facing dynamic metadata, including executor labels, approval categories, capability permissions, artifact source/kind labels, and untouched default help text for panels that already loaded data.
 - The Node Runtime card must render:
   - `"Electron provides the packaged desktop runtime."` when `nodeRequired === false`
   - `"Node must be available on PATH when running the local server outside Electron."` when `nodeRequired === true`
@@ -69,6 +70,7 @@ interface AppReadinessSummary {
 | --- | --- | --- |
 | `/api/app/readiness` fetch fails | renderer shows load failure message instead of crashing | `renderAppReadiness()` fallback path |
 | Saved language exists in local settings | page reload restores the saved language | bilingual smoke with `/api/settings/language` |
+| Dynamic lists or panel help loaded before language switch stay in the old language | mixed-language Settings, Executors, Capabilities, or Automations panels after switching language | renderer smoke after toggling `#language-select` |
 | Install path changes on backend only | regression test fails because docs/UI strings drift | `space-desktop.test.mjs` |
 | Windows package command exists on backend but is not rendered | install panel hides part of the documented cross-platform story | `space-desktop.test.mjs` source assertion and manual UI smoke |
 | `nodeRequired` toggles but UI copy does not | readiness install card shows wrong runtime expectation | manual smoke in Settings |
@@ -81,6 +83,7 @@ interface AppReadinessSummary {
 - Start page shows Electron build/open commands.
 - Install panel also surfaces the Windows packaging command.
 - Settings page exposes a language selector and Chinese mode re-renders page copy.
+- Chinese mode also re-renders dynamic status/help text instead of leaving executor, approval, or capability metadata in English.
 - Settings page still renders after navigation from Start.
 - Local install help text says Electron is the product shell.
 
