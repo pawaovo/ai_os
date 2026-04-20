@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 12
+- **Total Sessions**: 13
 - **Last Active**: 2026-04-20
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~445 | Active |
+| `journal-1.md` | ~492 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 13 | 2026-04-20 | Add bilingual Chinese and English app mode | `ba1db681504f89f9fd80a13080a031916678503e` | `codex/bilingual-app-language-toggle` |
 | 12 | 2026-04-20 | Real app E2E validation and provider-flow fixes | `3f7d8027d57997d3b233ad304f073300c39e3f00` | `codex/real-app-e2e-validation` |
 | 11 | 2026-04-20 | Polish desktop usability and user guidance | `628fe5704a4dff8ea412ad888123b76fe6ef9249` | `codex/desktop-usability-polish` |
 | 10 | 2026-04-20 | Complete Electron cross-platform desktop shell | `bb0ea8073e78bddca490bec8cd6374e1188751b1` | `codex/electron-cross-platform-desktop` |

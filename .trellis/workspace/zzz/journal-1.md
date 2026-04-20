@@ -443,3 +443,50 @@ Finished V0.2 UI controls for provider delete, model dropdown with manual fallba
 ### Next Steps
 
 - None - task complete
+
+
+## Session 13: Add bilingual Chinese and English app mode
+
+**Date**: 2026-04-20
+**Task**: Add bilingual Chinese and English app mode
+**Branch**: `codex/bilingual-app-language-toggle`
+
+### Summary
+
+(Add summary)
+
+### Main Changes
+
+| Area | Result |
+|------|--------|
+| Language mode | Added a real English/Chinese language selector instead of leaving the product English-only. |
+| Persistence | Added persisted language storage through local app settings so the selected language survives reload and restart. |
+| Frontend | Added a shared browser translation layer and re-render flow for core app surfaces, controls, and major dynamic UI text. |
+| Backend | Added language-aware readiness responses and a `/api/settings/language` flow so server-backed UI text can match the current language. |
+| Verification | Passed `npm test`, `npm run validate:electron`, `npm run package:mac`, and a bilingual smoke check that switched the app into Chinese and verified the dashboard and install panel copy updated. |
+
+**Key files**:
+- `product/apps/space-desktop/src/i18n.ts`
+- `product/apps/space-desktop/src/browser.ts`
+- `product/apps/space-desktop/scripts/dev-server.mjs`
+- `product/apps/space-desktop/public/index.html`
+- `.trellis/spec/frontend/desktop-readiness-contract.md`
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ba1db681504f89f9fd80a13080a031916678503e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
