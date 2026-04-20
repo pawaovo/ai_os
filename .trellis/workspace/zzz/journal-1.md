@@ -490,3 +490,44 @@ Finished V0.2 UI controls for provider delete, model dropdown with manual fallba
 ### Next Steps
 
 - None - task complete
+
+
+## Session 14: Bilingual UI Adaptation Follow-up
+
+**Date**: 2026-04-20
+**Task**: Bilingual UI Adaptation Follow-up
+**Branch**: `codex/bilingual-app-language-toggle`
+
+### Summary
+
+(Add summary)
+
+### Main Changes
+
+| Area | Update |
+|------|--------|
+| Renderer i18n | Completed language adaptation for dynamic metadata, executor labels, approval categories/reasons, capability permissions, artifact source/kind labels, and persisted default help copy. |
+| Tests | Extended `space-desktop.test.mjs` to cover bilingual readiness payloads and the new localization hooks/keys. |
+| Spec | Tightened the desktop readiness contract so language switching must also update dynamic list/help content, not just static headings. |
+| Validation | Passed `cd product && npm test`, `cd product && npm run validate:electron`, `cd product && npm run package:mac`, plus packaged-app readiness smoke on the latest mac build. |
+
+Residual note: packaged Electron window accessibility became flaky after relaunch, so the final smoke confirmed the latest packaged build boot path and localized readiness payload through the running app server, while earlier in-turn UI automation confirmed the real Settings language switch path in the packaged app.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9ed729a` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
