@@ -705,3 +705,36 @@ Implemented a real MCP stdio runtime probe, added registry/settings surfaces, im
 ### Next Steps
 
 - None - task complete
+
+
+## Session 20: P3 Agent Hub Orchestration MVP
+
+**Date**: 2026-04-22
+**Task**: P3 Agent Hub Orchestration MVP
+**Branch**: `codex/p3-agent-hub-orchestration`
+
+### Summary
+
+Implemented local Agent Hub orchestration over existing child runs, added a bilingual Agents page, covered deterministic success and failure paths, and validated packaged Electron smoke.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `dbacd43` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
