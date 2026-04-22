@@ -200,6 +200,9 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(html, /id="mcp-command-input"/);
   assert.match(html, /id="mcp-source"/);
   assert.match(html, /id="mcp-health"/);
+  assert.match(html, /id="agent-runtime-title"/);
+  assert.match(html, /id="agent-runtime-list"/);
+  assert.match(html, /id="agent-runtime-help"/);
   assert.match(html, /id="memory-title"/);
   assert.match(html, /id="memory-form"/);
   assert.match(html, /id="memory-scope"/);
@@ -333,6 +336,8 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(browserSource, /promptAppInstallationCapability/);
   assert.match(browserSource, /loadMcpConfig/);
   assert.match(browserSource, /saveMcpConfigFromForm/);
+  assert.match(browserSource, /loadAgentRuntimes/);
+  assert.match(browserSource, /renderAgentRuntimes/);
   assert.match(browserSource, /localizeExecutorChoice/);
   assert.match(browserSource, /localizeApprovalCategory/);
   assert.match(browserSource, /dynamic\.readiness\.summary/);
@@ -813,6 +818,65 @@ test("space desktop MCP config sync resolves global defaults and workspace overr
   }
 });
 
+test("agent hub skeleton projects executors, installed prompt apps, and MCP client state", async () => {
+  const storageDir = await mkdtemp(`${tmpdir()}/ai-os-agent-hub-`);
+  const appPort = await getAvailablePort();
+  const appServer = startSpaceDesktopServer({
+    port: appPort,
+    storageDir,
+  });
+
+  try {
+    await waitForHttp(`http://127.0.0.1:${appPort}/`);
+
+    await patchJson(`http://127.0.0.1:${appPort}/api/mcp/config`, {
+      scope: "global",
+      enabled: true,
+      command: process.execPath,
+      argsText: "--version",
+    });
+
+    const workspace = await postJson(`http://127.0.0.1:${appPort}/api/workspaces`, {
+      name: "Agent Hub Workspace",
+      path: storageDir,
+    });
+    const otherWorkspace = await postJson(`http://127.0.0.1:${appPort}/api/workspaces`, {
+      name: "Other Agent Hub Workspace",
+      path: storageDir,
+    });
+    await patchJson(`http://127.0.0.1:${appPort}/api/settings/workspace-selection`, {
+      workspaceId: workspace.workspace.id,
+    });
+
+    const started = await postJson(`http://127.0.0.1:${appPort}/api/runs/start`, {
+      goal: "summarize workspace status for agent hub prompt app",
+      executorChoice: "mock",
+      timeoutMs: 5000,
+    });
+    await waitForLiveRun(appPort, started.live.runId, (live) => live.status === "completed");
+    const created = await postJson(`http://127.0.0.1:${appPort}/api/recipes/from-run`, {
+      runId: started.live.runId,
+    });
+    const exported = await postJson(`http://127.0.0.1:${appPort}/api/recipes/${created.recipe.id}/export`, {});
+
+    const runtimeRegistry = await getJson(`http://127.0.0.1:${appPort}/api/agent-runtimes`);
+    assert.equal(runtimeRegistry.runtimes.some((runtime) => runtime.kind === "executor" && runtime.title === "mock"), true);
+    assert.equal(runtimeRegistry.runtimes.some((runtime) => runtime.kind === "executor" && runtime.title === "codex" && runtime.compatibility.transport === "process-cli"), true);
+    assert.equal(runtimeRegistry.runtimes.some((runtime) => runtime.kind === "mcp-client" && runtime.status === "ready"), true);
+    assert.equal(runtimeRegistry.runtimes.some((runtime) => runtime.kind === "prompt-app" && runtime.capabilityId === exported.capability.id && runtime.workspaceId === workspace.workspace.id), true);
+
+    await patchJson(`http://127.0.0.1:${appPort}/api/settings/workspace-selection`, {
+      workspaceId: otherWorkspace.workspace.id,
+    });
+    const switchedRegistry = await getJson(`http://127.0.0.1:${appPort}/api/agent-runtimes`);
+    assert.equal(switchedRegistry.runtimes.some((runtime) => runtime.kind === "prompt-app"), false);
+    assert.equal(switchedRegistry.runtimes.some((runtime) => runtime.kind === "mcp-client" && runtime.status === "ready"), true);
+  } finally {
+    await appServer.stop();
+    await rm(storageDir, { recursive: true, force: true });
+  }
+});
+
 test("space desktop provider catalog, model loading, and model selection stay compatible", async () => {
   const storageDir = await mkdtemp(`${tmpdir()}/ai-os-provider-governance-`);
   const providerServer = await startMockOpenAiProvider();
@@ -892,6 +956,12 @@ test("space desktop V0.5 run workflow records approval history and trust decisio
       ["mock", "codex", "claude-code"],
     );
     assert.equal(executors.executors[0].available, true);
+    assert.equal(executors.executors[0].compatibility.transport, "embedded");
+    assert.equal(executors.executors[0].compatibility.capabilities.artifactCollection, "native");
+    assert.equal(executors.executors[1].compatibility.transport, "process-cli");
+    assert.equal(executors.executors[1].compatibility.capabilities.approvalBridge, "product-pre-run");
+    assert.equal(executors.executors[1].compatibility.capabilities.artifactCollection, "fallback-only");
+    assert.equal(executors.executors[2].compatibility.capabilities.sessionContinuation, "product-pre-run");
 
     await postJson(`http://127.0.0.1:${appPort}/api/workspaces`, {
       name: "V0.5 Workspace",

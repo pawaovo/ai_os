@@ -16,11 +16,17 @@ This directory contains guidelines for backend development. Fill in each file wi
 |-------|-------------|--------|
 | [Directory Structure](./directory-structure.md) | Module organization and file layout | To fill |
 | [Database Guidelines](./database-guidelines.md) | ORM patterns, queries, migrations | To fill |
+| [Agent Hub Skeleton](./agent-hub-skeleton.md) | Read-only runtime registry layer that aggregates executors, Prompt App installs, and MCP projection | Active |
+| [Channel Pilot Remote Session Continuation](./channel-pilot-remote-session-continuation.md) | Boundary contract for a single remote channel pilot that reuses local continuation semantics | Active |
 | [Electron Desktop Shell](./electron-desktop-shell.md) | Runtime, packaging, env, and secret-store contracts for the Electron product shell | Active |
+| [External Runtime Compatibility Contract](./external-runtime-compatibility-contract.md) | Additive external runtime compatibility metadata before Agent Hub work | Active |
 | [Future MCP Server Boundary Spike](./future-mcp-server-boundary-spike.md) | Documentation boundary for future MCP server layer beyond current product-owned runtime | Active |
 | [MCP Client Config Sync](./mcp-client-config-sync.md) | Local MCP default/override config projection and health contract | Active |
+| [Multi Agent Coordination Mailbox](./multi-agent-coordination-mailbox.md) | Boundary contract for minimal mailbox and coordinator-worker linkage | Active |
+| [Multi Agent Governance Summary](./multi-agent-governance-summary.md) | Backend summary contract for future multi-agent governance surface | Active |
 | [Prompt App Contract](./prompt-app-contract.md) | Shared Prompt App Draft contract layered on top of the existing recipe flow | Active |
 | [Recipe Prompt App Bridge](./recipe-prompt-app-bridge.md) | Installation and rerun bridge from Prompt App Draft into local capability execution | Active |
+| [Remote Bridge Identity Trust Audit](./remote-bridge-identity-trust-audit.md) | Boundary contract for remote identity, trust, approval, and audit semantics | Active |
 | [Workspace Long Run Continuation](./workspace-long-run-continuation.md) | Persisted run runtime checkpoints and safe first-step continuation rules | Active |
 | [Workspace Native Artifact Preview Terminal](./workspace-native-artifact-preview-terminal.md) | Workspace-scoped latest artifact preview and read-only terminal summary surface | Active |
 | [Workspace Runtime Contract](./workspace-runtime-contract.md) | Product-layer workspace runtime summary contract for scoped state and live run projection | Active |

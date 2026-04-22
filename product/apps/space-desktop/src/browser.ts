@@ -233,6 +233,21 @@ interface ExecutorStatusSummary {
   choice: SpaceDemoExecutorChoice;
   available: boolean;
   message: string;
+  compatibility?: {
+    family: string;
+    runtime: string;
+    transport: string;
+    sessionModel: string;
+    capabilities: {
+      approvalBridge: string;
+      artifactCollection: string;
+      sessionContinuation: string;
+      interrupt: boolean;
+      cwd: boolean;
+      timeout: boolean;
+    };
+    limitations?: string[];
+  };
 }
 
 type ReadinessStatus = "ready" | "action" | "optional";
@@ -347,6 +362,20 @@ interface McpResolvedConfig extends McpClientConfigRecord {
   };
 }
 
+interface AgentRuntimeSummary {
+  id: string;
+  kind: string;
+  title: string;
+  source: string;
+  available: boolean;
+  status: string;
+  detail: string;
+  workspaceId?: string;
+  recipeId?: string;
+  capabilityId?: string;
+  compatibility?: ExecutorStatusSummary["compatibility"];
+}
+
 interface LiveRunState {
   sessionId?: string;
   runId: string;
@@ -397,6 +426,7 @@ const state = {
   capabilityRuns: [] as CapabilityRunRecord[],
   recipes: [] as RecipeSummary[],
   recipeTests: [] as RecipeTestSummary[],
+  agentRuntimes: [] as AgentRuntimeSummary[],
   mcpConfig: undefined as {
     globalConfig?: McpClientConfigRecord;
     workspaceOverride?: McpClientConfigRecord;
@@ -581,6 +611,8 @@ const elements = {
   mcpSource: getElement("mcp-source", HTMLElement),
   mcpHealth: getElement("mcp-health", HTMLElement),
   mcpHelp: getElement("mcp-help", HTMLElement),
+  agentRuntimeList: getElement("agent-runtime-list", HTMLElement),
+  agentRuntimeHelp: getElement("agent-runtime-help", HTMLElement),
 };
 
 elements.navButtons.forEach((button) => {
@@ -821,6 +853,7 @@ async function initializeAppState(): Promise<void> {
   await loadCapabilityRuns();
   await loadRecipes();
   await loadRecipeTests();
+  await loadAgentRuntimes();
   await loadMcpConfig();
   await loadAppReadiness();
 }
@@ -1097,6 +1130,12 @@ function applyStaticTranslations(): void {
   } else {
     renderMcpConfig();
   }
+  setText("#agent-runtime-title", t("agentRuntime.title"));
+  if (state.agentRuntimes.length === 0) {
+    elements.agentRuntimeHelp.textContent = t("agentRuntime.help.default");
+  } else {
+    renderAgentRuntimes();
+  }
   renderSettingsList();
 
   setText(".capability-detail-panel .eyebrow", t("capability-detail.eyebrow"));
@@ -1353,6 +1392,7 @@ async function saveLanguageSetting(): Promise<void> {
   await loadCapabilityRuns();
   await loadRecipes();
   await loadRecipeTests();
+  await loadAgentRuntimes();
   await loadArtifacts();
   await loadAppReadiness();
   renderChatMessages();
@@ -1493,7 +1533,14 @@ function renderExecutorStatuses(): void {
       id: status.choice,
       idName: "runId",
       title: localizeExecutorChoice(status.choice),
-      meta: localizeKnownText(status.message),
+      meta: status.compatibility
+        ? t("dynamic.executor.compatibility", {
+            transport: translateKeyOrFallback(`dynamic.executor.transport.${status.compatibility.transport}`, status.compatibility.transport),
+            approval: translateKeyOrFallback(`dynamic.executor.approval.${status.compatibility.capabilities.approvalBridge}`, status.compatibility.capabilities.approvalBridge),
+            artifacts: translateKeyOrFallback(`dynamic.executor.artifacts.${status.compatibility.capabilities.artifactCollection}`, status.compatibility.capabilities.artifactCollection),
+            continuation: translateKeyOrFallback(`dynamic.executor.continuation.${status.compatibility.capabilities.sessionContinuation}`, status.compatibility.capabilities.sessionContinuation),
+          })
+        : localizeKnownText(status.message),
       pressed: status.choice === elements.executor.value,
       source: status.available ? "completed" : "failed",
     })),
@@ -1633,6 +1680,7 @@ async function refreshWorkspaceScopedData(): Promise<void> {
   await loadCapabilities();
   await loadRecipes();
   await loadRecipeTests();
+  await loadAgentRuntimes();
   await loadMcpConfig();
   await loadAppReadiness();
 }
@@ -1819,6 +1867,40 @@ async function loadMcpConfig(): Promise<void> {
     state.mcpConfig = undefined;
     renderMcpConfig();
   }
+}
+
+async function loadAgentRuntimes(): Promise<void> {
+  try {
+    const payload = await apiJson<{ runtimes: AgentRuntimeSummary[] }>("/api/agent-runtimes");
+    state.agentRuntimes = payload.runtimes;
+    renderAgentRuntimes();
+  } catch (error) {
+    elements.agentRuntimeHelp.textContent = errorToMessage(error, t("agentRuntime.loadFailed"));
+    state.agentRuntimes = [];
+    renderAgentRuntimes();
+  }
+}
+
+function renderAgentRuntimes(): void {
+  if (state.agentRuntimes.length === 0) {
+    elements.agentRuntimeList.replaceChildren(createListItem(t("agentRuntime.none")));
+    elements.agentRuntimeHelp.textContent = t("agentRuntime.help.default");
+    return;
+  }
+
+  elements.agentRuntimeList.replaceChildren(
+    ...state.agentRuntimes.map((runtime) => createStaticActionListItem(
+      `${translateKeyOrFallback(`agentRuntime.kind.${runtime.kind}`, runtime.kind)} / ${runtime.title}`,
+      runtime.compatibility
+        ? t("agentRuntime.meta.compatibility", {
+            transport: translateKeyOrFallback(`dynamic.executor.transport.${runtime.compatibility.transport}`, runtime.compatibility.transport),
+            detail: runtime.detail,
+          })
+        : runtime.detail,
+      runtime.status,
+    )),
+  );
+  elements.agentRuntimeHelp.textContent = t("agentRuntime.help.count", { count: state.agentRuntimes.length });
 }
 
 function renderMcpConfig(): void {

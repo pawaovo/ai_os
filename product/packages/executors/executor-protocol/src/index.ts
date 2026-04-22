@@ -13,12 +13,36 @@ import type {
 
 export type ExecutorType = "code" | "browser" | "cli" | "shell" | "hybrid";
 export type CodeExecutorKind = "codex" | "claude-code";
+export type ExternalRuntimeTransport = "process-cli" | "embedded" | "app-server-jsonrpc" | "remote-bridge";
+export type ExternalRuntimeSessionModel = "in-process" | "ephemeral-process" | "managed-session";
+export type ExternalRuntimeApprovalBridge = "none" | "product-pre-run" | "runtime-native";
+export type ExternalRuntimeArtifactCollection = "none" | "fallback-only" | "native";
+export type ExternalRuntimeContinuation = "none" | "product-pre-run" | "native";
+
+export interface ExternalRuntimeCapabilitySet {
+  approvalBridge: ExternalRuntimeApprovalBridge;
+  artifactCollection: ExternalRuntimeArtifactCollection;
+  sessionContinuation: ExternalRuntimeContinuation;
+  interrupt: boolean;
+  cwd: boolean;
+  timeout: boolean;
+}
+
+export interface ExternalRuntimeCompatibility {
+  family: "executor";
+  runtime: string;
+  transport: ExternalRuntimeTransport;
+  sessionModel: ExternalRuntimeSessionModel;
+  capabilities: ExternalRuntimeCapabilitySet;
+  limitations?: string[];
+}
 
 export interface ExecutorStatus {
   executorId: ExecutorId;
   type: ExecutorType;
   available: boolean;
   message?: string;
+  compatibility?: ExternalRuntimeCompatibility;
 }
 
 export interface RunTask {

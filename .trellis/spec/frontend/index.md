@@ -18,6 +18,7 @@ This directory contains guidelines for frontend development. Fill in each file w
 | [Component Guidelines](./component-guidelines.md) | Component patterns, props, composition | To fill |
 | [Desktop Readiness Contract](./desktop-readiness-contract.md) | Renderer/UI contract for app readiness and Electron install messaging | Active |
 | [Hook Guidelines](./hook-guidelines.md) | Custom hooks, data fetching patterns | To fill |
+| [Multi Agent Product Surface](./multi-agent-product-surface.md) | Boundary contract for the first read-only frontend surface of future multi-agent governance work | Active |
 | [State Management](./state-management.md) | Local state, global state, server state | To fill |
 | [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | To fill |
 | [Type Safety](./type-safety.md) | Type patterns, validation | To fill |

@@ -85,6 +85,24 @@ export class ClaudeCodeProcessExecutor implements CodeExecutor {
       executorId: this.id,
       type: "code" as const,
       available,
+      compatibility: {
+        family: "executor" as const,
+        runtime: this.kind,
+        transport: "process-cli" as const,
+        sessionModel: "ephemeral-process" as const,
+        capabilities: {
+          approvalBridge: "product-pre-run" as const,
+          artifactCollection: "fallback-only" as const,
+          sessionContinuation: "product-pre-run" as const,
+          interrupt: true,
+          cwd: true,
+          timeout: true,
+        },
+        limitations: [
+          "Runtime approval bridge is not wired to the native Claude Code process protocol yet.",
+          "Artifact collection currently falls back to transcript and workspace diff artifacts.",
+        ],
+      },
       ...(available ? {} : { message: `Claude Code command not found: ${this.command}` }),
     };
   }

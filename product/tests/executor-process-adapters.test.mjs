@@ -61,11 +61,14 @@ test("CodexProcessExecutor streams normalized kernel events from process lines",
     clock,
   });
 
-  assert.deepEqual(await executor.getRuntimeStatus(), {
-    executorId: "executor-test",
-    type: "code",
-    available: true,
-  });
+  const codexStatus = await executor.getRuntimeStatus();
+  assert.equal(codexStatus.executorId, "executor-test");
+  assert.equal(codexStatus.type, "code");
+  assert.equal(codexStatus.available, true);
+  assert.equal(codexStatus.compatibility.transport, "process-cli");
+  assert.equal(codexStatus.compatibility.capabilities.approvalBridge, "product-pre-run");
+  assert.equal(codexStatus.compatibility.capabilities.artifactCollection, "fallback-only");
+  assert.equal(codexStatus.compatibility.capabilities.sessionContinuation, "product-pre-run");
 
   const result = await executor.startRun(task);
   const events = [];
@@ -121,6 +124,14 @@ test("ClaudeCodeProcessExecutor streams normalized kernel events from process li
     ids,
     clock,
   });
+
+  const claudeStatus = await executor.getRuntimeStatus();
+  assert.equal(claudeStatus.executorId, "executor-test");
+  assert.equal(claudeStatus.type, "code");
+  assert.equal(claudeStatus.available, true);
+  assert.equal(claudeStatus.compatibility.transport, "process-cli");
+  assert.equal(claudeStatus.compatibility.capabilities.approvalBridge, "product-pre-run");
+  assert.equal(claudeStatus.compatibility.capabilities.artifactCollection, "fallback-only");
 
   const result = await executor.startRun(task);
   const events = [];

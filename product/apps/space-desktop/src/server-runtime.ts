@@ -216,6 +216,23 @@ export async function getExecutorRuntimeStatus(
       type: "code" as const,
       available: true,
       message: "Deterministic local demo executor.",
+      compatibility: {
+        family: "executor" as const,
+        runtime: "mock",
+        transport: "embedded" as const,
+        sessionModel: "in-process" as const,
+        capabilities: {
+          approvalBridge: "runtime-native" as const,
+          artifactCollection: "native" as const,
+          sessionContinuation: "product-pre-run" as const,
+          interrupt: true,
+          cwd: true,
+          timeout: true,
+        },
+        limitations: [
+          "Mock executor is deterministic and local-only.",
+        ],
+      },
     };
   }
 

@@ -217,6 +217,11 @@ async function handleRequest(request, response) {
     return;
   }
 
+  if (request.method === "GET" && pathname === "/api/agent-runtimes") {
+    await handleListAgentRuntimes(response);
+    return;
+  }
+
   if (request.method === "GET" && pathname === "/api/recipes") {
     await handleListRecipes(response);
     return;
@@ -861,6 +866,12 @@ async function handleRunCapability(response, capabilityId) {
 
 async function handleListCapabilityRuns(response) {
   writeJson(response, 200, appStore.listCapabilityRuns(appStore.getSetting("activeWorkspaceId")));
+}
+
+async function handleListAgentRuntimes(response) {
+  writeJson(response, 200, {
+    runtimes: await listAgentRuntimeSummaries(appStore.getSetting("activeWorkspaceId")),
+  });
 }
 
 async function handleListRecipes(response) {
@@ -1543,10 +1554,52 @@ async function listExecutorStatuses() {
       choice,
       available: status.available,
       message: status.message ?? (status.available ? "Ready." : "Unavailable."),
+      ...(status.compatibility ? { compatibility: status.compatibility } : {}),
     });
   }
 
   return statuses;
+}
+
+async function listAgentRuntimeSummaries(workspaceId) {
+  const executors = await listExecutorStatuses();
+  const recipes = appStore.listRecipes(workspaceId).recipes.filter((recipe) => recipe.installation);
+  const mcp = appStore.getMcpConfigSummary(workspaceId).resolvedConfig;
+
+  return [
+    ...executors.map((status) => ({
+      id: `agent-runtime-${status.choice}`,
+      kind: "executor",
+      title: status.choice,
+      source: "local",
+      available: status.available,
+      status: status.available ? "ready" : "failed",
+      detail: status.message,
+      ...(status.compatibility ? { compatibility: status.compatibility } : {}),
+    })),
+    ...recipes.map((recipe) => ({
+      id: `agent-runtime-prompt-app-${recipe.id}`,
+      kind: "prompt-app",
+      title: recipe.title,
+      source: "local",
+      available: true,
+      status: "ready",
+      detail: `Installed capability ${recipe.installation.installedCapabilityId}`,
+      workspaceId: recipe.workspaceId,
+      recipeId: recipe.id,
+      capabilityId: recipe.installation.installedCapabilityId,
+    })),
+    {
+      id: "agent-runtime-mcp-client",
+      kind: "mcp-client",
+      title: "MCP Client",
+      source: "local",
+      available: mcp.health.status === "ready",
+      status: mcp.health.status,
+      detail: mcp.health.detail,
+      ...(workspaceId ? { workspaceId } : {}),
+    },
+  ];
 }
 
 function createExecutorRuntime() {
