@@ -55,6 +55,11 @@ export interface PromptAppRuntimeBinding {
   artifactPolicy: PromptAppArtifactPolicy;
 }
 
+export interface PromptAppInstallation {
+  installedCapabilityId: string;
+  installedAt: string;
+}
+
 export interface PromptAppDraftRecord {
   id: string;
   title: string;
@@ -62,6 +67,7 @@ export interface PromptAppDraftRecord {
   inputSpec: string;
   outputSpec: string;
   runtimeBinding: PromptAppRuntimeBinding;
+  installation?: PromptAppInstallation;
   sourceRunId?: string;
   workspaceId?: string;
   capabilityId?: string;

@@ -518,6 +518,8 @@ const elements = {
   promptAppBindingExecution: getElement("prompt-app-binding-execution", HTMLElement),
   promptAppBindingTools: getElement("prompt-app-binding-tools", HTMLElement),
   promptAppBindingArtifacts: getElement("prompt-app-binding-artifacts", HTMLElement),
+  promptAppInstallationCapability: getElement("prompt-app-installation-capability", HTMLElement),
+  promptAppInstallationAt: getElement("prompt-app-installation-at", HTMLElement),
   recipeSaveButton: getElement("recipe-save-button", HTMLButtonElement),
   recipeTestButton: getElement("recipe-test-button", HTMLButtonElement),
   recipeExportButton: getElement("recipe-export-button", HTMLButtonElement),
@@ -1051,6 +1053,8 @@ function applyStaticTranslations(): void {
   setPromptAppBindingLabel(1, t("recipe-editor.binding.execution"));
   setPromptAppBindingLabel(2, t("recipe-editor.binding.tools"));
   setPromptAppBindingLabel(3, t("recipe-editor.binding.artifacts"));
+  setPromptAppInstallationLabel(0, t("recipe-editor.installation.capability"));
+  setPromptAppInstallationLabel(1, t("recipe-editor.installation.installedAt"));
   elements.recipeSaveButton.textContent = t("recipe-editor.button.save");
   elements.recipeTestButton.textContent = t("recipe-editor.button.test");
 
@@ -1192,6 +1196,11 @@ function setApprovalGridLabel(index: number, text: string): void {
 
 function setPromptAppBindingLabel(index: number, text: string): void {
   const label = document.querySelectorAll<HTMLElement>(".prompt-app-binding-grid span")[index * 2];
+  if (label) label.textContent = text;
+}
+
+function setPromptAppInstallationLabel(index: number, text: string): void {
+  const label = document.querySelectorAll<HTMLElement>(".prompt-app-installation-grid span")[index * 2];
   if (label) label.textContent = text;
 }
 
@@ -2706,6 +2715,7 @@ function renderRecipes(): void {
     elements.recipeInputSpec.value = "";
     elements.recipeOutputSpec.value = "";
     renderPromptAppBinding(undefined);
+    renderPromptAppInstallation(undefined);
     elements.recipeSaveButton.disabled = true;
     elements.recipeTestButton.disabled = true;
     elements.recipeExportButton.disabled = true;
@@ -2733,6 +2743,7 @@ function renderRecipes(): void {
   elements.recipeInputSpec.value = activeRecipe.inputSpec;
   elements.recipeOutputSpec.value = activeRecipe.outputSpec;
   renderPromptAppBinding(activeRecipe.runtimeBinding);
+  renderPromptAppInstallation(activeRecipe.installation);
   elements.recipeSaveButton.disabled = false;
   elements.recipeTestButton.disabled = false;
   elements.recipeExportButton.disabled = false;
@@ -2753,6 +2764,13 @@ function renderPromptAppBinding(binding: PromptAppRuntimeBinding | undefined): v
     `recipe-editor.bindingValue.artifacts.${binding?.artifactPolicy ?? "workspace-artifact"}`,
     binding?.artifactPolicy ?? "workspace-artifact",
   );
+}
+
+function renderPromptAppInstallation(installation: RecipeSummary["installation"]): void {
+  elements.promptAppInstallationCapability.textContent = installation?.installedCapabilityId ?? t("dynamic.none");
+  elements.promptAppInstallationAt.textContent = installation?.installedAt
+    ? formatDate(installation.installedAt)
+    : t("recipe-editor.installation.none");
 }
 
 function renderRecipeTests(): void {

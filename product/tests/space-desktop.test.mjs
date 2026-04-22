@@ -219,6 +219,8 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(html, /id="prompt-app-binding-execution"/);
   assert.match(html, /id="prompt-app-binding-tools"/);
   assert.match(html, /id="prompt-app-binding-artifacts"/);
+  assert.match(html, /id="prompt-app-installation-capability"/);
+  assert.match(html, /id="prompt-app-installation-at"/);
   assert.match(html, /id="recipe-test-button"/);
   assert.match(html, /id="recipe-export-button"/);
   assert.match(html, /id="recipe-test-list"/);
@@ -322,6 +324,8 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(browserSource, /workspaceTerminalSurfacePreview/);
   assert.match(browserSource, /renderPromptAppBinding/);
   assert.match(browserSource, /promptAppBindingWorkspace/);
+  assert.match(browserSource, /renderPromptAppInstallation/);
+  assert.match(browserSource, /promptAppInstallationCapability/);
   assert.match(browserSource, /localizeExecutorChoice/);
   assert.match(browserSource, /localizeApprovalCategory/);
   assert.match(browserSource, /dynamic\.readiness\.summary/);
@@ -1428,6 +1432,8 @@ test("space desktop V0.9 forge recipes can be created, tested, exported, and rer
     const exported = await postJson(`http://127.0.0.1:${appPort}/api/recipes/${created.recipe.id}/export`, {});
     assert.equal(exported.recipe.capabilityId, exported.capability.id);
     assert.equal(exported.promptApp.runtimeBinding.workspaceId, workspace.workspace.id);
+    assert.equal(exported.promptApp.installation.installedCapabilityId, exported.capability.id);
+    assert.equal(typeof exported.promptApp.installation.installedAt, "string");
     assert.equal(exported.capability.kind, "local");
     assert.equal(exported.capability.enabled, true);
 
@@ -1442,7 +1448,9 @@ test("space desktop V0.9 forge recipes can be created, tested, exported, and rer
     const rerun = await postJson(`http://127.0.0.1:${appPort}/api/capabilities/${reexported.capability.id}/run`, {});
     assert.equal(rerun.run.status, "completed");
     assert.equal(rerun.artifact.source, "capability");
-    assert.match(rerun.run.result, /Recipe replay/);
+    assert.match(rerun.artifact.content, /Prompt App bridge replay/);
+    assert.match(rerun.artifact.content, /Installed Capability:/);
+    assert.match(rerun.run.result, /Prompt App bridge replay/);
     assert.match(rerun.artifact.content, /Workspace Digest Recipe V2/);
     assert.match(rerun.artifact.content, /Markdown digest with risks and next actions/);
 

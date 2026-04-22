@@ -1441,10 +1441,14 @@ function createCapabilityResult(capability, workspaceId) {
     return [
       `# ${recipe.title}`,
       "",
-      "Recipe replay:",
+      "Prompt App bridge replay:",
       `Prompt: ${recipe.prompt}`,
       `Input: ${recipe.inputSpec}`,
       `Output: ${recipe.outputSpec}`,
+      `Execution: ${recipe.runtimeBinding.executionMode}`,
+      `Tools: ${recipe.runtimeBinding.toolPolicy}`,
+      `Artifacts: ${recipe.runtimeBinding.artifactPolicy}`,
+      `Installed Capability: ${recipe.installation?.installedCapabilityId ?? capability.id}`,
       "",
       `Workspace: ${workspace?.name ?? "No workspace selected"}`,
     ].join("\n");
@@ -3031,6 +3035,7 @@ class SqliteAppStore {
         input_spec TEXT NOT NULL,
         output_spec TEXT NOT NULL,
         runtime_binding_json TEXT,
+        installed_at TEXT,
         source_run_id TEXT,
         workspace_id TEXT,
         capability_id TEXT,
@@ -3080,6 +3085,7 @@ class SqliteAppStore {
     this.addColumnIfMissing("runs", "continuation_state_json", "TEXT");
     this.addColumnIfMissing("runs", "last_checkpoint_at", "TEXT");
     this.addColumnIfMissing("recipes", "runtime_binding_json", "TEXT");
+    this.addColumnIfMissing("recipes", "installed_at", "TEXT");
     this.normalizePersistedRunCheckpoints();
     this.syncBuiltInCapabilities();
   }
@@ -3770,10 +3776,10 @@ class SqliteAppStore {
     const timestamp = nowIso();
     this.db.prepare(`
       INSERT INTO recipes (
-        id, title, prompt, input_spec, output_spec, runtime_binding_json,
+        id, title, prompt, input_spec, output_spec, runtime_binding_json, installed_at,
         source_run_id, workspace_id, capability_id, created_at, updated_at, last_tested_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       input.title,
@@ -3781,6 +3787,7 @@ class SqliteAppStore {
       input.inputSpec,
       input.outputSpec,
       JSON.stringify(input.runtimeBinding ?? createDefaultPromptAppRuntimeBinding({ workspaceId: input.workspaceId })),
+      null,
       input.sourceRunId ?? null,
       input.workspaceId ?? null,
       null,
@@ -3880,14 +3887,15 @@ class SqliteAppStore {
     `).run(
       capabilityId,
       recipe.title,
-      `Recipe capability exported from ${recipe.sourceRunId ?? "manual recipe"}.`,
+      `Prompt App capability installed from ${recipe.sourceRunId ?? "manual recipe"}.`,
       "local",
       JSON.stringify(permissions),
       1,
       createdAt,
       timestamp,
     );
-    this.db.prepare("UPDATE recipes SET capability_id = ?, updated_at = ? WHERE id = ?").run(capabilityId, timestamp, recipe.id);
+    this.db.prepare("UPDATE recipes SET capability_id = ?, installed_at = ?, updated_at = ? WHERE id = ?")
+      .run(capabilityId, timestamp, timestamp, recipe.id);
     return this.getCapability(capabilityId);
   }
 
@@ -4279,6 +4287,14 @@ function createDefaultPromptAppRuntimeBinding(input = {}) {
   };
 }
 
+function createPromptAppInstallation(row) {
+  if (!row.capability_id || !row.installed_at) return undefined;
+  return {
+    installedCapabilityId: row.capability_id,
+    installedAt: row.installed_at,
+  };
+}
+
 function approvalRowToSummary(row) {
   return {
     approvalId: row.id,
@@ -4348,6 +4364,7 @@ function recipeRowToSummary(row) {
       row.runtime_binding_json,
       createDefaultPromptAppRuntimeBinding({ workspaceId: row.workspace_id ?? undefined }),
     ),
+    ...(createPromptAppInstallation(row) ? { installation: createPromptAppInstallation(row) } : {}),
     ...(row.source_run_id ? { sourceRunId: row.source_run_id } : {}),
     ...(row.workspace_id ? { workspaceId: row.workspace_id } : {}),
     ...(row.capability_id ? { capabilityId: row.capability_id } : {}),
