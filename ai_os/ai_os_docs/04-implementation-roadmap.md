@@ -11,6 +11,11 @@ It is not a vision document. The vision is already covered by:
 - `02-ai-forge.md`
 - `03-capability-layer-principles.md`
 
+Companion reference documents for execution strategy:
+
+- `05-reference-project-comparison.md`
+- `06-reference-absorption-and-iteration-plan.md`
+
 This document is the execution map:
 
 - what each version should deliver
@@ -19,6 +24,12 @@ This document is the execution map:
 - which technology choices should be used
 - which tasks can run in parallel
 - which tasks must stay sequential
+
+Important:
+
+- `P0 / P1 / P2` in `06-reference-absorption-and-iteration-plan.md` mean reference-absorption priority only.
+- They do not replace the product release sequence in this document.
+- Delivery order still follows `V0.1 -> ... -> V1.0`.
 
 ## 2. Current State
 
