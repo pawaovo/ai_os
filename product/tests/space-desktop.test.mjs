@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { createServer } from "node:http";
@@ -223,6 +223,9 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(html, /id="workspace-runtime-title"/);
   assert.match(html, /id="workspace-runtime-list"/);
   assert.match(html, /id="workspace-runtime-help"/);
+  assert.match(html, /id="workspace-surface-title"/);
+  assert.match(html, /id="workspace-artifact-surface-preview"/);
+  assert.match(html, /id="workspace-terminal-surface-preview"/);
   assert.match(html, /id="executor-status-list"/);
   assert.match(html, /id="executor-timeout-input"/);
   assert.match(html, /id="run-cancel-button"/);
@@ -309,6 +312,9 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(browserSource, /saveLanguageSetting/);
   assert.match(browserSource, /renderWorkspaceRuntime/);
   assert.match(browserSource, /workspaceRuntimeList/);
+  assert.match(browserSource, /renderWorkspaceNativeSurface/);
+  assert.match(browserSource, /workspaceArtifactSurfacePreview/);
+  assert.match(browserSource, /workspaceTerminalSurfacePreview/);
   assert.match(browserSource, /localizeExecutorChoice/);
   assert.match(browserSource, /localizeApprovalCategory/);
   assert.match(browserSource, /dynamic\.readiness\.summary/);
@@ -1056,6 +1062,63 @@ test("space desktop V0.6 automations run locally and respect approvals", async (
   } finally {
     await appServer.stop();
     await rm(storageDir, { recursive: true, force: true });
+  }
+});
+
+test("workspace native artifact preview and terminal summary stay scoped to the active workspace", async () => {
+  const storageDir = await mkdtemp(`${tmpdir()}/ai-os-p1-surface-`);
+  const workspaceDir = await mkdtemp(`${tmpdir()}/ai-os-p1-worktree-`);
+  const secondWorkspaceDir = await mkdtemp(`${tmpdir()}/ai-os-p1-worktree-other-`);
+  const appPort = await getAvailablePort();
+  const appServer = startSpaceDesktopServer({
+    port: appPort,
+    storageDir,
+  });
+
+  try {
+    execFileSync("git", ["init", "-b", "main"], { cwd: workspaceDir });
+    await writeFile(resolve(workspaceDir, "notes.md"), "# Workspace Notes\n");
+
+    await waitForHttp(`http://127.0.0.1:${appPort}/`);
+
+    const workspace = await postJson(`http://127.0.0.1:${appPort}/api/workspaces`, {
+      name: "Surface Workspace",
+      path: workspaceDir,
+    });
+    const otherWorkspace = await postJson(`http://127.0.0.1:${appPort}/api/workspaces`, {
+      name: "Other Surface Workspace",
+      path: secondWorkspaceDir,
+    });
+
+    await patchJson(`http://127.0.0.1:${appPort}/api/settings/workspace-selection`, {
+      workspaceId: workspace.workspace.id,
+    });
+    await postJson(`http://127.0.0.1:${appPort}/api/artifacts`, {
+      title: "Workspace Surface Note",
+      content: "# Preview me from workspace runtime",
+      workspaceId: workspace.workspace.id,
+      source: "manual",
+    });
+
+    const scoped = await getJson(`http://127.0.0.1:${appPort}/api/workspaces`);
+    const activeWorkspace = scoped.workspaces.find((item) => item.id === workspace.workspace.id);
+    const inactiveWorkspace = scoped.workspaces.find((item) => item.id === otherWorkspace.workspace.id);
+    assert.equal(activeWorkspace.runtime.artifactPreview.title, "Workspace Surface Note");
+    assert.match(activeWorkspace.runtime.artifactPreview.contentPreview, /Preview me from workspace runtime/);
+    assert.equal(activeWorkspace.runtime.terminal.cwd, workspaceDir);
+    assert.equal(activeWorkspace.runtime.terminal.gitAvailable, true);
+    assert.equal(activeWorkspace.runtime.terminal.branch, "main");
+    assert.match(activeWorkspace.runtime.terminal.preview, /\$ git status --short/);
+    assert.match(activeWorkspace.runtime.terminal.preview, /notes\.md/);
+    assert.equal(activeWorkspace.runtime.surfaces.artifactPreviewReady, true);
+    assert.equal(activeWorkspace.runtime.surfaces.terminalCandidate, true);
+    assert.equal(inactiveWorkspace.runtime.artifactPreview, undefined);
+    assert.equal(inactiveWorkspace.runtime.terminal, undefined);
+  } finally {
+    await appServer.stop();
+    await rm(storageDir, { recursive: true, force: true });
+    await rm(workspaceDir, { recursive: true, force: true });
+    await rm(secondWorkspaceDir, { recursive: true, force: true });
   }
 });
 

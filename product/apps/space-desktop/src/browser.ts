@@ -83,6 +83,21 @@ interface WorkspaceRuntimeSummary {
     kind: string;
     updatedAt: string;
   };
+  artifactPreview?: {
+    artifactId: string;
+    title: string;
+    kind: string;
+    source: string;
+    updatedAt: string;
+    contentPreview: string;
+  };
+  terminal?: {
+    cwd: string;
+    preview: string;
+    gitAvailable: boolean;
+    dirty: boolean;
+    branch?: string;
+  };
   surfaces: {
     localPathBound: boolean;
     artifactPreviewReady: boolean;
@@ -405,6 +420,11 @@ const elements = {
   workspaceHelp: getElement("workspace-help", HTMLElement),
   workspaceRuntimeList: getElement("workspace-runtime-list", HTMLElement),
   workspaceRuntimeHelp: getElement("workspace-runtime-help", HTMLElement),
+  workspaceSurfaceHelp: getElement("workspace-surface-help", HTMLElement),
+  workspaceArtifactSurfaceMeta: getElement("workspace-artifact-surface-meta", HTMLElement),
+  workspaceArtifactSurfacePreview: getElement("workspace-artifact-surface-preview", HTMLElement),
+  workspaceTerminalSurfaceMeta: getElement("workspace-terminal-surface-meta", HTMLElement),
+  workspaceTerminalSurfacePreview: getElement("workspace-terminal-surface-preview", HTMLElement),
   providerForm: getElement("provider-form", HTMLFormElement),
   providerSelect: getElement("provider-select", HTMLSelectElement),
   providerName: getElement("provider-name", HTMLInputElement),
@@ -872,6 +892,18 @@ function applyStaticTranslations(): void {
   setText("#workspace-runtime-title", t("workspace.runtime.title"));
   if (!state.activeWorkspaceId) {
     elements.workspaceRuntimeHelp.textContent = t("workspace.runtime.help.default");
+  }
+  setText(".workspace-surface-panel .eyebrow", t("workspace.surface.eyebrow"));
+  setText(".workspace-surface-panel .mini-label", t("workspace.surface.mini"));
+  setText("#workspace-surface-title", t("workspace.surface.title"));
+  setText("#workspace-artifact-surface-title", t("workspace.surface.artifact.title"));
+  setText("#workspace-terminal-surface-title", t("workspace.surface.terminal.title"));
+  if (!state.activeWorkspaceId) {
+    elements.workspaceSurfaceHelp.textContent = t("workspace.surface.help.default");
+    elements.workspaceArtifactSurfaceMeta.textContent = t("workspace.surface.artifact.none");
+    elements.workspaceArtifactSurfacePreview.textContent = t("workspace.surface.artifact.previewDefault");
+    elements.workspaceTerminalSurfaceMeta.textContent = t("workspace.surface.terminal.none");
+    elements.workspaceTerminalSurfacePreview.textContent = t("workspace.surface.terminal.previewDefault");
   }
 
   setText(".threads-panel .eyebrow", t("threads.eyebrow"));
@@ -1517,12 +1549,14 @@ function renderWorkspaces(): void {
       trustLabel: localizeWorkspaceTrustLevel(activeWorkspace.trustLevel),
     });
     renderWorkspaceRuntime(activeWorkspace);
+    renderWorkspaceNativeSurface(activeWorkspace);
     return;
   }
 
   elements.activeWorkspaceLabel.textContent = t("dynamic.workspace.noneActive");
   elements.activeWorkspaceLabel.dataset.phase = "idle";
   renderWorkspaceRuntime(undefined);
+  renderWorkspaceNativeSurface(undefined);
   if (state.workspaces.length === 0) {
     elements.workspaceHelp.textContent = t("dynamic.workspace.createToScope");
   }
@@ -1607,6 +1641,47 @@ function renderWorkspaceRuntime(workspace: WorkspaceSummary | undefined): void {
           : "",
       })
     : t("dynamic.workspaceRuntime.help.default");
+}
+
+function renderWorkspaceNativeSurface(workspace: WorkspaceSummary | undefined): void {
+  if (!workspace?.runtime) {
+    elements.workspaceSurfaceHelp.textContent = t("workspace.surface.help.default");
+    elements.workspaceArtifactSurfaceMeta.textContent = t("workspace.surface.artifact.none");
+    elements.workspaceArtifactSurfacePreview.textContent = t("workspace.surface.artifact.previewDefault");
+    elements.workspaceTerminalSurfaceMeta.textContent = t("workspace.surface.terminal.none");
+    elements.workspaceTerminalSurfacePreview.textContent = t("workspace.surface.terminal.previewDefault");
+    return;
+  }
+
+  const runtime = workspace.runtime;
+  elements.workspaceSurfaceHelp.textContent = runtime.latestActivityAt
+    ? t("workspace.surface.help.latestActivity", { at: formatDate(runtime.latestActivityAt) })
+    : t("workspace.surface.help.default");
+
+  if (runtime.artifactPreview) {
+    elements.workspaceArtifactSurfaceMeta.textContent = t("workspace.surface.artifact.meta", {
+      title: runtime.artifactPreview.title,
+      kind: localizeArtifactKind(runtime.artifactPreview.kind),
+      source: localizeArtifactSource(runtime.artifactPreview.source),
+      updatedAt: formatDate(runtime.artifactPreview.updatedAt),
+    });
+    elements.workspaceArtifactSurfacePreview.textContent = runtime.artifactPreview.contentPreview;
+  } else {
+    elements.workspaceArtifactSurfaceMeta.textContent = t("workspace.surface.artifact.none");
+    elements.workspaceArtifactSurfacePreview.textContent = t("workspace.surface.artifact.previewDefault");
+  }
+
+  if (runtime.terminal) {
+    elements.workspaceTerminalSurfaceMeta.textContent = t("workspace.surface.terminal.meta", {
+      cwd: runtime.terminal.cwd,
+      branch: runtime.terminal.branch ?? t("dynamic.none"),
+      gitState: translatedToken(runtime.terminal.dirty ? "running" : "completed"),
+    });
+    elements.workspaceTerminalSurfacePreview.textContent = runtime.terminal.preview;
+  } else {
+    elements.workspaceTerminalSurfaceMeta.textContent = t("workspace.surface.terminal.none");
+    elements.workspaceTerminalSurfacePreview.textContent = t("workspace.surface.terminal.previewDefault");
+  }
 }
 
 function fillWorkspaceForm(workspace: WorkspaceSummary): void {

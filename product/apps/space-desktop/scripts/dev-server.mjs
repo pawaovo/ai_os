@@ -2276,35 +2276,111 @@ function createTranscriptArtifact(session) {
   };
 }
 
-function createWorkspaceDiffArtifact(session) {
-  try {
-    const status = execFileSync("git", ["-C", session.workspacePath, "status", "--short"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-    const diffStat = execFileSync("git", ["-C", session.workspacePath, "diff", "--stat"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
+function createWorkspaceArtifactPreview(artifact) {
+  return {
+    artifactId: artifact.id,
+    title: artifact.title,
+    kind: artifact.kind,
+    source: artifact.source,
+    updatedAt: artifact.updatedAt,
+    contentPreview: truncateWorkspacePreview(artifact.content ?? "", 1200),
+  };
+}
 
-    if (!status && !diffStat) return undefined;
+function createWorkspaceTerminalSummary(workspacePath) {
+  const git = readWorkspaceGitSnapshot(workspacePath);
+  const previewLines = [
+    `$ pwd`,
+    workspacePath,
+    "",
+  ];
+
+  if (!git) {
+    previewLines.push(
+      `$ git status --short`,
+      "(workspace is not a git repository or git metadata is unavailable)",
+    );
+    return {
+      cwd: workspacePath,
+      preview: previewLines.join("\n"),
+      gitAvailable: false,
+      dirty: false,
+    };
+  }
+
+  previewLines.push(
+    `$ git branch --show-current`,
+    git.branch || "(detached HEAD)",
+    "",
+    `$ git status --short`,
+    git.status || "(clean)",
+  );
+
+  if (git.diffStat) {
+    previewLines.push(
+      "",
+      `$ git diff --stat`,
+      git.diffStat,
+    );
+  }
+
+  return {
+    cwd: workspacePath,
+    preview: previewLines.join("\n"),
+    gitAvailable: true,
+    dirty: Boolean(git.status || git.diffStat),
+    ...(git.branch ? { branch: git.branch } : {}),
+  };
+}
+
+function readWorkspaceGitSnapshot(workspacePath) {
+  try {
+    const branch = execFileSync("git", ["-C", workspacePath, "branch", "--show-current"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    const status = execFileSync("git", ["-C", workspacePath, "status", "--short"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    const diffStat = execFileSync("git", ["-C", workspacePath, "diff", "--stat"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
 
     return {
-      id: session.ids.artifactId(),
-      kind: "diff",
-      title: "Workspace Diff Summary",
-      content: [
-        "# Workspace Diff Summary",
-        "",
-        diffStat ? "## Diff Stat" : "",
-        diffStat,
-        status ? "## Git Status" : "",
-        status,
-      ].filter(Boolean).join("\n\n"),
+      branch,
+      status,
+      diffStat,
     };
   } catch {
     return undefined;
   }
+}
+
+function createWorkspaceDiffArtifact(session) {
+  const git = readWorkspaceGitSnapshot(session.workspacePath);
+  if (!git) {
+    return undefined;
+  }
+
+  if (!git.status && !git.diffStat) {
+    return undefined;
+  }
+
+  return {
+    id: session.ids.artifactId(),
+    kind: "diff",
+    title: "Workspace Diff Summary",
+    content: [
+      "# Workspace Diff Summary",
+      "",
+      git.diffStat ? "## Diff Stat" : "",
+      git.diffStat,
+      git.status ? "## Git Status" : "",
+      git.status,
+    ].filter(Boolean).join("\n\n"),
+  };
 }
 
 function finalizeSession(session, status, message) {
@@ -3057,9 +3133,11 @@ class SqliteAppStore {
   }
 
   listWorkspaces() {
-    const workspaces = this.db.prepare("SELECT * FROM workspaces ORDER BY updated_at DESC").all()
-      .map((row) => this.enrichWorkspaceSummary(workspaceRowToSummary(row)));
     const activeWorkspaceId = this.getSetting("activeWorkspaceId");
+    const workspaces = this.db.prepare("SELECT * FROM workspaces ORDER BY updated_at DESC").all()
+      .map((row) => this.enrichWorkspaceSummary(workspaceRowToSummary(row), {
+        detailed: row.id === activeWorkspaceId,
+      }));
     return { workspaces, ...(activeWorkspaceId ? { activeWorkspaceId } : {}) };
   }
 
@@ -3077,7 +3155,7 @@ class SqliteAppStore {
   getWorkspace(id) {
     if (!id) return undefined;
     const row = this.db.prepare("SELECT * FROM workspaces WHERE id = ?").get(id);
-    return row ? this.enrichWorkspaceSummary(workspaceRowToSummary(row)) : undefined;
+    return row ? this.enrichWorkspaceSummary(workspaceRowToSummary(row), { detailed: true }) : undefined;
   }
 
   updateWorkspace(id, input) {
@@ -3118,14 +3196,14 @@ class SqliteAppStore {
     return workspace;
   }
 
-  enrichWorkspaceSummary(workspace) {
+  enrichWorkspaceSummary(workspace, options = {}) {
     return {
       ...workspace,
-      runtime: this.getWorkspaceRuntimeSummary(workspace),
+      runtime: this.getWorkspaceRuntimeSummary(workspace, options),
     };
   }
 
-  getWorkspaceRuntimeSummary(workspace) {
+  getWorkspaceRuntimeSummary(workspace, options = {}) {
     const threads = this.listThreads(workspace.id).threads;
     const runs = this.listRuns(workspace.id).runs;
     const artifacts = this.listArtifacts(workspace.id).artifacts;
@@ -3146,6 +3224,12 @@ class SqliteAppStore {
       ? this.getRunRuntimeState(latestRun.id)?.runtimeState
       : undefined;
     const latestArtifact = artifacts[0];
+    const artifactPreview = options.detailed && latestArtifact
+      ? createWorkspaceArtifactPreview(latestArtifact)
+      : undefined;
+    const terminal = options.detailed && workspace.path
+      ? createWorkspaceTerminalSummary(workspace.path)
+      : undefined;
     const latestMemory = memories[0];
     const latestAutomation = automations[0];
     const latestActivityAt = [
@@ -3203,13 +3287,15 @@ class SqliteAppStore {
             },
           }
         : {}),
+      ...(artifactPreview ? { artifactPreview } : {}),
+      ...(terminal ? { terminal } : {}),
       surfaces: {
         localPathBound: Boolean(workspace.path),
-        artifactPreviewReady: artifacts.length > 0,
+        artifactPreviewReady: Boolean(artifactPreview),
         runHistoryReady: runs.length > 0,
         memoryReady: memories.length > 0,
         automationReady: automations.length > 0,
-        terminalCandidate: Boolean(workspace.path),
+        terminalCandidate: Boolean(terminal),
       },
     };
   }
@@ -4167,6 +4253,14 @@ function parseStoredJson(value, fallback) {
   } catch {
     return fallback;
   }
+}
+
+function truncateWorkspacePreview(value, limit = 1200) {
+  const normalized = String(value ?? "").trim();
+  if (normalized.length === 0) {
+    return "(no preview content)";
+  }
+  return normalized.length > limit ? `${normalized.slice(0, limit - 3)}...` : normalized;
 }
 
 function approvalRowToSummary(row) {

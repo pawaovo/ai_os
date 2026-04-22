@@ -18,6 +18,7 @@ This directory contains guidelines for backend development. Fill in each file wi
 | [Database Guidelines](./database-guidelines.md) | ORM patterns, queries, migrations | To fill |
 | [Electron Desktop Shell](./electron-desktop-shell.md) | Runtime, packaging, env, and secret-store contracts for the Electron product shell | Active |
 | [Workspace Long Run Continuation](./workspace-long-run-continuation.md) | Persisted run runtime checkpoints and safe first-step continuation rules | Active |
+| [Workspace Native Artifact Preview Terminal](./workspace-native-artifact-preview-terminal.md) | Workspace-scoped latest artifact preview and read-only terminal summary surface | Active |
 | [Workspace Runtime Contract](./workspace-runtime-contract.md) | Product-layer workspace runtime summary contract for scoped state and live run projection | Active |
 | [Error Handling](./error-handling.md) | Error types, handling strategies | To fill |
 | [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | To fill |
