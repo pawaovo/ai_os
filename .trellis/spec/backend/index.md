@@ -17,6 +17,7 @@ This directory contains guidelines for backend development. Fill in each file wi
 | [Directory Structure](./directory-structure.md) | Module organization and file layout | To fill |
 | [Database Guidelines](./database-guidelines.md) | ORM patterns, queries, migrations | To fill |
 | [Electron Desktop Shell](./electron-desktop-shell.md) | Runtime, packaging, env, and secret-store contracts for the Electron product shell | Active |
+| [Workspace Long Run Continuation](./workspace-long-run-continuation.md) | Persisted run runtime checkpoints and safe first-step continuation rules | Active |
 | [Workspace Runtime Contract](./workspace-runtime-contract.md) | Product-layer workspace runtime summary contract for scoped state and live run projection | Active |
 | [Error Handling](./error-handling.md) | Error types, handling strategies | To fill |
 | [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | To fill |

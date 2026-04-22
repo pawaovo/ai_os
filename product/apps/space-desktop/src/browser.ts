@@ -332,6 +332,12 @@ interface LiveRunState {
   };
   memoryUsage?: RetrievedMemory[];
   memoryTrace?: MemoryRetrievalTrace;
+  continuationState?: {
+    kind: string;
+    resumable: boolean;
+    site?: string;
+    reason: string;
+  };
   completedAt?: string;
   timeoutMs?: number;
 }
@@ -2939,6 +2945,7 @@ function renderCurrentRunView(): void {
   elements.statusPill.dataset.phase = phase;
   elements.runSummary.textContent = localizeKnownText(
     liveRun.pendingApproval?.reason
+      ?? liveRun.continuationState?.reason
       ?? latestEvent?.message
       ?? t("dynamic.run.statusSummary", { executor: liveRun.executorChoice, status: translatedToken(liveRun.status) }),
   );

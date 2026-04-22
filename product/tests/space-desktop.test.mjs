@@ -1059,6 +1059,113 @@ test("space desktop V0.6 automations run locally and respect approvals", async (
   }
 });
 
+test("workspace long run continuation resumes pre-run approval after restart", async () => {
+  const storageDir = await mkdtemp(`${tmpdir()}/ai-os-p1-pre-run-`);
+  const appPort = await getAvailablePort();
+  const appServer = startSpaceDesktopServer({
+    port: appPort,
+    storageDir,
+  });
+  let restartedServer;
+
+  try {
+    await waitForHttp(`http://127.0.0.1:${appPort}/`);
+
+    await postJson(`http://127.0.0.1:${appPort}/api/workspaces`, {
+      name: "P1 Continuation Workspace",
+      path: storageDir,
+    });
+
+    const run = await postJson(`http://127.0.0.1:${appPort}/api/runs/start`, {
+      goal: "write a resumable approval workflow report",
+      executorChoice: "mock",
+      timeoutMs: 5000,
+    });
+    const pending = await waitForLiveRun(appPort, run.live.runId, (live) => Boolean(live.pendingApproval));
+    assert.equal(pending.pendingApproval.stage, "pre-run");
+
+    await appServer.stop();
+    restartedServer = startSpaceDesktopServer({
+      port: appPort,
+      storageDir,
+    });
+    await waitForHttp(`http://127.0.0.1:${appPort}/`);
+
+    const resumedLive = await getJson(`http://127.0.0.1:${appPort}/api/runs/${run.live.runId}/live`);
+    assert.equal(resumedLive.live.status, "awaiting-approval");
+    assert.equal(resumedLive.live.continuationState.kind, "resume-pre-run-approval");
+    assert.equal(resumedLive.live.continuationState.resumable, true);
+    assert.equal(resumedLive.live.pendingApproval.stage, "pre-run");
+
+    await postJson(`http://127.0.0.1:${appPort}/api/runs/${run.live.runId}/approval`, {
+      decision: "grant",
+    });
+    const completed = await waitForLiveRun(appPort, run.live.runId, (live) => live.status === "completed");
+    assert.equal(completed.events.some((event) => event.type === "approval.granted"), true);
+  } finally {
+    if (restartedServer) {
+      await restartedServer.stop();
+    } else {
+      await appServer.stop();
+    }
+    await rm(storageDir, { recursive: true, force: true });
+  }
+});
+
+test("workspace long run continuation marks runtime approval restarts as rerun-required", async () => {
+  const storageDir = await mkdtemp(`${tmpdir()}/ai-os-p1-runtime-`);
+  const appPort = await getAvailablePort();
+  const appServer = startSpaceDesktopServer({
+    port: appPort,
+    storageDir,
+  });
+  let restartedServer;
+
+  try {
+    await waitForHttp(`http://127.0.0.1:${appPort}/`);
+
+    await postJson(`http://127.0.0.1:${appPort}/api/workspaces`, {
+      name: "P1 Runtime Approval Workspace",
+      path: storageDir,
+    });
+
+    const run = await postJson(`http://127.0.0.1:${appPort}/api/runs/start`, {
+      goal: "review the workspace and pause for approval before the final summary",
+      executorChoice: "mock",
+      timeoutMs: 5000,
+    });
+    const runtimePending = await waitForLiveRun(appPort, run.live.runId, (live) => Boolean(live.pendingApproval));
+    assert.equal(runtimePending.pendingApproval.stage, "runtime");
+
+    await appServer.stop();
+    restartedServer = startSpaceDesktopServer({
+      port: appPort,
+      storageDir,
+    });
+    await waitForHttp(`http://127.0.0.1:${appPort}/`);
+
+    const restartedLive = await getJson(`http://127.0.0.1:${appPort}/api/runs/${run.live.runId}/live`);
+    assert.equal(restartedLive.live.status, "interrupted");
+    assert.equal(restartedLive.live.continuationState.kind, "history-only");
+    assert.equal(restartedLive.live.continuationState.resumable, false);
+    assert.equal(restartedLive.live.queryLoop.phase, "interrupted");
+    assert.equal(restartedLive.live.queryLoop.lastFailure.site, "runtime-approval");
+
+    const retryApproval = await postJsonAllowFailure(`http://127.0.0.1:${appPort}/api/runs/${run.live.runId}/approval`, {
+      decision: "grant",
+    });
+    assert.equal(retryApproval.ok, false);
+    assert.match(retryApproval.payload.error, /Run session not found/);
+  } finally {
+    if (restartedServer) {
+      await restartedServer.stop();
+    } else {
+      await appServer.stop();
+    }
+    await rm(storageDir, { recursive: true, force: true });
+  }
+});
+
 test("space desktop V0.7 memories persist and are injected into chat and runs", async () => {
   const storageDir = await mkdtemp(`${tmpdir()}/ai-os-v07-`);
   const providerServer = await startMockOpenAiProvider();

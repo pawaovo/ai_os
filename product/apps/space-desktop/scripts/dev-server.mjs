@@ -1013,7 +1013,12 @@ async function handleRunLive(response, runId) {
   const session = runSessions.get(runId);
 
   if (!session) {
-    writeJson(response, 404, { error: "Run session not active." });
+    const persisted = restorePersistedLiveRun(runId);
+    if (!persisted) {
+      writeJson(response, 404, { error: "Run session not active." });
+      return;
+    }
+    writeJson(response, 200, { live: persisted });
     return;
   }
 
@@ -1770,18 +1775,21 @@ async function createRunSession(input) {
     trustLevel: session.trustLevel,
   });
   session.pendingApproval = approvalRequirement ? createPreRunApproval(session, approvalRequirement) : undefined;
+  session.status = session.pendingApproval ? "awaiting-approval" : "running";
   appStore.createRunRecord({
     id: runId,
     goal: session.goal,
     executorChoice: session.executorChoice,
-    status: session.pendingApproval ? "awaiting-approval" : "running",
+    status: session.status,
     workspaceId: session.workspaceId,
     threadId: session.threadId,
     startedAt: clock.now(),
     memoryUsage: session.memoryUsage,
     memoryTrace: session.memoryTrace,
+    runtimeState: serializeRunSession(session),
+    continuationState: deriveContinuationStateFromRuntimeState(serializeRunSession(session)),
+    lastCheckpointAt: clock.now(),
   });
-  session.status = session.pendingApproval ? "awaiting-approval" : "running";
 
   if (session.pendingApproval) {
     registerQueryLoopInterception(session, {
@@ -1823,6 +1831,7 @@ async function createRunSession(input) {
       setCurrentTurnStatus(session, "running");
       transitionQueryLoop(session, "executing", "Auto-granted pre-run approval.");
       appStore.updateRunStatus(session.runId, "running");
+      persistRunRuntimeCheckpoint(session);
       session.promise = runSessionWork(session);
       return session;
     }
@@ -1835,6 +1844,7 @@ async function createRunSession(input) {
     });
   } else {
     transitionQueryLoop(session, "executing", "Run dispatched without pre-run approval.");
+    persistRunRuntimeCheckpoint(session);
     session.promise = runSessionWork(session);
   }
 
@@ -1911,6 +1921,7 @@ async function resolveRunApproval(session, decision) {
     setCurrentTurnStatus(session, "running");
     transitionQueryLoop(session, "executing", "Pre-run approval granted.");
     appStore.updateRunStatus(session.runId, "running");
+    persistRunRuntimeCheckpoint(session);
     session.promise = runSessionWork(session);
     return;
   }
@@ -1934,6 +1945,7 @@ async function resolveRunApproval(session, decision) {
     approvalId: approval.approvalId,
     decision: approvalDecision,
   });
+  persistRunRuntimeCheckpoint(session);
 }
 
 async function cancelRunSession(session) {
@@ -2179,6 +2191,7 @@ function appendLiveEvent(session, event) {
     message: event.message,
     createdAt: liveEvent.createdAt,
   });
+  persistRunRuntimeCheckpoint(session);
 }
 
 async function persistSessionArtifacts(session, collectedArtifacts) {
@@ -2322,15 +2335,24 @@ function finalizeSession(session, status, message) {
   });
   session.activeExecutorItemId = undefined;
   appStore.updateRunStatus(session.runId, status, session.completedAt);
+  persistRunRuntimeCheckpoint(session, {
+    status,
+    completedAt: session.completedAt,
+  });
 }
 
 function serializeRunSession(session) {
-  return {
+  const serialized = {
     sessionId: session.sessionId,
     runId: session.runId,
+    missionId: session.missionId,
     goal: session.goal,
     executorChoice: session.executorChoice,
     status: session.status,
+    workspaceId: session.workspaceId,
+    workspacePath: session.workspacePath,
+    trustLevel: session.trustLevel,
+    ...(session.threadId ? { threadId: session.threadId } : {}),
     stream: [...session.stream],
     events: [...session.events],
     currentTurn: {
@@ -2355,15 +2377,157 @@ function serializeRunSession(session) {
       ...session.memoryTrace,
       entries: session.memoryTrace.entries.map((entry) => ({ ...entry })),
     },
+    ...(session.latestMessage ? { latestMessage: session.latestMessage } : {}),
     ...(session.pendingApproval ? { pendingApproval: { ...session.pendingApproval } } : {}),
     ...(session.completedAt ? { completedAt: session.completedAt } : {}),
     ...(session.timeoutMs !== undefined ? { timeoutMs: session.timeoutMs } : {}),
   };
+
+  return {
+    ...serialized,
+    continuationState: deriveContinuationStateFromRuntimeState(serialized),
+  };
 }
 
 function requireRunSession(runId) {
-  const session = runSessions.get(runId);
+  const session = runSessions.get(runId) ?? rehydratePersistedRunSession(runId);
   if (!session) throw new Error("Run session not found.");
+  return session;
+}
+
+function restorePersistedLiveRun(runId) {
+  const persisted = appStore.getRunRuntimeState(runId);
+  const runtimeState = persisted?.runtimeState;
+  if (!runtimeState) return undefined;
+
+  return {
+    ...runtimeState,
+    continuationState: persisted?.continuationState ?? deriveContinuationStateFromRuntimeState(runtimeState),
+  };
+}
+
+function summarizeWorkspaceCurrentRun(runtimeState) {
+  if (!runtimeState) return undefined;
+
+  return {
+    runId: runtimeState.runId,
+    sessionId: runtimeState.sessionId,
+    status: runtimeState.status,
+    currentTurn: {
+      turnId: runtimeState.currentTurn.turnId,
+      status: runtimeState.currentTurn.status,
+      latestEventType: runtimeState.currentTurn.latestEventType,
+    },
+    queryLoop: {
+      phase: runtimeState.queryLoop.phase,
+      ...(runtimeState.queryLoop.lastFailure ? { lastFailureSite: runtimeState.queryLoop.lastFailure.site } : {}),
+    },
+    ...(runtimeState.pendingApproval
+      ? {
+          pendingApproval: {
+            approvalId: runtimeState.pendingApproval.approvalId,
+            stage: runtimeState.pendingApproval.stage,
+          },
+        }
+      : {}),
+  };
+}
+
+function persistRunRuntimeCheckpoint(session, input = {}) {
+  if (!appStore.getRun(session.runId)) return;
+  const runtimeState = serializeRunSession(session);
+  appStore.updateRunRuntimeState(session.runId, {
+    runtimeState,
+    continuationState: runtimeState.continuationState,
+    lastCheckpointAt: session.clock.now(),
+    ...input,
+  });
+}
+
+function deriveContinuationStateFromRuntimeState(runtimeState) {
+  if (!runtimeState) {
+    return {
+      kind: "none",
+      resumable: false,
+      reason: "Run runtime checkpoint is unavailable.",
+    };
+  }
+
+  if (runtimeState.pendingApproval?.stage === "pre-run" && runtimeState.status === "awaiting-approval") {
+    return {
+      kind: "resume-pre-run-approval",
+      resumable: true,
+      site: "pre-run-approval",
+      reason: "Pre-run approval can continue after restart.",
+    };
+  }
+
+  if (runtimeState.status === "completed" || runtimeState.status === "failed" || runtimeState.status === "interrupted") {
+    return {
+      kind: "history-only",
+      resumable: false,
+      site: runtimeState.queryLoop?.lastFailure?.site,
+      reason: `Run is already ${runtimeState.status}.`,
+    };
+  }
+
+  const site = runtimeState.pendingApproval?.stage === "runtime"
+    ? "runtime-approval"
+    : runtimeState.queryLoop?.phase === "persisting-artifacts"
+      ? "artifact-persist"
+      : runtimeState.queryLoop?.lastFailure?.site ?? "executor-stream";
+
+  return {
+    kind: "needs-rerun",
+    resumable: false,
+    site,
+    reason: "Executor work already started. Restart requires a rerun from the same workspace and goal.",
+  };
+}
+
+function rehydratePersistedRunSession(runId) {
+  const persisted = appStore.getRunRuntimeState(runId);
+  const runtimeState = persisted?.runtimeState;
+  const continuationState = persisted?.continuationState ?? deriveContinuationStateFromRuntimeState(runtimeState);
+  if (!runtimeState || !continuationState.resumable) return undefined;
+
+  const workspace = appStore.getWorkspace(runtimeState.workspaceId);
+  if (!workspace?.path) return undefined;
+
+  const session = {
+    runId: runtimeState.runId,
+    missionId: runtimeState.missionId,
+    sessionId: runtimeState.sessionId,
+    goal: runtimeState.goal,
+    executorChoice: runtimeState.executorChoice,
+    workspaceId: runtimeState.workspaceId,
+    workspacePath: runtimeState.workspacePath ?? workspace.path,
+    trustLevel: runtimeState.trustLevel ?? workspace.trustLevel,
+    threadId: runtimeState.threadId,
+    timeoutMs: runtimeState.timeoutMs,
+    memoryUsage: runtimeState.memoryUsage ?? [],
+    memoryTrace: runtimeState.memoryTrace ?? { mode: "search", candidateCount: 0, returnedCount: 0, entries: [] },
+    status: runtimeState.status,
+    events: runtimeState.events ?? [],
+    currentTurn: runtimeState.currentTurn,
+    queryLoop: runtimeState.queryLoop,
+    items: runtimeState.items ?? [],
+    stream: runtimeState.stream ?? [],
+    artifacts: runtimeState.artifacts ?? [],
+    artifactContents: runtimeState.artifactContents ?? {},
+    pendingApproval: runtimeState.pendingApproval,
+    completedAt: runtimeState.completedAt,
+    latestMessage: runtimeState.latestMessage,
+    ids: createWorkflowIds({
+      runId: runtimeState.runId,
+      missionId: runtimeState.missionId,
+    }),
+    clock: createWorkflowClock(),
+    executor: undefined,
+    promise: undefined,
+    activeExecutorItemId: undefined,
+  };
+  runSessions.set(runId, session);
   return session;
 }
 
@@ -2717,7 +2881,10 @@ class SqliteAppStore {
         workspace_id TEXT,
         thread_id TEXT,
         started_at TEXT NOT NULL,
-        completed_at TEXT
+        completed_at TEXT,
+        runtime_state_json TEXT,
+        continuation_state_json TEXT,
+        last_checkpoint_at TEXT
       );
       CREATE TABLE IF NOT EXISTS run_events (
         id TEXT PRIMARY KEY,
@@ -2830,6 +2997,10 @@ class SqliteAppStore {
     this.addColumnIfMissing("approvals", "executor_choice", "TEXT NOT NULL DEFAULT 'mock'");
     this.addColumnIfMissing("runs", "memory_usage_json", "TEXT");
     this.addColumnIfMissing("runs", "memory_trace_json", "TEXT");
+    this.addColumnIfMissing("runs", "runtime_state_json", "TEXT");
+    this.addColumnIfMissing("runs", "continuation_state_json", "TEXT");
+    this.addColumnIfMissing("runs", "last_checkpoint_at", "TEXT");
+    this.normalizePersistedRunCheckpoints();
     this.syncBuiltInCapabilities();
   }
 
@@ -2971,6 +3142,9 @@ class SqliteAppStore {
     const activeThreadId = this.getSetting("activeThreadId");
     const activeThread = activeThreadId ? threads.find((thread) => thread.id === activeThreadId) : undefined;
     const latestRun = runs[0];
+    const persistedCurrentRun = !currentRun && latestRun && !isTerminalRunStatus(latestRun.status)
+      ? this.getRunRuntimeState(latestRun.id)?.runtimeState
+      : undefined;
     const latestArtifact = artifacts[0];
     const latestMemory = memories[0];
     const latestAutomation = automations[0];
@@ -3003,32 +3177,9 @@ class SqliteAppStore {
             },
           }
         : {}),
-      ...(currentRun
+      ...(currentRun || persistedCurrentRun
         ? {
-            currentRun: {
-              runId: currentRun.runId,
-              sessionId: currentRun.sessionId,
-              status: currentRun.status,
-              currentTurn: {
-                turnId: currentRun.currentTurn.turnId,
-                status: currentRun.currentTurn.status,
-                latestEventType: currentRun.currentTurn.latestEventType,
-              },
-              queryLoop: {
-                phase: currentRun.queryLoop.phase,
-                ...(currentRun.queryLoop.lastFailure
-                  ? { lastFailureSite: currentRun.queryLoop.lastFailure.site }
-                  : {}),
-              },
-              ...(currentRun.pendingApproval
-                ? {
-                    pendingApproval: {
-                      approvalId: currentRun.pendingApproval.approvalId,
-                      stage: currentRun.pendingApproval.stage,
-                    },
-                  }
-                : {}),
-            },
+            currentRun: summarizeWorkspaceCurrentRun(currentRun ? serializeRunSession(currentRun) : persistedCurrentRun),
           }
         : {}),
       ...(latestRun
@@ -3310,9 +3461,10 @@ class SqliteAppStore {
     this.db.prepare(`
       INSERT INTO runs (
         id, goal, executor_choice, status, workspace_id, thread_id,
-        started_at, completed_at, memory_usage_json, memory_trace_json
+        started_at, completed_at, memory_usage_json, memory_trace_json,
+        runtime_state_json, continuation_state_json, last_checkpoint_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       input.id,
       input.goal,
@@ -3324,6 +3476,9 @@ class SqliteAppStore {
       input.completedAt ?? null,
       input.memoryUsage ? JSON.stringify(input.memoryUsage) : null,
       input.memoryTrace ? JSON.stringify(input.memoryTrace) : null,
+      input.runtimeState ? JSON.stringify(input.runtimeState) : null,
+      input.continuationState ? JSON.stringify(input.continuationState) : null,
+      input.lastCheckpointAt ?? null,
     );
     return this.getRun(input.id);
   }
@@ -3836,9 +3991,105 @@ class SqliteAppStore {
     return parseStoredJson(row?.memory_trace_json, undefined);
   }
 
+  updateRunRuntimeState(id, input) {
+    this.db.prepare(`
+      UPDATE runs
+      SET
+        runtime_state_json = ?,
+        continuation_state_json = ?,
+        last_checkpoint_at = ?,
+        status = COALESCE(?, status),
+        completed_at = COALESCE(?, completed_at)
+      WHERE id = ?
+    `).run(
+      JSON.stringify(input.runtimeState),
+      JSON.stringify(input.continuationState),
+      input.lastCheckpointAt ?? nowIso(),
+      input.status ?? null,
+      input.completedAt ?? null,
+      id,
+    );
+    return this.getRun(id);
+  }
+
+  getRunRuntimeState(id) {
+    const row = this.db.prepare(`
+      SELECT runtime_state_json, continuation_state_json, last_checkpoint_at
+      FROM runs
+      WHERE id = ?
+    `).get(id);
+    if (!row) return undefined;
+
+    return {
+      runtimeState: parseStoredJson(row.runtime_state_json, undefined),
+      continuationState: parseStoredJson(row.continuation_state_json, undefined),
+      ...(row.last_checkpoint_at ? { lastCheckpointAt: row.last_checkpoint_at } : {}),
+    };
+  }
+
   retrieveMemories(input) {
     const memories = this.listMemories(input.workspaceId).memories;
     return retrieveMemoryRecords(memories, input);
+  }
+
+  normalizePersistedRunCheckpoints() {
+    const rows = this.db.prepare(`
+      SELECT id, status, runtime_state_json
+      FROM runs
+      WHERE status IN ('running', 'awaiting-approval')
+        AND runtime_state_json IS NOT NULL
+    `).all();
+
+    for (const row of rows) {
+      const runtimeState = parseStoredJson(row.runtime_state_json, undefined);
+      if (!runtimeState) continue;
+
+      const continuationState = deriveContinuationStateFromRuntimeState(runtimeState);
+      if (continuationState.resumable) {
+        this.updateRunRuntimeState(row.id, {
+          runtimeState,
+          continuationState,
+          lastCheckpointAt: nowIso(),
+        });
+        continue;
+      }
+
+      const interruptedRuntimeState = {
+        ...runtimeState,
+        status: "interrupted",
+        queryLoop: {
+          ...runtimeState.queryLoop,
+          phase: "interrupted",
+          ...(runtimeState.queryLoop?.lastFailure
+            ? {}
+            : {
+                lastFailure: {
+                  site: continuationState.site ?? "executor-stream",
+                  retryable: true,
+                  message: continuationState.reason,
+                  at: nowIso(),
+                },
+              }),
+        },
+        ...(runtimeState.currentTurn
+          ? {
+              currentTurn: {
+                ...runtimeState.currentTurn,
+                status: "interrupted",
+                completedAt: runtimeState.currentTurn.completedAt ?? nowIso(),
+              },
+            }
+          : {}),
+        completedAt: runtimeState.completedAt ?? nowIso(),
+      };
+      this.updateRunRuntimeState(row.id, {
+        runtimeState: interruptedRuntimeState,
+        continuationState: deriveContinuationStateFromRuntimeState(interruptedRuntimeState),
+        status: "interrupted",
+        completedAt: interruptedRuntimeState.completedAt,
+        lastCheckpointAt: nowIso(),
+      });
+    }
   }
 }
 
@@ -4460,9 +4711,9 @@ function createMockWorkflowArtifacts(input) {
   ];
 }
 
-function createWorkflowIds() {
-  const runId = `run-live-${randomUUID()}`;
-  const missionId = `mission-live-${randomUUID()}`;
+function createWorkflowIds(input = {}) {
+  const runId = input.runId ?? `run-live-${randomUUID()}`;
+  const missionId = input.missionId ?? `mission-live-${randomUUID()}`;
 
   return {
     missionId: () => missionId,
