@@ -1094,6 +1094,8 @@ function applyStaticTranslations(): void {
     elements.mcpHelp.textContent = t("mcp.help.default");
     elements.mcpSource.textContent = t("dynamic.none");
     elements.mcpHealth.textContent = translatedToken("not-configured");
+  } else {
+    renderMcpConfig();
   }
   renderSettingsList();
 
@@ -1118,6 +1120,16 @@ function applyStaticTranslations(): void {
   setPromptAppInstallationLabel(1, t("recipe-editor.installation.installedAt"));
   elements.recipeSaveButton.textContent = t("recipe-editor.button.save");
   elements.recipeTestButton.textContent = t("recipe-editor.button.test");
+  if (state.activeRecipeId) {
+    const activeRecipe = getActiveRecipe();
+    if (activeRecipe) {
+      renderPromptAppBinding(activeRecipe.runtimeBinding);
+      renderPromptAppInstallation(activeRecipe.installation);
+    }
+  } else {
+    renderPromptAppBinding(undefined);
+    renderPromptAppInstallation(undefined);
+  }
 
   setText(".install-panel .eyebrow", t("install.eyebrow"));
   setText("#install-title", t("install.title"));
