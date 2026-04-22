@@ -771,3 +771,36 @@ Implemented a real hosted MCP stdio server, added packaged Electron --mcp-hosted
 ### Next Steps
 
 - None - task complete
+
+
+## Session 22: P3 Remote Bridge Single-Channel Pilot
+
+**Date**: 2026-04-22
+**Task**: P3 Remote Bridge Single-Channel Pilot
+**Branch**: `codex/p3-remote-bridge-pilot`
+
+### Summary
+
+Implemented an authenticated single-channel remote bridge pilot, added a bilingual settings panel, reused local run and approval semantics, and verified source plus packaged remote bridge flows.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `862e6c3` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
