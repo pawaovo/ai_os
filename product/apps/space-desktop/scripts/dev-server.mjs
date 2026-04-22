@@ -55,7 +55,7 @@ const {
   createMemoryUsageSummary,
   normalizeMemoryScope,
   normalizeMemorySensitivity,
-  selectRelevantMemories,
+  retrieveMemories: retrieveMemoryRecords,
 } = await import(pathToImportUrl(join(productRoot, "packages/kernel/kernel-memory/dist/index.js")));
 const {
   normalizeAppLanguage,
@@ -977,7 +977,11 @@ async function handleRunEvents(response, runId) {
     return;
   }
 
-  writeJson(response, 200, { events: appStore.listRunEvents(runId) });
+  writeJson(response, 200, {
+    events: appStore.listRunEvents(runId),
+    memoryUsage: appStore.getRunMemoryUsage(runId),
+    memoryTrace: appStore.getRunMemoryTrace(runId),
+  });
 }
 
 async function handleExecutorDoctor(response) {
@@ -1183,7 +1187,13 @@ async function handleChatSendWithThread(response, body) {
   }
 
   const history = appStore.listMessages(thread.id).map(({ role, content }) => ({ role, content }));
-  const memoryUsage = appStore.searchMemories(thread.workspaceId, chatRequest.message);
+  const memoryRetrieval = appStore.retrieveMemories({
+    workspaceId: thread.workspaceId,
+    mode: "search",
+    query: chatRequest.message,
+    limit: 3,
+  });
+  const memoryUsage = memoryRetrieval.memories;
   const memoryContext = createMemoryUsageSummary(memoryUsage);
   if (memoryUsage.length > 0) {
     appStore.markMemoriesUsed(memoryUsage.map((memory) => memory.memoryId));
@@ -1234,6 +1244,7 @@ async function handleChatSendWithThread(response, body) {
       messages: appStore.listMessages(thread.id),
       assistantMessage,
       memoryUsage,
+      memoryTrace: memoryRetrieval.trace,
     });
   } catch (error) {
     appStore.addMessage({
@@ -1700,6 +1711,12 @@ async function createRunSession(input) {
   const clock = createWorkflowClock();
   const runId = ids.runId();
   const missionId = ids.missionId();
+  const memoryRetrieval = appStore.retrieveMemories({
+    workspaceId: workspace.id,
+    mode: "search",
+    query: input.goal,
+    limit: 3,
+  });
   const session = {
     runId,
     missionId,
@@ -1711,7 +1728,8 @@ async function createRunSession(input) {
     trustLevel: normalizeWorkspaceTrustLevel(workspace.trustLevel),
     threadId: appStore.getSetting("activeThreadId"),
     timeoutMs: input.timeoutMs,
-    memoryUsage: appStore.searchMemories(workspace.id, input.goal),
+    memoryUsage: memoryRetrieval.memories,
+    memoryTrace: memoryRetrieval.trace,
     status: "queued",
     events: [],
     currentTurn: createRunTurn(ids, clock),
@@ -1760,6 +1778,8 @@ async function createRunSession(input) {
     workspaceId: session.workspaceId,
     threadId: session.threadId,
     startedAt: clock.now(),
+    memoryUsage: session.memoryUsage,
+    memoryTrace: session.memoryTrace,
   });
   session.status = session.pendingApproval ? "awaiting-approval" : "running";
 
@@ -2331,6 +2351,10 @@ function serializeRunSession(session) {
     artifacts: [...session.artifacts],
     artifactContents: { ...session.artifactContents },
     memoryUsage: [...session.memoryUsage],
+    memoryTrace: {
+      ...session.memoryTrace,
+      entries: session.memoryTrace.entries.map((entry) => ({ ...entry })),
+    },
     ...(session.pendingApproval ? { pendingApproval: { ...session.pendingApproval } } : {}),
     ...(session.completedAt ? { completedAt: session.completedAt } : {}),
     ...(session.timeoutMs !== undefined ? { timeoutMs: session.timeoutMs } : {}),
@@ -2804,6 +2828,8 @@ class SqliteAppStore {
     this.addColumnIfMissing("threads", "workspace_id", "TEXT");
     this.addColumnIfMissing("workspaces", "trust_level", "TEXT NOT NULL DEFAULT 'strict'");
     this.addColumnIfMissing("approvals", "executor_choice", "TEXT NOT NULL DEFAULT 'mock'");
+    this.addColumnIfMissing("runs", "memory_usage_json", "TEXT");
+    this.addColumnIfMissing("runs", "memory_trace_json", "TEXT");
     this.syncBuiltInCapabilities();
   }
 
@@ -3165,8 +3191,11 @@ class SqliteAppStore {
 
   createRunRecord(input) {
     this.db.prepare(`
-      INSERT INTO runs (id, goal, executor_choice, status, workspace_id, thread_id, started_at, completed_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO runs (
+        id, goal, executor_choice, status, workspace_id, thread_id,
+        started_at, completed_at, memory_usage_json, memory_trace_json
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       input.id,
       input.goal,
@@ -3176,6 +3205,8 @@ class SqliteAppStore {
       input.threadId ?? null,
       input.startedAt ?? nowIso(),
       input.completedAt ?? null,
+      input.memoryUsage ? JSON.stringify(input.memoryUsage) : null,
+      input.memoryTrace ? JSON.stringify(input.memoryTrace) : null,
     );
     return this.getRun(input.id);
   }
@@ -3286,8 +3317,12 @@ class SqliteAppStore {
   }
 
   searchMemories(workspaceId, query) {
-    const memories = this.listMemories(workspaceId).memories;
-    return selectRelevantMemories(memories, query, { limit: 3 });
+    return this.retrieveMemories({
+      workspaceId,
+      mode: "search",
+      query,
+      limit: 3,
+    }).memories;
   }
 
   markMemoriesUsed(ids) {
@@ -3673,6 +3708,21 @@ class SqliteAppStore {
   listRunEvents(runId) {
     return this.db.prepare("SELECT * FROM run_events WHERE run_id = ? ORDER BY created_at ASC").all(runId).map(runEventRowToSummary);
   }
+
+  getRunMemoryUsage(runId) {
+    const row = this.db.prepare("SELECT memory_usage_json FROM runs WHERE id = ?").get(runId);
+    return parseStoredJson(row?.memory_usage_json, []);
+  }
+
+  getRunMemoryTrace(runId) {
+    const row = this.db.prepare("SELECT memory_trace_json FROM runs WHERE id = ?").get(runId);
+    return parseStoredJson(row?.memory_trace_json, undefined);
+  }
+
+  retrieveMemories(input) {
+    const memories = this.listMemories(input.workspaceId).memories;
+    return retrieveMemoryRecords(memories, input);
+  }
 }
 
 function threadRowToSummary(row) {
@@ -3737,6 +3787,18 @@ function runEventRowToSummary(row) {
     message: row.message,
     createdAt: row.created_at,
   };
+}
+
+function parseStoredJson(value, fallback) {
+  if (typeof value !== "string" || value.length === 0) {
+    return fallback;
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
 }
 
 function approvalRowToSummary(row) {

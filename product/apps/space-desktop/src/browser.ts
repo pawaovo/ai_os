@@ -13,7 +13,7 @@ import {
 import type { ChatUiMessage } from "./server-runtime.js";
 import type { ApprovalRecord, WorkspaceTrustLevel } from "@ai-os/approval-core";
 import type { CapabilityPermission, CapabilityRecord, CapabilityRunRecord, RecipeRecord, RecipeTestRecord } from "@ai-os/capability-contract";
-import type { MemoryRecord, MemoryScope, MemorySensitivity, RetrievedMemory } from "@ai-os/kernel-memory";
+import type { MemoryRecord, MemoryRetrievalTrace, MemoryScope, MemorySensitivity, RetrievedMemory } from "@ai-os/kernel-memory";
 
 type ProviderProtocol = "openai-compatible" | "anthropic-compatible";
 
@@ -273,6 +273,7 @@ interface LiveRunState {
     resolvedAt?: string;
   };
   memoryUsage?: RetrievedMemory[];
+  memoryTrace?: MemoryRetrievalTrace;
   completedAt?: string;
   timeoutMs?: number;
 }
@@ -2690,11 +2691,15 @@ async function openRun(runId: string): Promise<void> {
       return;
     }
 
-    const payload = await apiJson<{ events: RunEventSummary[] }>(`/api/runs/${encodeURIComponent(runId)}/events`);
+    const payload = await apiJson<{
+      events: RunEventSummary[];
+      memoryUsage?: RetrievedMemory[];
+      memoryTrace?: MemoryRetrievalTrace;
+    }>(`/api/runs/${encodeURIComponent(runId)}/events`);
     state.activeRunId = runId;
     state.runEvents = payload.events;
-    state.memoryUsage = deriveMemoryUsageFromEvents(payload.events);
-    state.liveRun = createPersistedRunView(runId);
+    state.memoryUsage = payload.memoryUsage ?? deriveMemoryUsageFromEvents(payload.events);
+    state.liveRun = createPersistedRunView(runId, payload.memoryUsage, payload.memoryTrace);
     renderRunHistory();
     renderCurrentRunView();
   } catch (error) {
@@ -2730,7 +2735,11 @@ function renderRunHistory(): void {
   );
 }
 
-function createPersistedRunView(runId: string): LiveRunState | undefined {
+function createPersistedRunView(
+  runId: string,
+  memoryUsage?: RetrievedMemory[],
+  memoryTrace?: MemoryRetrievalTrace,
+): LiveRunState | undefined {
   const run = state.runs.find((item) => item.id === runId);
   if (!run) return undefined;
 
@@ -2744,7 +2753,8 @@ function createPersistedRunView(runId: string): LiveRunState | undefined {
     events: [...state.runEvents],
     artifacts,
     artifactContents: Object.fromEntries(artifacts.map((artifact) => [artifact.id, artifact.content ?? ""])),
-    memoryUsage: deriveMemoryUsageFromEvents(state.runEvents),
+    memoryUsage: memoryUsage ?? deriveMemoryUsageFromEvents(state.runEvents),
+    ...(memoryTrace ? { memoryTrace } : {}),
     ...(run.completedAt ? { completedAt: run.completedAt } : {}),
   };
 }

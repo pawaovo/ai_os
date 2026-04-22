@@ -1072,6 +1072,8 @@ test("space desktop V0.7 memories persist and are injected into chat and runs", 
     });
     assert.equal(chat.memoryUsage.length > 0, true);
     assert.equal(chat.memoryUsage[0].title, "Planning preference");
+    assert.equal(chat.memoryTrace.mode, "search");
+    assert.equal(chat.memoryTrace.entries[0].memoryId, memory.memory.id);
 
     const memoriesAfterChat = await getJson(`http://127.0.0.1:${appPort}/api/memories`);
     const usedMemory = memoriesAfterChat.memories.find((item) => item.id === memory.memory.id);
@@ -1084,10 +1086,24 @@ test("space desktop V0.7 memories persist and are injected into chat and runs", 
     });
     assert.equal(run.live.memoryUsage.length > 0, true);
     assert.equal(run.live.memoryUsage[0].title, "Planning preference");
+    assert.equal(run.live.memoryTrace.mode, "search");
+    assert.equal(run.live.memoryTrace.entries[0].memoryId, memory.memory.id);
+
+    await postJson(`http://127.0.0.1:${appPort}/api/runs/${run.live.runId}/approval`, {
+      decision: "grant",
+    });
+    await waitForLiveRun(appPort, run.live.runId, (live) => live.status === "completed");
+    const persistedRun = await getJson(`http://127.0.0.1:${appPort}/api/runs/${run.live.runId}/events`);
+    assert.equal(persistedRun.memoryUsage.length > 0, true);
+    assert.equal(persistedRun.memoryUsage[0].title, "Planning preference");
+    assert.equal(persistedRun.memoryTrace.mode, "search");
 
     await deleteJson(`http://127.0.0.1:${appPort}/api/memories/${memory.memory.id}`);
     const memoriesAfterDelete = await getJson(`http://127.0.0.1:${appPort}/api/memories`);
     assert.equal(memoriesAfterDelete.memories.some((item) => item.id === memory.memory.id), false);
+    const persistedAfterDelete = await getJson(`http://127.0.0.1:${appPort}/api/runs/${run.live.runId}/events`);
+    assert.equal(persistedAfterDelete.memoryUsage.length > 0, true);
+    assert.equal(persistedAfterDelete.memoryUsage[0].title, "Planning preference");
   } finally {
     await appServer.stop();
     await providerServer.stop();
