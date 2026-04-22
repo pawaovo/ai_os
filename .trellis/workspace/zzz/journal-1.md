@@ -903,3 +903,36 @@ Added backend-owned local setup discovery/import APIs, safe generated-data/profi
 ### Next Steps
 
 - None - task complete
+
+
+## Session 26: P7 run follow-up actions
+
+**Date**: 2026-04-22
+**Task**: P7 run follow-up actions
+**Branch**: `codex/p7-run-artifact-automation-forge-actions`
+
+### Summary
+
+Added a run follow-up panel on Runs, wired one-click artifact, automation, and Forge recipe creation for completed runs, added bilingual UI copy, and validated with tests plus packaged app smoke.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e988ee5` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
