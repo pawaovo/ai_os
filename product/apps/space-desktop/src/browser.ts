@@ -495,6 +495,44 @@ interface AgentOrchestrationSummary {
   tasks: AgentOrchestrationTaskSummary[];
 }
 
+interface MultiAgentGovernanceItem {
+  id: string;
+  kind: string;
+  status: string;
+  title: string;
+  detail: string;
+  at: string;
+  targetPage: string;
+  runId?: string;
+  approvalId?: string;
+  orchestrationId?: string;
+  remoteBridgeSessionId?: string;
+}
+
+interface MultiAgentGovernanceSummary {
+  status: string;
+  summary: string;
+  generatedAt: string;
+  workspace?: {
+    id: string;
+    name: string;
+    trustLevel: WorkspaceTrustLevel;
+  };
+  counts: {
+    runtimes: number;
+    readyRuntimes: number;
+    orchestrations: number;
+    activeOrchestrations: number;
+    remoteSessions: number;
+    activeRemoteSessions: number;
+    mailboxDelivered: number;
+    mailboxHandled: number;
+    pendingApprovals: number;
+  };
+  attention: MultiAgentGovernanceItem[];
+  activity: MultiAgentGovernanceItem[];
+}
+
 interface LiveRunState {
   sessionId?: string;
   runId: string;
@@ -546,6 +584,8 @@ const state = {
   recipes: [] as RecipeSummary[],
   recipeTests: [] as RecipeTestSummary[],
   agentRuntimes: [] as AgentRuntimeSummary[],
+  multiAgentGovernance: undefined as MultiAgentGovernanceSummary | undefined,
+  multiAgentGovernanceError: undefined as string | undefined,
   orchestrations: [] as AgentOrchestrationSummary[],
   hostedMcpServer: undefined as HostedMcpServerSummary | undefined,
   hostedMcpServerError: undefined as string | undefined,
@@ -613,6 +653,12 @@ const elements = {
   workspaceHelp: getElement("workspace-help", HTMLElement),
   workspaceRuntimeList: getElement("workspace-runtime-list", HTMLElement),
   workspaceRuntimeHelp: getElement("workspace-runtime-help", HTMLElement),
+  multiAgentGovernanceSummary: getElement("multi-agent-governance-summary", HTMLElement),
+  multiAgentGovernanceCounts: getElement("multi-agent-governance-counts", HTMLElement),
+  multiAgentGovernanceAttention: getElement("multi-agent-governance-attention", HTMLElement),
+  multiAgentGovernanceAttentionHelp: getElement("multi-agent-governance-attention-help", HTMLElement),
+  multiAgentGovernanceActivity: getElement("multi-agent-governance-activity", HTMLElement),
+  multiAgentGovernanceActivityHelp: getElement("multi-agent-governance-activity-help", HTMLElement),
   agentOrchestrationForm: getElement("agent-orchestration-form", HTMLFormElement),
   agentOrchestrationGoalInput: getElement("agent-orchestration-goal-input", HTMLTextAreaElement),
   agentOrchestrationStartButton: getElement("agent-orchestration-start-button", HTMLButtonElement),
@@ -828,6 +874,14 @@ elements.mailboxList.addEventListener("click", (event) => {
     ? event.target.closest<HTMLButtonElement>("button[data-mailbox-run-id]")
     : null;
   if (target?.dataset.mailboxRunId) void openRun(target.dataset.mailboxRunId);
+});
+
+elements.multiAgentGovernanceAttention.addEventListener("click", (event) => {
+  void handleMultiAgentGovernanceAction(event);
+});
+
+elements.multiAgentGovernanceActivity.addEventListener("click", (event) => {
+  void handleMultiAgentGovernanceAction(event);
 });
 
 elements.appReadinessList.addEventListener("click", (event) => {
@@ -1139,6 +1193,10 @@ function localizeOrchestrationRole(value: string): string {
   return translateKeyOrFallback(`agents.role.${value}`, value);
 }
 
+function localizeGovernanceKind(value: string): string {
+  return translateKeyOrFallback(`agents.governance.activity.kind.${value}`, value);
+}
+
 function localizePageTarget(value: string): string {
   switch (value) {
     case "start":
@@ -1206,6 +1264,12 @@ function applyStaticTranslations(): void {
   if (!state.activeWorkspaceId) {
     elements.workspaceRuntimeHelp.textContent = t("workspace.runtime.help.default");
   }
+
+  setText(".agent-orchestration-detail-panel .eyebrow", t("agents.eyebrow"));
+  setText("#multi-agent-governance-title", t("agents.governance.title"));
+  setText("#multi-agent-governance-attention-title", t("agents.governance.attention.title"));
+  setText("#multi-agent-governance-activity-title", t("agents.governance.activity.title"));
+  renderMultiAgentGovernance();
 
   setText(".agent-orchestration-form-panel .eyebrow", t("agents.eyebrow"));
   setText(".agent-orchestration-form-panel .mini-label", t("agents.mini"));
@@ -1971,6 +2035,7 @@ async function refreshWorkspaceScopedData(): Promise<void> {
   await loadRecipes();
   await loadRecipeTests();
   await loadAgentRuntimes();
+  await loadMultiAgentGovernance();
   await loadAgentOrchestrations();
   await loadMcpConfig();
   await loadHostedMcpServer();
@@ -2040,6 +2105,7 @@ async function createRemoteBridgeSessionFromForm(): Promise<void> {
     state.remoteBridgeConnect = payload.connect;
     state.remoteBridgeSessionError = undefined;
     await loadRemoteBridgePilot();
+    await loadMultiAgentGovernance().catch(() => undefined);
     state.activeRemoteBridgeSessionId = payload.session.id;
     await openRemoteBridgeSession(payload.session.id, false);
   } catch (error) {
@@ -2477,6 +2543,19 @@ async function loadAgentRuntimes(): Promise<void> {
   }
 }
 
+async function loadMultiAgentGovernance(): Promise<void> {
+  try {
+    const payload = await apiJson<{ governance: MultiAgentGovernanceSummary }>("/api/multi-agent-governance");
+    state.multiAgentGovernance = payload.governance;
+    state.multiAgentGovernanceError = undefined;
+  } catch (error) {
+    state.multiAgentGovernance = undefined;
+    state.multiAgentGovernanceError = errorToMessage(error, t("agents.governance.loadFailed"));
+  }
+
+  renderMultiAgentGovernance();
+}
+
 async function loadHostedMcpServer(): Promise<void> {
   try {
     const payload = await apiJson<{ hostedServer: HostedMcpServerSummary }>("/api/mcp/hosted-server");
@@ -2505,6 +2584,114 @@ function renderAgentRuntimes(): void {
     )),
   );
   elements.agentRuntimeHelp.textContent = t("agentRuntime.help.count", { count: state.agentRuntimes.length });
+}
+
+function renderMultiAgentGovernance(): void {
+  const governance = state.multiAgentGovernance;
+  const status = governance?.status ?? (state.multiAgentGovernanceError ? "failed" : "idle");
+  elements.agentOrchestrationStatus.textContent = translatedToken(status);
+  elements.agentOrchestrationStatus.dataset.phase = normalizePhase(status);
+  elements.multiAgentGovernanceSummary.textContent = governance?.summary
+    ?? state.multiAgentGovernanceError
+    ?? t("agents.governance.summary.default");
+  renderMultiAgentGovernanceCounts(governance?.counts);
+  renderMultiAgentGovernanceAttention(governance?.attention ?? [], Boolean(governance));
+  renderMultiAgentGovernanceActivity(governance?.activity ?? [], Boolean(governance));
+}
+
+function renderMultiAgentGovernanceCounts(counts?: MultiAgentGovernanceSummary["counts"]): void {
+  const cards = [
+    ["agents.governance.counts.runtimes", counts?.runtimes ?? 0],
+    ["agents.governance.counts.readyRuntimes", counts?.readyRuntimes ?? 0],
+    ["agents.governance.counts.orchestrations", counts?.orchestrations ?? 0],
+    ["agents.governance.counts.activeOrchestrations", counts?.activeOrchestrations ?? 0],
+    ["agents.governance.counts.remoteSessions", counts?.remoteSessions ?? 0],
+    ["agents.governance.counts.activeRemoteSessions", counts?.activeRemoteSessions ?? 0],
+    ["agents.governance.counts.mailboxDelivered", counts?.mailboxDelivered ?? 0],
+    ["agents.governance.counts.mailboxHandled", counts?.mailboxHandled ?? 0],
+    ["agents.governance.counts.pendingApprovals", counts?.pendingApprovals ?? 0],
+  ] as const;
+
+  elements.multiAgentGovernanceCounts.replaceChildren(
+    ...cards.map(([labelKey, value]) => createGovernanceMetricCard(t(labelKey), value)),
+  );
+}
+
+function renderMultiAgentGovernanceAttention(items: MultiAgentGovernanceItem[], hasGovernance: boolean): void {
+  if (items.length === 0) {
+    elements.multiAgentGovernanceAttention.replaceChildren(createListItem(t("agents.governance.attention.none")));
+    elements.multiAgentGovernanceAttentionHelp.textContent = hasGovernance
+      ? t("agents.governance.attention.help.clear")
+      : state.multiAgentGovernanceError ?? t("agents.governance.attention.help.default");
+    return;
+  }
+
+  elements.multiAgentGovernanceAttention.replaceChildren(
+    ...items.map((item) => createMultiAgentGovernanceListItem(item)),
+  );
+  elements.multiAgentGovernanceAttentionHelp.textContent = t("agents.governance.attention.help.count", {
+    count: items.length,
+  });
+}
+
+function renderMultiAgentGovernanceActivity(items: MultiAgentGovernanceItem[], hasGovernance: boolean): void {
+  if (items.length === 0) {
+    elements.multiAgentGovernanceActivity.replaceChildren(createListItem(t("agents.governance.activity.none")));
+    elements.multiAgentGovernanceActivityHelp.textContent = hasGovernance
+      ? t("agents.governance.activity.help.default")
+      : state.multiAgentGovernanceError ?? t("agents.governance.activity.help.default");
+    return;
+  }
+
+  elements.multiAgentGovernanceActivity.replaceChildren(
+    ...items.map((item) => createMultiAgentGovernanceListItem(item)),
+  );
+  elements.multiAgentGovernanceActivityHelp.textContent = t("agents.governance.activity.help.count", {
+    count: items.length,
+  });
+}
+
+function createGovernanceMetricCard(label: string, value: number): HTMLDivElement {
+  const wrapper = document.createElement("div");
+  const strong = document.createElement("strong");
+  const span = document.createElement("span");
+  strong.textContent = String(value);
+  span.textContent = label;
+  wrapper.append(strong, span);
+  return wrapper;
+}
+
+function createMultiAgentGovernanceListItem(item: MultiAgentGovernanceItem): HTMLLIElement {
+  const wrapper = document.createElement("li");
+  const button = document.createElement("button");
+  const title = document.createElement("span");
+  const meta = document.createElement("span");
+  const badge = document.createElement("span");
+
+  button.type = "button";
+  button.className = "list-button";
+  button.dataset.governanceItemId = item.id;
+  button.dataset.governanceTargetPage = item.targetPage;
+  if (item.runId) button.dataset.governanceRunId = item.runId;
+  if (item.orchestrationId) button.dataset.governanceOrchestrationId = item.orchestrationId;
+  if (item.remoteBridgeSessionId) button.dataset.governanceRemoteBridgeSessionId = item.remoteBridgeSessionId;
+  if (item.approvalId) button.dataset.governanceApprovalId = item.approvalId;
+
+  title.className = "item-title";
+  title.textContent = item.title;
+  meta.className = "item-meta";
+  meta.textContent = [
+    localizeGovernanceKind(item.kind),
+    formatDate(item.at),
+    localizeKnownText(item.detail),
+  ].join(" / ");
+  badge.className = "source-badge";
+  badge.dataset.source = item.status;
+  badge.textContent = translatedToken(item.status);
+
+  button.append(title, meta, badge);
+  wrapper.append(button);
+  return wrapper;
 }
 
 async function loadAgentOrchestrations(): Promise<void> {
@@ -2556,6 +2743,7 @@ async function startAgentOrchestrationFromForm(): Promise<void> {
       id: truncate(orchestration.id, 24),
     });
     elements.agentOrchestrationFormHelp.dataset.dynamic = "true";
+    await loadMultiAgentGovernance().catch(() => undefined);
     renderAgentOrchestrationList();
     renderAgentOrchestrationDetail(orchestration);
     setActivePage("agents");
@@ -2599,6 +2787,39 @@ async function openAgentTaskChildRun(runId: string): Promise<void> {
   await openRun(runId);
 }
 
+async function handleMultiAgentGovernanceAction(event: Event): Promise<void> {
+  const target = event.target instanceof HTMLElement
+    ? event.target.closest<HTMLButtonElement>("button[data-governance-item-id]")
+    : null;
+  if (!target) return;
+
+  if (target.dataset.governanceRunId) {
+    await openAgentTaskChildRun(target.dataset.governanceRunId);
+    return;
+  }
+
+  if (target.dataset.governanceOrchestrationId) {
+    setActivePage("agents");
+    await openAgentOrchestration(target.dataset.governanceOrchestrationId);
+    return;
+  }
+
+  if (target.dataset.governanceRemoteBridgeSessionId) {
+    setActivePage("settings");
+    await openRemoteBridgeSession(target.dataset.governanceRemoteBridgeSessionId);
+    return;
+  }
+
+  const targetPage = target.dataset.governanceTargetPage;
+  if (!targetPage) return;
+  setActivePage(targetPage);
+  if (targetPage === "approvals") {
+    await loadApprovals().catch(() => undefined);
+  } else if (targetPage === "settings") {
+    await loadRemoteBridgePilot().catch(() => undefined);
+  }
+}
+
 function renderAgentOrchestrationList(): void {
   if (state.orchestrations.length === 0) {
     elements.agentOrchestrationList.replaceChildren(createListItem(t("agents.list.none")));
@@ -2631,8 +2852,6 @@ function renderAgentOrchestrationList(): void {
 
 function renderAgentOrchestrationDetail(orchestration: AgentOrchestrationSummary | undefined): void {
   if (!orchestration) {
-    elements.agentOrchestrationStatus.textContent = translatedToken("idle");
-    elements.agentOrchestrationStatus.dataset.phase = "idle";
     elements.agentOrchestrationCurrentGoal.textContent = t("agents.detail.empty");
     elements.agentOrchestrationCurrentSummary.textContent = t("agents.detail.help.default");
     elements.agentOrchestrationMetaList.replaceChildren(
@@ -2645,8 +2864,6 @@ function renderAgentOrchestrationDetail(orchestration: AgentOrchestrationSummary
     return;
   }
 
-  elements.agentOrchestrationStatus.textContent = translatedToken(orchestration.status);
-  elements.agentOrchestrationStatus.dataset.phase = normalizePhase(orchestration.status);
   elements.agentOrchestrationCurrentGoal.textContent = orchestration.goal;
   elements.agentOrchestrationCurrentSummary.textContent = orchestration.summary?.trim()
     ? localizeKnownText(orchestration.summary)
@@ -2776,6 +2993,7 @@ async function pollAgentOrchestration(orchestrationId: string): Promise<void> {
 
     if (isOrchestrationTerminalStatus(payload.orchestration.status)) {
       stopAgentOrchestrationPolling();
+      await loadMultiAgentGovernance().catch(() => undefined);
     }
   } catch (error) {
     stopAgentOrchestrationPolling();
@@ -2796,6 +3014,8 @@ function normalizePhase(status: string | undefined): string {
     case "planning":
     case "running":
       return "running";
+    case "active":
+      return "active";
     case "completed":
       return "completed";
     case "failed":
@@ -3484,6 +3704,7 @@ async function resolveActiveApproval(decision: "grant" | "reject"): Promise<void
     }
     await loadRuns();
     await loadApprovals();
+    await loadMultiAgentGovernance().catch(() => undefined);
     await loadAppReadiness();
   } catch (error) {
     elements.approvalReason.textContent = errorToMessage(error, t("dynamic.approval.resolveFailed"));

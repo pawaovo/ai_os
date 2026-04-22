@@ -171,6 +171,10 @@ input {
   text-transform: uppercase;
 }
 
+.governance-metric-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .panel {
   border: 1px solid var(--line);
   border-radius: 28px;
@@ -280,6 +284,10 @@ h3 {
 
 .status-pill[data-phase="running"] {
   background: var(--pool);
+}
+
+.status-pill[data-phase="active"] {
+  background: var(--moss);
 }
 
 .status-pill[data-phase="completed"] {
@@ -537,7 +545,16 @@ button:disabled {
   background: var(--pool);
 }
 
+.source-badge[data-source="active"],
+.source-badge[data-source="delivered"] {
+  background: var(--pool);
+}
+
 .source-badge[data-source="completed"] {
+  background: var(--moss);
+}
+
+.source-badge[data-source="handled"] {
   background: var(--moss);
 }
 

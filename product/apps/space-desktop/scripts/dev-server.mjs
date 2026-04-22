@@ -268,6 +268,11 @@ async function handleRequest(request, response) {
     return;
   }
 
+  if (request.method === "GET" && pathname === "/api/multi-agent-governance") {
+    await handleGetMultiAgentGovernance(request, response);
+    return;
+  }
+
   if (request.method === "GET" && pathname === "/api/agent-orchestrations") {
     await handleListAgentOrchestrations(response);
     return;
@@ -713,6 +718,287 @@ async function createAppReadinessSummary(language) {
   };
 }
 
+async function createMultiAgentGovernanceSummary(language) {
+  const activeWorkspaceId = appStore.getSetting("activeWorkspaceId");
+  const activeWorkspace = activeWorkspaceId ? appStore.getWorkspace(activeWorkspaceId) : undefined;
+  const runtimes = await listAgentRuntimeSummaries(activeWorkspaceId);
+  const orchestrations = appStore.listAgentOrchestrations(activeWorkspaceId).orchestrations;
+  const remoteSessions = appStore.listRemoteBridgeSessions(activeWorkspaceId).sessions;
+  const mailboxItems = appStore.listMailboxItems(activeWorkspaceId).items;
+  const approvals = appStore.listApprovals(activeWorkspaceId).approvals;
+  const pendingApprovals = approvals.filter((approval) => approval.status === "pending");
+  const activeOrchestrations = orchestrations.filter((orchestration) => !isTerminalAgentOrchestrationStatus(orchestration.status));
+  const failedOrchestration = orchestrations.find((orchestration) => orchestration.status === "failed");
+  const activeRemoteSessions = remoteSessions.filter((session) => session.status === "active");
+  const deliveredMailboxItems = mailboxItems.filter((item) => item.status === "delivered");
+  const readyRuntimes = runtimes.filter((runtime) => runtime.available);
+
+  const status = pendingApprovals.length > 0
+    ? "awaiting-approval"
+    : failedOrchestration
+      ? "failed"
+      : activeOrchestrations.length > 0 || deliveredMailboxItems.length > 0
+        ? "running"
+        : runtimes.length > 0 || remoteSessions.length > 0 || mailboxItems.length > 0 || approvals.length > 0
+          ? "active"
+          : "idle";
+
+  return {
+    status,
+    summary: createMultiAgentGovernanceSummaryText(language, {
+      status,
+      activeWorkspace,
+      pendingApprovals,
+      activeOrchestrations,
+      readyRuntimes,
+      remoteSessions,
+    }),
+    generatedAt: nowIso(),
+    ...(activeWorkspace
+      ? {
+          workspace: {
+            id: activeWorkspace.id,
+            name: activeWorkspace.name,
+            trustLevel: activeWorkspace.trustLevel,
+          },
+        }
+      : {}),
+    counts: {
+      runtimes: runtimes.length,
+      readyRuntimes: readyRuntimes.length,
+      orchestrations: orchestrations.length,
+      activeOrchestrations: activeOrchestrations.length,
+      remoteSessions: remoteSessions.length,
+      activeRemoteSessions: activeRemoteSessions.length,
+      mailboxDelivered: deliveredMailboxItems.length,
+      mailboxHandled: mailboxItems.filter((item) => item.status === "handled").length,
+      pendingApprovals: pendingApprovals.length,
+    },
+    attention: createMultiAgentGovernanceAttentionItems(language, {
+      pendingApprovals,
+      activeOrchestrations,
+      failedOrchestration,
+      deliveredMailboxItems,
+      activeRemoteSessions,
+    }),
+    activity: createMultiAgentGovernanceActivityItems(language, {
+      orchestrations,
+      remoteSessions,
+      mailboxItems,
+      approvals,
+    }),
+  };
+}
+
+function createMultiAgentGovernanceSummaryText(language, input) {
+  const workspaceName = input.activeWorkspace?.name ?? serverT(language, "dynamic.workspace.noneActive");
+  switch (input.status) {
+    case "awaiting-approval":
+      return serverT(language, "server.multiAgent.summary.awaitingApproval", {
+        workspace: workspaceName,
+        count: input.pendingApprovals.length,
+      });
+    case "failed":
+      return serverT(language, "server.multiAgent.summary.failed", {
+        workspace: workspaceName,
+      });
+    case "running":
+      return serverT(language, "server.multiAgent.summary.running", {
+        workspace: workspaceName,
+        count: input.activeOrchestrations.length,
+      });
+    case "active":
+      return serverT(language, "server.multiAgent.summary.active", {
+        workspace: workspaceName,
+        runtimes: input.readyRuntimes.length,
+        remote: input.remoteSessions.length,
+      });
+    default:
+      return serverT(language, "server.multiAgent.summary.idle", {
+        workspace: workspaceName,
+      });
+  }
+}
+
+function createMultiAgentGovernanceAttentionItems(language, input) {
+  const items = [];
+
+  if (input.pendingApprovals.length > 0) {
+    const approval = input.pendingApprovals[0];
+    items.push({
+      id: "pending-approvals",
+      kind: "approval",
+      status: "awaiting-approval",
+      title: serverT(language, "server.multiAgent.attention.pendingApprovals.title"),
+      detail: serverT(language, "server.multiAgent.attention.pendingApprovals.detail", {
+        count: input.pendingApprovals.length,
+      }),
+      at: approval.requestedAt,
+      targetPage: "approvals",
+      approvalId: approval.approvalId,
+    });
+  }
+
+  if (input.failedOrchestration) {
+    items.push({
+      id: `failed-orchestration-${input.failedOrchestration.id}`,
+      kind: "orchestration",
+      status: "failed",
+      title: serverT(language, "server.multiAgent.attention.failedOrchestration.title"),
+      detail: serverT(language, "server.multiAgent.attention.failedOrchestration.detail", {
+        goal: truncateText(input.failedOrchestration.goal, 72),
+      }),
+      at: input.failedOrchestration.completedAt ?? input.failedOrchestration.createdAt,
+      targetPage: "agents",
+      orchestrationId: input.failedOrchestration.id,
+    });
+  }
+
+  if (input.activeOrchestrations.length > 0) {
+    const orchestration = input.activeOrchestrations[0];
+    items.push({
+      id: `active-orchestration-${orchestration.id}`,
+      kind: "orchestration",
+      status: orchestration.status,
+      title: serverT(language, "server.multiAgent.attention.activeOrchestration.title"),
+      detail: serverT(language, "server.multiAgent.attention.activeOrchestration.detail", {
+        goal: truncateText(orchestration.goal, 72),
+      }),
+      at: orchestration.createdAt,
+      targetPage: "agents",
+      orchestrationId: orchestration.id,
+    });
+  }
+
+  if (input.deliveredMailboxItems.length > 0) {
+    const mailboxItem = input.deliveredMailboxItems[0];
+    items.push({
+      id: `mailbox-${mailboxItem.id}`,
+      kind: "mailbox",
+      status: "active",
+      title: serverT(language, "server.multiAgent.attention.mailboxDelivered.title"),
+      detail: serverT(language, "server.multiAgent.attention.mailboxDelivered.detail", {
+        count: input.deliveredMailboxItems.length,
+      }),
+      at: mailboxItem.createdAt,
+      targetPage: mailboxItem.runId ? "runs" : "agents",
+      ...(mailboxItem.runId ? { runId: mailboxItem.runId } : {}),
+    });
+  }
+
+  if (input.activeRemoteSessions.length > 0) {
+    const session = input.activeRemoteSessions[0];
+    items.push({
+      id: `remote-session-${session.id}`,
+      kind: "remote-bridge",
+      status: "active",
+      title: serverT(language, "server.multiAgent.attention.remoteSessions.title"),
+      detail: serverT(language, "server.multiAgent.attention.remoteSessions.detail", {
+        count: input.activeRemoteSessions.length,
+        principal: session.principalLabel,
+      }),
+      at: session.lastSeenAt ?? session.updatedAt,
+      targetPage: "settings",
+      remoteBridgeSessionId: session.id,
+    });
+  }
+
+  return items.slice(0, 4);
+}
+
+function createMultiAgentGovernanceActivityItems(language, input) {
+  const items = [
+    ...input.orchestrations.slice(0, 4).map((orchestration) => createGovernanceActivityFromOrchestration(language, orchestration)),
+    ...input.remoteSessions.flatMap((session) =>
+      appStore.listRemoteBridgeEvents(session.id).slice(0, 3).map((event) => createGovernanceActivityFromRemoteEvent(language, session, event))),
+    ...input.mailboxItems.slice(0, 4).map((item) => createGovernanceActivityFromMailbox(language, item)),
+    ...input.approvals.slice(0, 4).map((approval) => createGovernanceActivityFromApproval(language, approval)),
+  ];
+
+  return items
+    .sort((left, right) => right.at.localeCompare(left.at))
+    .slice(0, 8);
+}
+
+function createGovernanceActivityFromOrchestration(language, orchestration) {
+  return {
+    id: `orchestration-${orchestration.id}`,
+    kind: "orchestration",
+    status: orchestration.status,
+    title: truncateText(orchestration.goal, 84),
+    detail: [
+      serverStatusT(language, orchestration.status),
+      serverT(language, "server.multiAgent.activity.orchestration.detail", {
+        count: orchestration.tasks.length,
+      }),
+    ].join(" / "),
+    at: orchestration.completedAt ?? orchestration.createdAt,
+    targetPage: "agents",
+    orchestrationId: orchestration.id,
+  };
+}
+
+function createGovernanceActivityFromRemoteEvent(language, session, event) {
+  return {
+    id: `remote-event-${event.id}`,
+    kind: "remote-bridge",
+    status: session.status,
+    title: serverT(language, `remoteBridge.event.${event.type}`),
+    detail: [
+      session.principalLabel,
+      ...(event.runId ? [truncateText(event.runId, 18)] : []),
+      ...(event.approvalId ? [truncateText(event.approvalId, 18)] : []),
+    ].join(" / "),
+    at: event.createdAt,
+    targetPage: "settings",
+    remoteBridgeSessionId: session.id,
+    ...(event.runId ? { runId: event.runId } : {}),
+    ...(event.approvalId ? { approvalId: event.approvalId } : {}),
+  };
+}
+
+function createGovernanceActivityFromMailbox(language, item) {
+  return {
+    id: `mailbox-${item.id}`,
+    kind: "mailbox",
+    status: item.status,
+    title: item.title,
+    detail: [
+      serverT(language, `mailbox.flow.${item.flowKind}`),
+      `${item.senderLabel} -> ${item.recipientLabel}`,
+    ].join(" / "),
+    at: item.updatedAt ?? item.createdAt,
+    targetPage: item.runId ? "runs" : "agents",
+    ...(item.runId ? { runId: item.runId } : {}),
+    ...(item.orchestrationId ? { orchestrationId: item.orchestrationId } : {}),
+    ...(item.remoteBridgeSessionId ? { remoteBridgeSessionId: item.remoteBridgeSessionId } : {}),
+  };
+}
+
+function createGovernanceActivityFromApproval(language, approval) {
+  return {
+    id: `approval-${approval.approvalId}`,
+    kind: "approval",
+    status: approval.status === "pending" ? "awaiting-approval" : approval.status,
+    title: serverT(language, "server.multiAgent.activity.approval.title"),
+    detail: [
+      serverStatusT(language, approval.status),
+      serverT(language, `dynamic.approval.category.${approval.category}`),
+    ].join(" / "),
+    at: approval.resolvedAt ?? approval.requestedAt,
+    targetPage: "approvals",
+    approvalId: approval.approvalId,
+  };
+}
+
+function serverStatusT(language, value) {
+  return serverT(language, `status.${value}`);
+}
+
+function isTerminalAgentOrchestrationStatus(status) {
+  return status === "completed" || status === "failed" || status === "interrupted";
+}
+
 function createReadinessCheck(input) {
   return {
     id: input.id,
@@ -1009,6 +1295,13 @@ async function handleListCapabilityRuns(response) {
 async function handleListAgentRuntimes(response) {
   writeJson(response, 200, {
     runtimes: await listAgentRuntimeSummaries(appStore.getSetting("activeWorkspaceId")),
+  });
+}
+
+async function handleGetMultiAgentGovernance(request, response) {
+  const language = requestLanguage(request);
+  writeJson(response, 200, {
+    governance: await createMultiAgentGovernanceSummary(language),
   });
 }
 

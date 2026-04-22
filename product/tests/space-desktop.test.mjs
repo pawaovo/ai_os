@@ -240,6 +240,15 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(html, /id="agent-orchestration-start-button"/);
   assert.match(html, /id="agent-orchestration-form-help"/);
   assert.match(html, /id="agent-orchestration-status"/);
+  assert.match(html, /id="multi-agent-governance-title"/);
+  assert.match(html, /id="multi-agent-governance-summary"/);
+  assert.match(html, /id="multi-agent-governance-counts"/);
+  assert.match(html, /id="multi-agent-governance-attention-title"/);
+  assert.match(html, /id="multi-agent-governance-attention"/);
+  assert.match(html, /id="multi-agent-governance-attention-help"/);
+  assert.match(html, /id="multi-agent-governance-activity-title"/);
+  assert.match(html, /id="multi-agent-governance-activity"/);
+  assert.match(html, /id="multi-agent-governance-activity-help"/);
   assert.match(html, /id="agent-orchestration-detail-title"/);
   assert.match(html, /id="agent-orchestration-current-goal"/);
   assert.match(html, /id="agent-orchestration-current-summary"/);
@@ -319,10 +328,13 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(styles, /\.nav-button/);
   assert.match(styles, /\.page-section\[hidden\]/);
   assert.match(styles, /\.metric-grid/);
+  assert.match(styles, /\.governance-metric-grid/);
   assert.match(styles, /\.readiness-list-item/);
   assert.match(styles, /data-source="ready"/);
   assert.match(styles, /data-source="action"/);
   assert.match(styles, /data-source="optional"/);
+  assert.match(styles, /data-source="delivered"/);
+  assert.match(styles, /data-phase="active"/);
   assert.match(styles, /awaiting-approval/);
   assert.match(styles, /approval-detail-grid/);
   assert.match(readme, /V1\.0 Capabilities/);
@@ -378,6 +390,8 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(devServer, /\/api\/mcp\/hosted-server/);
   assert.match(devServer, /createHostedMcpServerSummary/);
   assert.match(devServer, /\/api\/remote-bridge\/pilot/);
+  assert.match(devServer, /\/api\/multi-agent-governance/);
+  assert.match(devServer, /createMultiAgentGovernanceSummary/);
   assert.match(devServer, /single-http-bearer/);
   assert.match(devServer, /Missing remote bridge bearer token/);
   assert.match(devServer, /Remote bridge bearer token is invalid/);
@@ -401,8 +415,11 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(browserSource, /\/api\/mcp\/hosted-server/);
   assert.match(browserSource, /\/api\/remote-bridge\/pilot/);
   assert.match(browserSource, /\/api\/mailbox/);
+  assert.match(browserSource, /\/api\/multi-agent-governance/);
   assert.match(browserSource, /loadAgentRuntimes/);
+  assert.match(browserSource, /loadMultiAgentGovernance/);
   assert.match(browserSource, /renderAgentRuntimes/);
+  assert.match(browserSource, /renderMultiAgentGovernance/);
   assert.match(browserSource, /localizeExecutorChoice/);
   assert.match(browserSource, /localizeApprovalCategory/);
   assert.match(browserSource, /dynamic\.readiness\.summary/);
@@ -414,6 +431,9 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(i18nSource, /"nav\.start": "开始"/);
   assert.match(i18nSource, /"nav\.start": "Start"/);
   assert.match(i18nSource, /"recipe-editor\.binding\.workspace": "Workspace"/);
+  assert.match(i18nSource, /"agents\.governance\.title": "Multi-Agent Overview"/);
+  assert.match(i18nSource, /"agents\.governance\.title": "多 Agent 总览"/);
+  assert.match(i18nSource, /"server\.multiAgent\.summary\.awaitingApproval":/);
   assert.match(capabilityContractSource, /export interface PromptAppRuntimeBinding/);
   assert.match(capabilityContractSource, /export interface PromptAppDraftRecord/);
   assert.match(i18nSource, /"dynamic\.approval\.reason\.file-write":/);
@@ -1563,6 +1583,156 @@ test("mailbox runtime records orchestration handoffs and remote bridge events wi
     });
     const switched = await getJson(`${baseUrl}/api/mailbox`);
     assert.deepEqual(switched.items, []);
+  } finally {
+    await appServer.stop();
+    await rm(storageDir, { recursive: true, force: true });
+  }
+});
+
+test("multi-agent governance summary aggregates backend state and respects workspace scope", async () => {
+  const storageDir = await mkdtemp(`${tmpdir()}/ai-os-governance-`);
+  const appPort = await getAvailablePort();
+  const appServer = startSpaceDesktopServer({
+    port: appPort,
+    storageDir,
+  });
+
+  try {
+    const baseUrl = `http://127.0.0.1:${appPort}`;
+    await waitForHttp(`${baseUrl}/`);
+
+    await patchJson(`${baseUrl}/api/mcp/config`, {
+      scope: "global",
+      enabled: true,
+      command: process.execPath,
+      argsText: mockMcpServerPath,
+    });
+
+    const workspace = await postJson(`${baseUrl}/api/workspaces`, {
+      name: "Governance Workspace",
+      path: storageDir,
+    });
+    const otherWorkspace = await postJson(`${baseUrl}/api/workspaces`, {
+      name: "Other Governance Workspace",
+      path: storageDir,
+    });
+    await patchJson(`${baseUrl}/api/settings/workspace-selection`, {
+      workspaceId: workspace.workspace.id,
+    });
+
+    const orchestration = await postJson(`${baseUrl}/api/agent-orchestrations/start`, {
+      goal: "Prepare a concise governance summary.",
+      executorChoice: "mock",
+      timeoutMs: 5000,
+    });
+    await waitForOrchestration(appPort, orchestration.orchestration.id, (item) => item.status === "completed");
+
+    const remote = await postJson(`${baseUrl}/api/remote-bridge/pilot/sessions`, {
+      principalLabel: "Governance Remote",
+      workspaceId: workspace.workspace.id,
+    });
+    const authHeaders = remoteBridgeAuthHeaders(remote.connect.bearerToken);
+    const started = await postJson(
+      remote.connect.runStartUrl,
+      {
+        goal: "review the workspace and pause for approval before the final summary",
+        executorChoice: "mock",
+        timeoutMs: 5000,
+      },
+      authHeaders,
+    );
+    const awaitingApproval = await waitForRemoteBridgeLive(
+      remote.connect,
+      started.run.id,
+      (live) => Boolean(live.pendingApproval),
+    );
+    assert.equal(awaitingApproval.pendingApproval?.stage, "runtime");
+
+    const runtimeRegistry = await getJson(`${baseUrl}/api/agent-runtimes`);
+    const orchestrationList = await getJson(`${baseUrl}/api/agent-orchestrations`);
+    const pilot = await getJson(`${baseUrl}/api/remote-bridge/pilot`);
+    const mailbox = await getJson(`${baseUrl}/api/mailbox`);
+    const approvals = await getJson(`${baseUrl}/api/approvals`);
+    const governance = await getJson(`${baseUrl}/api/multi-agent-governance`);
+
+    assert.equal(governance.governance.status, "awaiting-approval");
+    assert.equal(governance.governance.counts.runtimes, runtimeRegistry.runtimes.length);
+    assert.equal(
+      governance.governance.counts.readyRuntimes,
+      runtimeRegistry.runtimes.filter((runtime) => runtime.available).length,
+    );
+    assert.equal(governance.governance.counts.orchestrations, orchestrationList.orchestrations.length);
+    assert.equal(
+      governance.governance.counts.activeOrchestrations,
+      orchestrationList.orchestrations.filter((item) => !["completed", "failed", "interrupted"].includes(item.status)).length,
+    );
+    assert.equal(governance.governance.counts.remoteSessions, pilot.pilot.sessions.length);
+    assert.equal(
+      governance.governance.counts.activeRemoteSessions,
+      pilot.pilot.sessions.filter((session) => session.status === "active").length,
+    );
+    assert.equal(
+      governance.governance.counts.mailboxDelivered,
+      mailbox.items.filter((item) => item.status === "delivered").length,
+    );
+    assert.equal(
+      governance.governance.counts.mailboxHandled,
+      mailbox.items.filter((item) => item.status === "handled").length,
+    );
+    assert.equal(
+      governance.governance.counts.pendingApprovals,
+      approvals.approvals.filter((item) => item.status === "pending").length,
+    );
+    assert.equal(
+      governance.governance.attention.some((item) => item.kind === "approval" && item.targetPage === "approvals"),
+      true,
+    );
+    assert.equal(
+      governance.governance.activity.every((item) => (
+        typeof item.id === "string"
+        && typeof item.kind === "string"
+        && typeof item.status === "string"
+        && typeof item.at === "string"
+        && typeof item.targetPage === "string"
+      )),
+      true,
+    );
+    for (let index = 1; index < governance.governance.activity.length; index += 1) {
+      assert.equal(
+        governance.governance.activity[index - 1].at.localeCompare(governance.governance.activity[index].at) >= 0,
+        true,
+      );
+    }
+
+    const pendingApprovalId = awaitingApproval.pendingApproval?.approvalId;
+    assert.notEqual(pendingApprovalId, undefined);
+
+    await patchJson(`${baseUrl}/api/settings/workspace-selection`, {
+      workspaceId: otherWorkspace.workspace.id,
+    });
+    const switched = await getJson(`${baseUrl}/api/multi-agent-governance`);
+    assert.equal(switched.governance.counts.orchestrations, 0);
+    assert.equal(switched.governance.counts.remoteSessions, 0);
+    assert.equal(switched.governance.counts.mailboxDelivered, 0);
+    assert.equal(switched.governance.counts.mailboxHandled, 0);
+    assert.equal(switched.governance.counts.pendingApprovals, 0);
+    assert.equal(
+      switched.governance.attention.some((item) => (
+        item.orchestrationId === orchestration.orchestration.id
+        || item.remoteBridgeSessionId === remote.session.id
+        || item.approvalId === pendingApprovalId
+      )),
+      false,
+    );
+    assert.equal(
+      switched.governance.activity.some((item) => (
+        item.orchestrationId === orchestration.orchestration.id
+        || item.remoteBridgeSessionId === remote.session.id
+        || item.approvalId === pendingApprovalId
+        || item.runId === started.run.id
+      )),
+      false,
+    );
   } finally {
     await appServer.stop();
     await rm(storageDir, { recursive: true, force: true });

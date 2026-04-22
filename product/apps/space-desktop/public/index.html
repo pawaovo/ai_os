@@ -339,12 +339,21 @@
           <pre id="run-artifact-preview" class="artifact-preview">Run artifacts will render here after a task completes.</pre>
         </section>
 
-        <section class="agent-orchestration-detail-panel panel tall-panel page-section" data-pages="agents" aria-labelledby="agent-orchestration-detail-title">
+        <section class="agent-orchestration-detail-panel panel tall-panel page-section" data-pages="agents" aria-labelledby="multi-agent-governance-title">
           <div class="panel-heading">
             <p class="eyebrow">Agents</p>
             <span id="agent-orchestration-status" class="status-pill" data-phase="idle">idle</span>
           </div>
-          <h2 id="agent-orchestration-detail-title">Current Orchestration</h2>
+          <h2 id="multi-agent-governance-title">Multi-Agent Overview</h2>
+          <p id="multi-agent-governance-summary" class="mission-meta">Unified multi-agent governance status will appear here.</p>
+          <div id="multi-agent-governance-counts" class="metric-grid governance-metric-grid"></div>
+          <h3 id="multi-agent-governance-attention-title">Attention</h3>
+          <ul id="multi-agent-governance-attention" class="action-list compact-list"></ul>
+          <p id="multi-agent-governance-attention-help" class="inline-help">Approval, orchestration, mailbox, and remote session attention items appear here.</p>
+          <h3 id="multi-agent-governance-activity-title">Recent Activity</h3>
+          <ul id="multi-agent-governance-activity" class="action-list compact-list"></ul>
+          <p id="multi-agent-governance-activity-help" class="inline-help">Recent orchestration, remote bridge, mailbox, and approval activity appears here.</p>
+          <h3 id="agent-orchestration-detail-title">Current Orchestration</h3>
           <p id="agent-orchestration-current-goal" class="run-summary">Select an orchestration to inspect it.</p>
           <p id="agent-orchestration-current-summary" class="mission-meta">Task status, child runs, and aggregate summary will appear here.</p>
           <ul id="agent-orchestration-meta-list" class="action-list compact-list"></ul>
