@@ -102,3 +102,15 @@ test("ProviderRegistry reports missing protocols", () => {
     ProviderRegistryError,
   );
 });
+
+test("ProviderRegistry exposes provider catalog and protocol detection helpers", () => {
+  const registry = new ProviderRegistry();
+
+  assert.deepEqual(
+    registry.listCatalog().map((entry) => entry.protocol),
+    ["openai-compatible", "anthropic-compatible"],
+  );
+  assert.equal(registry.describe("openai-compatible").displayName, "OpenAI-Compatible");
+  assert.equal(registry.detectProtocol("https://example.test/anthropic"), "anthropic-compatible");
+  assert.equal(registry.detectProtocol("https://api.example.test/v1"), "openai-compatible");
+});

@@ -6,6 +6,7 @@ import type {
   ProviderStatus,
 } from "@ai-os/provider-protocol";
 import type { ProviderId } from "@ai-os/kernel-objects";
+import { ModelProviderError as ProviderError } from "@ai-os/provider-protocol";
 
 type OpenAiChatMessage = {
   role: "system" | "user" | "assistant" | "tool";
@@ -54,7 +55,14 @@ function parseOpenAiChunk(data: string): ChatStreamEvent | undefined {
 
 async function* readOpenAiStream(response: Response): AsyncIterable<ChatStreamEvent> {
   if (!response.body) {
-    yield { type: "error", message: "OpenAI-compatible provider returned an empty stream body." };
+    yield {
+      type: "error",
+      message: new ProviderError(
+        "OpenAI-compatible provider returned an empty stream body.",
+        "empty-response-body",
+        { protocol: "openai-compatible" },
+      ).message,
+    };
     return;
   }
 
@@ -77,7 +85,14 @@ async function* readOpenAiStream(response: Response): AsyncIterable<ChatStreamEv
         const event = parseOpenAiChunk(data);
         if (event) yield event;
       } catch {
-        yield { type: "error", message: "Failed to parse OpenAI-compatible stream chunk." };
+        yield {
+          type: "error",
+          message: new ProviderError(
+            "Failed to parse OpenAI-compatible stream chunk.",
+            "stream-parse-failed",
+            { protocol: "openai-compatible" },
+          ).message,
+        };
       }
     }
   }
@@ -88,7 +103,14 @@ async function* readOpenAiStream(response: Response): AsyncIterable<ChatStreamEv
       const event = parseOpenAiChunk(data);
       if (event) yield event;
     } catch {
-      yield { type: "error", message: "Failed to parse OpenAI-compatible stream chunk." };
+      yield {
+        type: "error",
+        message: new ProviderError(
+          "Failed to parse OpenAI-compatible stream chunk.",
+          "stream-parse-failed",
+          { protocol: "openai-compatible" },
+        ).message,
+      };
     }
   }
 }
@@ -103,23 +125,52 @@ export class OpenAiCompatibleProvider implements ModelProvider {
       await this.listModels(request);
       return { available: true };
     } catch (error) {
+      const providerError = error instanceof ProviderError ? error : undefined;
       return {
         available: false,
         message: error instanceof Error ? error.message : String(error),
+        ...(providerError ? { errorCode: providerError.code } : {}),
       };
     }
   }
 
   async listModels({ config, runtime }: ModelProviderRequest): Promise<ModelInfo[]> {
-    const apiKey = await runtime.resolveSecret(config.apiKeyRef);
-    const response = await runtime.fetch(`${trimTrailingSlash(config.baseUrl)}/models`, {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-      },
-    });
+    let apiKey: string;
+    try {
+      apiKey = await runtime.resolveSecret(config.apiKeyRef);
+    } catch (error) {
+      throw new ProviderError(
+        error instanceof Error ? error.message : "Failed to resolve provider API key.",
+        "secret-resolution-failed",
+        { protocol: this.protocol },
+      );
+    }
+
+    let response: Response;
+    try {
+      response = await runtime.fetch(`${trimTrailingSlash(config.baseUrl)}/models`, {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+        },
+      });
+    } catch (error) {
+      throw new ProviderError(
+        error instanceof Error ? error.message : "OpenAI-compatible models request failed.",
+        "network-error",
+        { protocol: this.protocol },
+      );
+    }
 
     if (!response.ok) {
-      throw new Error(`OpenAI-compatible models request failed with HTTP ${response.status}.`);
+      throw new ProviderError(
+        `OpenAI-compatible models request failed with HTTP ${response.status}.`,
+        response.status === 401 || response.status === 403
+          ? "authentication-failed"
+          : response.status === 404
+            ? "protocol-mismatch"
+            : "models-request-failed",
+        { protocol: this.protocol, statusCode: response.status },
+      );
     }
 
     const payload = (await response.json()) as OpenAiModelListResponse;
@@ -138,24 +189,59 @@ export class OpenAiCompatibleProvider implements ModelProvider {
     { config, runtime }: ModelProviderRequest,
     chat: ChatRequest,
   ): AsyncIterable<ChatStreamEvent> {
-    const apiKey = await runtime.resolveSecret(config.apiKeyRef);
-    const response = await runtime.fetch(`${trimTrailingSlash(config.baseUrl)}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: chat.modelId,
-        messages: chat.messages.map(messageToOpenAi),
-        stream: true,
-      }),
-    });
+    let apiKey: string;
+    try {
+      apiKey = await runtime.resolveSecret(config.apiKeyRef);
+    } catch (error) {
+      yield {
+        type: "error",
+        message: new ProviderError(
+          error instanceof Error ? error.message : "Failed to resolve provider API key.",
+          "secret-resolution-failed",
+          { protocol: this.protocol },
+        ).message,
+      };
+      return;
+    }
+
+    let response: Response;
+    try {
+      response = await runtime.fetch(`${trimTrailingSlash(config.baseUrl)}/chat/completions`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: chat.modelId,
+          messages: chat.messages.map(messageToOpenAi),
+          stream: true,
+        }),
+      });
+    } catch (error) {
+      yield {
+        type: "error",
+        message: new ProviderError(
+          error instanceof Error ? error.message : "OpenAI-compatible chat request failed.",
+          "network-error",
+          { protocol: this.protocol },
+        ).message,
+      };
+      return;
+    }
 
     if (!response.ok) {
       yield {
         type: "error",
-        message: `OpenAI-compatible chat request failed with HTTP ${response.status}.`,
+        message: new ProviderError(
+          `OpenAI-compatible chat request failed with HTTP ${response.status}.`,
+          response.status === 401 || response.status === 403
+            ? "authentication-failed"
+            : response.status === 404
+              ? "protocol-mismatch"
+              : "chat-request-failed",
+          { protocol: this.protocol, statusCode: response.status },
+        ).message,
       };
       return;
     }

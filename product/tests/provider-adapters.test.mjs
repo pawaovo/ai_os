@@ -64,6 +64,20 @@ test("OpenAiCompatibleProvider lists models", async () => {
   ]);
 });
 
+test("OpenAiCompatibleProvider classifies authentication failures during connection tests", async () => {
+  const provider = new OpenAiCompatibleProvider("provider-test");
+  const status = await provider.testConnection({
+    config: { ...baseConfig, protocol: "openai-compatible" },
+    runtime: createRuntime(async () => new Response("denied", { status: 401 })),
+  });
+
+  assert.deepEqual(status, {
+    available: false,
+    message: "OpenAI-compatible models request failed with HTTP 401.",
+    errorCode: "authentication-failed",
+  });
+});
+
 test("OpenAiCompatibleProvider streams text deltas", async () => {
   const provider = new OpenAiCompatibleProvider("provider-test");
   const runtime = createRuntime(async (url, init) => {
@@ -91,6 +105,23 @@ test("OpenAiCompatibleProvider streams text deltas", async () => {
   ]);
 });
 
+test("OpenAiCompatibleProvider surfaces network failures during chat streaming", async () => {
+  const provider = new OpenAiCompatibleProvider("provider-test");
+  const runtime = createRuntime(async () => {
+    throw new Error("fetch failed");
+  });
+
+  const events = [];
+  for await (const event of provider.streamChat(
+    { config: { ...baseConfig, protocol: "openai-compatible" }, runtime },
+    chatRequest,
+  )) {
+    events.push(event);
+  }
+
+  assert.deepEqual(events, [{ type: "error", message: "fetch failed" }]);
+});
+
 test("AnthropicCompatibleProvider lists models", async () => {
   const provider = new AnthropicCompatibleProvider("provider-test");
   const runtime = createRuntime(async (url, init) => {
@@ -114,6 +145,20 @@ test("AnthropicCompatibleProvider lists models", async () => {
       supportsReasoning: true,
     },
   ]);
+});
+
+test("AnthropicCompatibleProvider classifies protocol mismatches during connection tests", async () => {
+  const provider = new AnthropicCompatibleProvider("provider-test");
+  const status = await provider.testConnection({
+    config: { ...baseConfig, protocol: "anthropic-compatible" },
+    runtime: createRuntime(async () => new Response("missing", { status: 404 })),
+  });
+
+  assert.deepEqual(status, {
+    available: false,
+    message: "Anthropic-compatible models request failed with HTTP 404.",
+    errorCode: "protocol-mismatch",
+  });
 });
 
 test("AnthropicCompatibleProvider streams text deltas", async () => {
@@ -141,5 +186,25 @@ test("AnthropicCompatibleProvider streams text deltas", async () => {
   assert.deepEqual(events, [
     { type: "text.delta", delta: "hel" },
     { type: "text.delta", delta: "lo" },
+  ]);
+});
+
+test("AnthropicCompatibleProvider surfaces empty stream bodies as chat errors", async () => {
+  const provider = new AnthropicCompatibleProvider("provider-test");
+  const runtime = createRuntime(async () => new Response(null, { status: 200 }));
+
+  const events = [];
+  for await (const event of provider.streamChat(
+    { config: { ...baseConfig, protocol: "anthropic-compatible" }, runtime },
+    chatRequest,
+  )) {
+    events.push(event);
+  }
+
+  assert.deepEqual(events, [
+    {
+      type: "error",
+      message: "Anthropic-compatible provider returned an empty stream body.",
+    },
   ]);
 });

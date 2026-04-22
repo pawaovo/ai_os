@@ -30,6 +30,7 @@ if (process.env.AI_SPACE_SKIP_BUILD !== "1") {
 
 const {
   createCodeExecutorForChoice,
+  createProviderCatalogResponse,
   createProviderListResponse,
   createProviderSettingsResponse,
   getExecutorRuntimeStatus,
@@ -302,6 +303,11 @@ async function handleRequest(request, response) {
 
   if (request.method === "GET" && pathname === "/api/providers") {
     await handleListProviders(response);
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/providers/catalog") {
+    await handleProviderCatalog(request, response);
     return;
   }
 
@@ -1038,6 +1044,11 @@ async function handleListProviders(response) {
     200,
     createProviderListResponse(await appStore.listProviders(), appStore.getSetting("activeProviderId")),
   );
+}
+
+async function handleProviderCatalog(request, response) {
+  const requestUrl = new URL(request.url ?? "/", "http://localhost");
+  writeJson(response, 200, createProviderCatalogResponse(requestUrl.searchParams.get("baseUrl") ?? undefined));
 }
 
 async function handleGetProvider(response) {

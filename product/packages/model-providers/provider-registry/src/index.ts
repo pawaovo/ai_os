@@ -1,5 +1,6 @@
 import type { ChatRequest, ChatStreamEvent } from "@ai-os/conversation-core";
 import type {
+  ProviderCatalogEntry,
   ModelInfo,
   ModelProvider,
   ModelProviderConfig,
@@ -7,6 +8,11 @@ import type {
   ProviderProtocol,
   ProviderRuntime,
   ProviderStatus,
+} from "@ai-os/provider-protocol";
+import {
+  detectProviderProtocol as detectProtocol,
+  getProviderCatalogEntry as getCatalogEntry,
+  listProviderCatalog as listCatalogEntries,
 } from "@ai-os/provider-protocol";
 
 export class ProviderRegistryError extends Error {
@@ -38,6 +44,18 @@ export class ProviderRegistry {
     return this.get(config.protocol).testConnection(this.createRequest(config, runtime));
   }
 
+  listCatalog(): ProviderCatalogEntry[] {
+    return listCatalogEntries();
+  }
+
+  describe(protocol: ProviderProtocol): ProviderCatalogEntry {
+    return getCatalogEntry(protocol);
+  }
+
+  detectProtocol(baseUrl: string): ProviderProtocol | undefined {
+    return detectProtocol(baseUrl);
+  }
+
   listModels(config: ModelProviderConfig, runtime: ProviderRuntime): Promise<ModelInfo[]> {
     return this.get(config.protocol).listModels(this.createRequest(config, runtime));
   }
@@ -54,4 +72,3 @@ export class ProviderRegistry {
     return { config, runtime };
   }
 }
-

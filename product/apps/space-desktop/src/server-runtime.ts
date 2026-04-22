@@ -15,10 +15,19 @@ import type {
 import { AnthropicCompatibleProvider } from "@ai-os/provider-anthropic-compatible";
 import { OpenAiCompatibleProvider } from "@ai-os/provider-openai-compatible";
 import type {
+  ProviderCatalogEntry,
+  ProviderCheck,
+  ProviderErrorCode,
   ModelProviderConfig,
   ProviderProtocol,
   ProviderRuntime,
   SecretRef,
+} from "@ai-os/provider-protocol";
+import {
+  ModelProviderError as ProviderError,
+  detectProviderProtocol as detectProtocol,
+  getProviderCatalogEntry as getCatalogEntry,
+  normalizeProviderBaseUrl as normalizeBaseUrl,
 } from "@ai-os/provider-protocol";
 import { ProviderRegistry } from "@ai-os/provider-registry";
 
@@ -67,7 +76,7 @@ export interface StoredProviderConfig {
 export interface ProviderSettingsInput {
   id?: string;
   name: string;
-  protocol: ProviderProtocol;
+  protocol?: ProviderProtocol;
   baseUrl: string;
   apiKey?: string;
   modelId: string;
@@ -94,6 +103,16 @@ export interface ProviderDoctorResponse {
   available: boolean;
   message: string;
   models: string[];
+  errorCode?: ProviderErrorCode;
+  detectedProtocol?: ProviderProtocol;
+  checks: ProviderCheck[];
+  hints: string[];
+  catalog: ProviderCatalogEntry;
+}
+
+export interface ProviderCatalogResponse {
+  providers: ProviderCatalogEntry[];
+  detectedProtocol?: ProviderProtocol;
 }
 
 export interface ChatThreadSummary {
@@ -212,8 +231,9 @@ export function parseProviderSettingsInput(
   }
 
   const name = readRequiredString(value.name, "name");
-  const protocol = parseProviderProtocol(value.protocol);
-  const baseUrl = readRequiredString(value.baseUrl, "baseUrl").replace(/\/+$/, "");
+  const baseUrl = normalizeBaseUrl(readRequiredString(value.baseUrl, "baseUrl"));
+  const detectedProtocol = detectProtocol(baseUrl);
+  const protocol = parseProviderProtocol(value.protocol, detectedProtocol);
   const apiKey = readOptionalString(value.apiKey) || existing?.apiKey;
   const modelId = readRequiredString(value.modelId, "modelId");
 
@@ -228,6 +248,13 @@ export function parseProviderSettingsInput(
     baseUrl,
     apiKey,
     modelId,
+  };
+}
+
+export function createProviderCatalogResponse(baseUrl?: string): ProviderCatalogResponse {
+  return {
+    providers: new ProviderRegistry().listCatalog(),
+    ...(baseUrl ? createDetectedProtocolProperty(baseUrl) : {}),
   };
 }
 
@@ -290,24 +317,61 @@ export async function runProviderDoctor(input: {
       available: false,
       message: "Configure a model provider first.",
       models: [],
+      errorCode: "unknown-provider-error",
+      checks: [{ id: "protocol", status: "fail", message: "Provider configuration is missing." }],
+      hints: ["Save a provider before loading models or starting chat."],
+      catalog: getCatalogEntry("openai-compatible"),
     };
   }
 
   const registry = createProviderRegistry();
   const providerConfig = toModelProviderConfig(input.provider);
   const providerRuntime = createProviderRuntime(input.provider, input.fetch);
+  const catalog = registry.describe(providerConfig.protocol);
+  const detectedProtocol = registry.detectProtocol(providerConfig.baseUrl);
+  const checks: ProviderCheck[] = [
+    {
+      id: "base-url",
+      status: "pass",
+      message: `Using ${providerConfig.baseUrl}`,
+    },
+  ];
+
+  if (detectedProtocol && detectedProtocol !== providerConfig.protocol) {
+    checks.unshift({
+      id: "protocol",
+      status: "warn",
+      message: `Configured protocol ${providerConfig.protocol} differs from detected protocol ${detectedProtocol}.`,
+    });
+  } else {
+    checks.unshift({
+      id: "protocol",
+      status: "pass",
+      message: `Configured protocol ${providerConfig.protocol} is accepted.`,
+    });
+  }
 
   try {
+    const status = await registry.testConnection(providerConfig, providerRuntime);
     const models = await registry.listModels(providerConfig, providerRuntime);
     return {
-      available: true,
-      message: "Provider connection succeeded.",
+      available: status.available,
+      message: status.message ?? "Provider connection succeeded.",
       models: models.map((model) => model.id),
+      ...(status.errorCode ? { errorCode: status.errorCode } : {}),
+      ...(detectedProtocol ? { detectedProtocol } : {}),
+      checks: [
+        ...checks,
+        { id: "auth", status: "pass", message: "Provider credentials were accepted." },
+        { id: "models", status: "pass", message: `Loaded ${models.length} models.` },
+      ],
+      hints: status.hints ?? [],
+      catalog,
     };
   } catch (error) {
+    const normalized = toProviderDoctorFailure(error, providerConfig.protocol, detectedProtocol, catalog, checks);
     return {
-      available: false,
-      message: error instanceof Error ? error.message : "Provider connection failed.",
+      ...normalized,
       models: [],
     };
   }
@@ -435,14 +499,96 @@ function toModelProviderConfig(provider: StoredProviderConfig): ModelProviderCon
   };
 }
 
-function parseProviderProtocol(value: unknown): ProviderProtocol {
+function parseProviderProtocol(value: unknown, detectedProtocol?: ProviderProtocol): ProviderProtocol {
   switch (value) {
     case "openai-compatible":
     case "anthropic-compatible":
       return value;
+    case undefined:
+    case null:
+      if (detectedProtocol) return detectedProtocol;
+      throw new Error("Provider settings field is required: protocol");
     default:
       throw new Error("Unsupported provider protocol.");
   }
+}
+
+function createDetectedProtocolProperty(baseUrl: string): { detectedProtocol?: ProviderProtocol } {
+  const detectedProtocol = detectProtocol(baseUrl);
+  return detectedProtocol ? { detectedProtocol } : {};
+}
+
+function toProviderDoctorFailure(
+  error: unknown,
+  configuredProtocol: ProviderProtocol,
+  detectedProtocol: ProviderProtocol | undefined,
+  catalog: ProviderCatalogEntry,
+  existingChecks: ProviderCheck[],
+): Omit<ProviderDoctorResponse, "models"> {
+  const providerError = error instanceof ProviderError ? error : undefined;
+  const message = error instanceof Error ? error.message : "Provider connection failed.";
+  const checks = [...existingChecks];
+  const errorCode = providerError?.code ?? inferProviderErrorCode(message);
+
+  checks.push({
+    id: "auth",
+    status: errorCode === "authentication-failed" ? "fail" : "warn",
+    message: errorCode === "authentication-failed"
+      ? "Provider credentials were rejected."
+      : "Provider credentials could not be fully verified.",
+  });
+  checks.push({
+    id: "models",
+    status: "fail",
+    message,
+  });
+
+  const hints = buildProviderHints(errorCode, configuredProtocol, detectedProtocol);
+
+  return {
+    available: false,
+    message,
+    ...(errorCode ? { errorCode } : {}),
+    ...(detectedProtocol ? { detectedProtocol } : {}),
+    checks,
+    hints,
+    catalog,
+  };
+}
+
+function inferProviderErrorCode(message: string): ProviderErrorCode {
+  const normalized = message.toLowerCase();
+  if (normalized.includes("required: protocol")) return "unknown-protocol";
+  if (normalized.includes("invalid url") || normalized.includes("failed to parse url")) return "invalid-base-url";
+  if (normalized.includes("unknown secret ref")) return "secret-resolution-failed";
+  if (normalized.includes("fetch failed")) return "network-error";
+  return "unknown-provider-error";
+}
+
+function buildProviderHints(
+  errorCode: ProviderErrorCode,
+  configuredProtocol: ProviderProtocol,
+  detectedProtocol?: ProviderProtocol,
+): string[] {
+  const hints: string[] = [];
+
+  if (errorCode === "authentication-failed") {
+    hints.push("Check the API key or token for the selected provider.");
+  }
+  if (errorCode === "protocol-mismatch") {
+    hints.push("Confirm that the provider base URL matches the selected protocol.");
+  }
+  if (errorCode === "invalid-base-url") {
+    hints.push("Provide a full HTTP base URL such as https://api.example.com/v1.");
+  }
+  if (errorCode === "network-error") {
+    hints.push("Check network reachability and any local proxy configuration.");
+  }
+  if (detectedProtocol && detectedProtocol !== configuredProtocol) {
+    hints.push(`The current base URL looks more like ${detectedProtocol}.`);
+  }
+
+  return hints;
 }
 
 export function parseExecutorChoice(value: unknown): SpaceDemoExecutorChoice {

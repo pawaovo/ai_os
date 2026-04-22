@@ -28,11 +28,13 @@ const {
   runSpaceDemoGoal,
 } = await import("../apps/space-desktop/dist/demo-runtime.js");
 const {
+  createProviderCatalogResponse,
   createProviderSettingsResponse,
   parseChatSendRequest,
   parseProviderSettingsInput,
   parseSpaceDemoRunRequest,
   runChatSendRequest,
+  runProviderDoctor,
   runSpaceDemoRequest,
 } = await import("../apps/space-desktop/dist/server-runtime.js");
 
@@ -425,6 +427,69 @@ test("provider settings parsing preserves an existing API key when the form leav
   });
 });
 
+test("provider settings can detect a protocol from base URL when protocol is omitted", () => {
+  const provider = parseProviderSettingsInput({
+    name: "Detected Provider",
+    baseUrl: "https://relay.test/anthropic/",
+    apiKey: "sk-detected-key",
+    modelId: "claude-demo",
+  });
+
+  assert.deepEqual(provider, {
+    name: "Detected Provider",
+    protocol: "anthropic-compatible",
+    baseUrl: "https://relay.test/anthropic",
+    apiKey: "sk-detected-key",
+    modelId: "claude-demo",
+  });
+});
+
+test("provider catalog response exposes supported protocols and detected protocol hints", () => {
+  const response = createProviderCatalogResponse("https://api.example.test/v1");
+
+  assert.deepEqual(
+    response.providers.map((entry) => entry.protocol),
+    ["openai-compatible", "anthropic-compatible"],
+  );
+  assert.equal(response.detectedProtocol, "openai-compatible");
+});
+
+test("runProviderDoctor returns structured checks and hints for protocol mismatch", async () => {
+  const response = await runProviderDoctor({
+    provider: {
+      name: "Mismatch Provider",
+      protocol: "openai-compatible",
+      baseUrl: "https://relay.test/anthropic",
+      apiKey: "sk-test",
+      modelId: "demo-model",
+    },
+    fetch: async () => Response.json({ data: [{ id: "demo-model" }] }),
+  });
+
+  assert.equal(response.available, true);
+  assert.equal(response.detectedProtocol, "anthropic-compatible");
+  assert.equal(response.catalog.protocol, "openai-compatible");
+  assert.equal(response.checks.some((check) => check.id === "protocol" && check.status === "warn"), true);
+});
+
+test("runProviderDoctor classifies authentication failures with a structured error code", async () => {
+  const response = await runProviderDoctor({
+    provider: {
+      name: "Auth Provider",
+      protocol: "openai-compatible",
+      baseUrl: "https://api.example.test/v1",
+      apiKey: "sk-bad",
+      modelId: "demo-model",
+    },
+    fetch: async () => new Response("denied", { status: 401 }),
+  });
+
+  assert.equal(response.available, false);
+  assert.equal(response.errorCode, "authentication-failed");
+  assert.equal(response.checks.some((check) => check.id === "auth" && check.status === "fail"), true);
+  assert.equal(response.hints.includes("Check the API key or token for the selected provider."), true);
+});
+
 test("parseChatSendRequest validates chat message and history shape", () => {
   assert.deepEqual(
     parseChatSendRequest({
@@ -631,6 +696,61 @@ test("space desktop dev server persists providers, threads, and messages without
     assert.equal(Object.values(secretStore)[0], "sk-persistent-secret");
   } finally {
     await restartedServer?.stop();
+    await appServer.stop();
+    await providerServer.stop();
+    await rm(storageDir, { recursive: true, force: true });
+  }
+});
+
+test("space desktop provider catalog, model loading, and model selection stay compatible", async () => {
+  const storageDir = await mkdtemp(`${tmpdir()}/ai-os-provider-governance-`);
+  const providerServer = await startMockOpenAiProvider();
+  const appPort = await getAvailablePort();
+  const appServer = startSpaceDesktopServer({
+    port: appPort,
+    storageDir,
+  });
+
+  try {
+    await waitForHttp(`http://127.0.0.1:${appPort}/`);
+
+    const saved = await postJson(`http://127.0.0.1:${appPort}/api/providers`, {
+      name: "Catalog Provider",
+      protocol: "openai-compatible",
+      baseUrl: `http://127.0.0.1:${providerServer.port}/v1`,
+      apiKey: "sk-provider-governance",
+      modelId: "mock-model",
+    });
+
+    const catalogResponse = await fetch(
+      `http://127.0.0.1:${appPort}/api/providers/catalog?baseUrl=${encodeURIComponent(`http://127.0.0.1:${providerServer.port}/v1`)}`,
+    );
+    assert.equal(catalogResponse.ok, true);
+    const catalog = await catalogResponse.json();
+    assert.deepEqual(
+      catalog.providers.map((entry) => entry.protocol),
+      ["openai-compatible", "anthropic-compatible"],
+    );
+    assert.equal(catalog.detectedProtocol, "openai-compatible");
+
+    const modelResponse = await getJson(
+      `http://127.0.0.1:${appPort}/api/providers/${saved.provider.id}/models`,
+    );
+    assert.equal(modelResponse.available, true);
+    assert.equal(modelResponse.catalog.protocol, "openai-compatible");
+    assert.equal(modelResponse.models.includes("mock-model"), true);
+
+    const selectedModelId = "mock-model-alt";
+    const selection = await patchJson(`http://127.0.0.1:${appPort}/api/settings/model-selection`, {
+      providerId: saved.provider.id,
+      modelId: selectedModelId,
+    });
+    assert.equal(selection.activeProviderId, saved.provider.id);
+    assert.equal(selection.activeModelId, selectedModelId);
+
+    const activeProvider = await getJson(`http://127.0.0.1:${appPort}/api/provider`);
+    assert.equal(activeProvider.provider.modelId, selectedModelId);
+  } finally {
     await appServer.stop();
     await providerServer.stop();
     await rm(storageDir, { recursive: true, force: true });
