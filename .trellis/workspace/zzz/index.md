@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 17
+- **Total Sessions**: 18
 - **Last Active**: 2026-04-22
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~640 | Active |
+| `journal-1.md` | ~674 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 18 | 2026-04-22 | Complete remaining P2 contract backlog | `a02672d`, `a7e0500` | `codex/bilingual-app-language-toggle` |
 | 17 | 2026-04-22 | Complete P1 runtime and prompt app backlog | `534a7d8`, `383a9d1`, `f730062`, `22b5db9`, `1cdee41` | `codex/bilingual-app-language-toggle` |
 | 16 | 2026-04-22 | Start P1 workspace runtime work | `99aeef1`, `7bf7837` | `codex/bilingual-app-language-toggle` |
 | 15 | 2026-04-22 | Complete P0 runtime foundations | `8dc8b08`, `005ceb7`, `da8356f`, `6b827e5` | `codex/bilingual-app-language-toggle` |

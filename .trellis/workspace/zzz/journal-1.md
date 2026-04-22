@@ -638,3 +638,37 @@ Completed remaining P1 backlog: workspace native preview surfaces, Prompt App Dr
 ### Next Steps
 
 - None - task complete
+
+
+## Session 18: Complete remaining P2 contract backlog
+
+**Date**: 2026-04-22
+**Task**: Complete remaining P2 contract backlog
+**Branch**: `codex/bilingual-app-language-toggle`
+
+### Summary
+
+Completed external runtime compatibility, Agent Hub skeleton, and the remaining remote bridge and multi-agent boundary contracts with full product validation for code-bearing changes.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a02672d` | (see git log) |
+| `a7e0500` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
