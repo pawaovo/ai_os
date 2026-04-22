@@ -531,3 +531,39 @@ Residual note: packaged Electron window accessibility became flaky after relaunc
 ### Next Steps
 
 - None - task complete
+
+
+## Session 15: Complete P0 runtime foundations
+
+**Date**: 2026-04-22
+**Task**: Complete P0 runtime foundations
+**Branch**: `codex/bilingual-app-language-toggle`
+
+### Summary
+
+Completed P0 executor session foundation, query loop discipline, memory retrieval integration, and vertical regression baseline with full product validation and packaged macOS smoke.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8dc8b08` | (see git log) |
+| `005ceb7` | (see git log) |
+| `da8356f` | (see git log) |
+| `6b827e5` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 14
-- **Last Active**: 2026-04-20
+- **Total Sessions**: 15
+- **Last Active**: 2026-04-22
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~533 | Active |
+| `journal-1.md` | ~569 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 15 | 2026-04-22 | Complete P0 runtime foundations | `8dc8b08`, `005ceb7`, `da8356f`, `6b827e5` | `codex/bilingual-app-language-toggle` |
 | 14 | 2026-04-20 | Bilingual UI Adaptation Follow-up | `9ed729a` | `codex/bilingual-app-language-toggle` |
 | 13 | 2026-04-20 | Add bilingual Chinese and English app mode | `ba1db681504f89f9fd80a13080a031916678503e` | `codex/bilingual-app-language-toggle` |
 | 12 | 2026-04-20 | Real app E2E validation and provider-flow fixes | `3f7d8027d57997d3b233ad304f073300c39e3f00` | `codex/real-app-e2e-validation` |
