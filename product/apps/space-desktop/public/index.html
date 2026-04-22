@@ -409,6 +409,22 @@
           <h3 id="agent-runtime-title">Agent Runtime Registry</h3>
           <ul id="agent-runtime-list" class="action-list"></ul>
           <p id="agent-runtime-help" class="inline-help">Agent Hub skeleton lists local runtimes that can be bridged into the workspace.</p>
+          <h3 id="mcp-hosted-server-title">Hosted MCP Server</h3>
+          <div class="approval-detail-grid hosted-mcp-grid">
+            <span id="mcp-hosted-server-status-label">Status</span>
+            <strong id="mcp-hosted-server-status">not configured</strong>
+            <span id="mcp-hosted-server-transport-label">Transport</span>
+            <strong id="mcp-hosted-server-transport">none</strong>
+            <span id="mcp-hosted-server-command-label">Command</span>
+            <strong id="mcp-hosted-server-command">none</strong>
+            <span id="mcp-hosted-server-command-line-label">Command Line</span>
+            <strong id="mcp-hosted-server-command-line">none</strong>
+          </div>
+          <h4 id="mcp-hosted-server-tools-title">Tools</h4>
+          <ul id="mcp-hosted-server-tools" class="action-list compact-list"></ul>
+          <h4 id="mcp-hosted-server-resources-title">Resources</h4>
+          <ul id="mcp-hosted-server-resources" class="action-list compact-list"></ul>
+          <p id="mcp-hosted-server-help" class="inline-help">Hosted MCP Server status and connection guidance appear here.</p>
           <ul class="settings-list">
             <li><strong>Start</strong><span>Use the V1.0 readiness dashboard to see what is configured and what to do next.</span></li>
             <li><strong>Providers</strong><span>Configure custom provider base URLs, API keys, and models in the Providers page.</span></li>
@@ -418,6 +434,7 @@
             <li><strong>Automation</strong><span>Create and pause one-off, scheduled, or heartbeat automations from the Automations page.</span></li>
             <li><strong>Memory</strong><span>Save personal or workspace context from the Memory page and review usage in chat or runs.</span></li>
             <li><strong>Capabilities And Forge</strong><span>Inspect local capabilities, run them, and export Forge recipes as reusable capabilities.</span></li>
+            <li><strong>Hosted MCP Server</strong><span>Review the local hosted MCP server status, command line, and exported read-only tools and resources.</span></li>
             <li><strong>Local Install</strong><span>Build the Electron app, then use the Desktop App Path panel to open the correct packaged output for the current host.</span></li>
           </ul>
         </section>

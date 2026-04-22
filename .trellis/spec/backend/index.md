@@ -23,6 +23,7 @@ This directory contains guidelines for backend development. Fill in each file wi
 | [External Runtime Compatibility Contract](./external-runtime-compatibility-contract.md) | Additive external runtime compatibility metadata before Agent Hub work | Active |
 | [Future MCP Server Boundary Spike](./future-mcp-server-boundary-spike.md) | Documentation boundary for future MCP server layer beyond current product-owned runtime | Active |
 | [MCP Client Config Sync](./mcp-client-config-sync.md) | Local MCP default/override config projection and health contract | Active |
+| [MCP Server Hosting MVP](./mcp-server-hosting-mvp.md) | Local stdio MCP hosted server that exposes bounded AI OS summaries to external clients | Active |
 | [MCP Transport Runtime](./mcp-transport-runtime.md) | Real stdio MCP runtime probe layered on top of the existing config projection | Active |
 | [Multi Agent Coordination Mailbox](./multi-agent-coordination-mailbox.md) | Boundary contract for minimal mailbox and coordinator-worker linkage | Active |
 | [Multi Agent Governance Summary](./multi-agent-governance-summary.md) | Backend summary contract for future multi-agent governance surface | Active |

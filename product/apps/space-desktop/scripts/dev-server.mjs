@@ -11,6 +11,7 @@ import { createInterface } from "node:readline";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createMcpRuntimeProbeCache } from "./mcp-runtime.mjs";
+import { createHostedMcpServerSummary } from "./mcp-hosted-server.mjs";
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const productRoot = resolve(appRoot, "../..");
@@ -159,6 +160,11 @@ async function handleRequest(request, response) {
 
   if (request.method === "PATCH" && pathname === "/api/mcp/config") {
     await handleSetMcpConfig(request, response);
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/mcp/hosted-server") {
+    await handleGetHostedMcpServer(response);
     return;
   }
 
@@ -788,6 +794,12 @@ async function handleSetMcpConfig(request, response) {
   } catch (error) {
     writeJson(response, 400, { error: sanitizeErrorMessage(error) });
   }
+}
+
+async function handleGetHostedMcpServer(response) {
+  writeJson(response, 200, {
+    hostedServer: getHostedMcpServerSummary(),
+  });
 }
 
 async function handleListArtifacts(response) {
@@ -1969,6 +1981,14 @@ async function getMcpConfigSummaryWithRuntime(workspaceId) {
       runtime: await mcpRuntimeProbeCache.probe(summary.resolvedConfig),
     },
   };
+}
+
+function getHostedMcpServerSummary() {
+  return createHostedMcpServerSummary({
+    productRoot,
+    storageRoot,
+    electronHostedMode: desktopShell === "electron",
+  });
 }
 
 function createRunTurn(ids, clock) {

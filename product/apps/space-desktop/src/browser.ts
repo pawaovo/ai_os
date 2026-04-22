@@ -373,6 +373,29 @@ interface McpResolvedConfig extends McpClientConfigRecord {
   runtime: McpRuntimeSummary;
 }
 
+interface HostedMcpToolSummary {
+  name: string;
+  title?: string;
+  description?: string;
+}
+
+interface HostedMcpResourceSummary {
+  uri: string;
+  title?: string;
+  description?: string;
+}
+
+interface HostedMcpServerSummary {
+  status: string;
+  transport: string;
+  detail: string;
+  command?: string;
+  args?: string[];
+  commandLine?: string;
+  tools: HostedMcpToolSummary[];
+  resources: HostedMcpResourceSummary[];
+}
+
 interface AgentRuntimeSummary {
   id: string;
   kind: string;
@@ -461,6 +484,8 @@ const state = {
   recipeTests: [] as RecipeTestSummary[],
   agentRuntimes: [] as AgentRuntimeSummary[],
   orchestrations: [] as AgentOrchestrationSummary[],
+  hostedMcpServer: undefined as HostedMcpServerSummary | undefined,
+  hostedMcpServerError: undefined as string | undefined,
   mcpConfig: undefined as {
     globalConfig?: McpClientConfigRecord;
     workspaceOverride?: McpClientConfigRecord;
@@ -663,6 +688,13 @@ const elements = {
   mcpHelp: getElement("mcp-help", HTMLElement),
   agentRuntimeList: getElement("agent-runtime-list", HTMLElement),
   agentRuntimeHelp: getElement("agent-runtime-help", HTMLElement),
+  hostedMcpStatus: getElement("mcp-hosted-server-status", HTMLElement),
+  hostedMcpTransport: getElement("mcp-hosted-server-transport", HTMLElement),
+  hostedMcpCommand: getElement("mcp-hosted-server-command", HTMLElement),
+  hostedMcpCommandLine: getElement("mcp-hosted-server-command-line", HTMLElement),
+  hostedMcpToolList: getElement("mcp-hosted-server-tools", HTMLElement),
+  hostedMcpResourceList: getElement("mcp-hosted-server-resources", HTMLElement),
+  hostedMcpHelp: getElement("mcp-hosted-server-help", HTMLElement),
 };
 
 elements.navButtons.forEach((button) => {
@@ -925,6 +957,7 @@ async function initializeAppState(): Promise<void> {
   await loadAgentRuntimes();
   await loadAgentOrchestrations();
   await loadMcpConfig();
+  await loadHostedMcpServer();
   await loadAppReadiness();
 }
 
@@ -1237,6 +1270,14 @@ function applyStaticTranslations(): void {
   } else {
     renderAgentRuntimes();
   }
+  setText("#mcp-hosted-server-title", t("hostedMcp.title"));
+  setText("#mcp-hosted-server-status-label", t("hostedMcp.status"));
+  setText("#mcp-hosted-server-transport-label", t("hostedMcp.transport"));
+  setText("#mcp-hosted-server-command-label", t("hostedMcp.command"));
+  setText("#mcp-hosted-server-command-line-label", t("hostedMcp.commandLine"));
+  setText("#mcp-hosted-server-tools-title", t("hostedMcp.tools"));
+  setText("#mcp-hosted-server-resources-title", t("hostedMcp.resources"));
+  renderHostedMcpServer();
   renderSettingsList();
 
   setText(".capability-detail-panel .eyebrow", t("capability-detail.eyebrow"));
@@ -1403,7 +1444,7 @@ function setMetricLabel(index: number, text: string): void {
 }
 
 function setApprovalGridLabel(index: number, text: string): void {
-  const label = document.querySelectorAll<HTMLElement>(".approval-detail-grid span")[index * 2];
+  const label = document.querySelectorAll<HTMLElement>("#approval-panel .approval-detail-grid > span")[index];
   if (label) label.textContent = text;
 }
 
@@ -1413,12 +1454,12 @@ function setMcpGridLabel(index: number, text: string): void {
 }
 
 function setPromptAppBindingLabel(index: number, text: string): void {
-  const label = document.querySelectorAll<HTMLElement>(".prompt-app-binding-grid span")[index * 2];
+  const label = document.querySelectorAll<HTMLElement>(".prompt-app-binding-grid > span")[index];
   if (label) label.textContent = text;
 }
 
 function setPromptAppInstallationLabel(index: number, text: string): void {
-  const label = document.querySelectorAll<HTMLElement>(".prompt-app-installation-grid span")[index * 2];
+  const label = document.querySelectorAll<HTMLElement>(".prompt-app-installation-grid > span")[index];
   if (label) label.textContent = text;
 }
 
@@ -1439,6 +1480,7 @@ function renderSettingsList(): void {
     ["settings.item.automation.title", "settings.item.automation.detail"],
     ["settings.item.memory.title", "settings.item.memory.detail"],
     ["settings.item.capabilities.title", "settings.item.capabilities.detail"],
+    ["settings.item.hostedMcp.title", "settings.item.hostedMcp.detail"],
     ["settings.item.install.title", "settings.item.install.detail"],
   ] as const;
 
@@ -1496,6 +1538,7 @@ async function saveLanguageSetting(): Promise<void> {
   await loadRecipeTests();
   await loadAgentRuntimes();
   await loadAgentOrchestrations();
+  await loadHostedMcpServer();
   await loadArtifacts();
   await loadAppReadiness();
   renderChatMessages();
@@ -1786,6 +1829,7 @@ async function refreshWorkspaceScopedData(): Promise<void> {
   await loadAgentRuntimes();
   await loadAgentOrchestrations();
   await loadMcpConfig();
+  await loadHostedMcpServer();
   await loadAppReadiness();
 }
 
@@ -1983,6 +2027,19 @@ async function loadAgentRuntimes(): Promise<void> {
     state.agentRuntimes = [];
     renderAgentRuntimes();
   }
+}
+
+async function loadHostedMcpServer(): Promise<void> {
+  try {
+    const payload = await apiJson<{ hostedServer: HostedMcpServerSummary }>("/api/mcp/hosted-server");
+    state.hostedMcpServer = payload.hostedServer;
+    state.hostedMcpServerError = undefined;
+  } catch (error) {
+    state.hostedMcpServer = undefined;
+    state.hostedMcpServerError = errorToMessage(error, t("hostedMcp.loadFailed"));
+  }
+
+  renderHostedMcpServer();
 }
 
 function renderAgentRuntimes(): void {
@@ -2383,6 +2440,81 @@ function describeAgentRuntime(runtime: AgentRuntimeSummary): string {
   }
 
   return runtime.detail;
+}
+
+function renderHostedMcpServer(): void {
+  const hostedServer = state.hostedMcpServer;
+  elements.hostedMcpStatus.textContent = hostedServer
+    ? translatedToken(hostedServer.status)
+    : translatedToken("not-configured");
+  elements.hostedMcpTransport.textContent = hostedServer
+    ? localizeHostedMcpTransport(hostedServer.transport)
+    : t("dynamic.none");
+  elements.hostedMcpCommand.textContent = hostedServer
+    ? hostedServer.command?.trim() || t("dynamic.none")
+    : t("dynamic.none");
+  elements.hostedMcpCommandLine.textContent = hostedServer
+    ? formatHostedMcpCommandLine(hostedServer)
+    : t("dynamic.none");
+
+  if (!hostedServer) {
+    elements.hostedMcpToolList.replaceChildren(createListItem(t("hostedMcp.tools.none")));
+    elements.hostedMcpResourceList.replaceChildren(createListItem(t("hostedMcp.resources.none")));
+    elements.hostedMcpHelp.textContent = state.hostedMcpServerError ?? t("hostedMcp.help.default");
+    return;
+  }
+
+  elements.hostedMcpToolList.replaceChildren(
+    ...(
+      hostedServer.tools.length > 0
+        ? hostedServer.tools.map((tool) => createStaticActionListItem(
+            tool.title?.trim() || tool.name,
+            [
+              tool.title?.trim() && tool.title.trim() !== tool.name ? tool.name : "",
+              tool.description?.trim() ?? "",
+            ].filter(Boolean).join(" / ") || t("dynamic.none"),
+            "configured",
+          ))
+        : [createListItem(t("hostedMcp.tools.none"))]
+    ),
+  );
+  elements.hostedMcpResourceList.replaceChildren(
+    ...(
+      hostedServer.resources.length > 0
+        ? hostedServer.resources.map((resource) => createStaticActionListItem(
+            resource.title?.trim() || resource.uri,
+            [
+              resource.title?.trim() && resource.title.trim() !== resource.uri ? resource.uri : "",
+              resource.description?.trim() ?? "",
+            ].filter(Boolean).join(" / ") || t("dynamic.none"),
+            "configured",
+          ))
+        : [createListItem(t("hostedMcp.resources.none"))]
+    ),
+  );
+  elements.hostedMcpHelp.textContent = describeHostedMcpHelp(hostedServer);
+}
+
+function localizeHostedMcpTransport(value: string): string {
+  return translateKeyOrFallback(`hostedMcp.transport.${value}`, value);
+}
+
+function formatHostedMcpCommandLine(hostedServer: HostedMcpServerSummary): string {
+  const commandLine = hostedServer.commandLine?.trim();
+  if (commandLine) return commandLine;
+
+  const command = hostedServer.command?.trim();
+  const args = Array.isArray(hostedServer.args)
+    ? hostedServer.args.map((entry) => entry.trim()).filter(Boolean)
+    : [];
+  return [command, ...args].filter(Boolean).join(" ") || t("dynamic.none");
+}
+
+function describeHostedMcpHelp(hostedServer: HostedMcpServerSummary): string {
+  const detail = hostedServer.detail?.trim();
+  return detail
+    ? t("hostedMcp.help.detail", { detail: localizeKnownText(detail) })
+    : t("hostedMcp.help.ready");
 }
 
 function describeMcpRuntimeHelp(runtime: McpRuntimeSummary): string {

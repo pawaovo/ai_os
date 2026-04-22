@@ -58,8 +58,10 @@ This scenario is cross-layer because one change fans out into package scripts, E
 #### Electron Main Process Contract
 
 - `main.cjs` must acquire a single-instance lock before showing UI.
+- `main.cjs` hosted server mode (`--mcp-hosted-server`) must bypass the normal desktop single-instance path.
 - `main.cjs` must set `PORT`, `AI_SPACE_SKIP_BUILD`, and `AI_SPACE_DESKTOP_SHELL="electron"` before importing `dev-server.mjs`.
 - `main.cjs` must wait for `GET /api/app/readiness` before calling `BrowserWindow.loadURL(...)`.
+- `main.cjs` hosted server mode must import `mcp-hosted-server.mjs` and run it without opening a window.
 - `BrowserWindow` must keep:
   - `nodeIntegration: false`
   - `contextIsolation: true`
@@ -73,7 +75,7 @@ This scenario is cross-layer because one change fans out into package scripts, E
 - Packaged output root must remain `build/electron`.
 - Extra resources must copy:
   - `product/package.json`
-  - `product/apps/space-desktop/{package.json,README.md,dist,public,scripts/dev-server.mjs,scripts/mcp-runtime.mjs}`
+  - `product/apps/space-desktop/{package.json,README.md,dist,public,scripts/dev-server.mjs,scripts/mcp-runtime.mjs,scripts/mcp-hosted-server.mjs}`
   - built workspace package `dist/**` payloads under `product/packages/**`
   - built package payloads under `product/node_modules/@ai-os/*`
 - `after-pack-electron.mjs` must ensure `Contents/Resources/app/package.json` exists in the packaged app so Electron can resolve packaged metadata consistently.
@@ -131,6 +133,7 @@ Contract details:
 | Electron scripts missing or `main` points elsewhere | `validate-electron-config.mjs` fails | `npm run validate:electron` |
 | Packaged app resources drift from builder config | package config regression test fails | `node --test tests/*.test.mjs` |
 | New runtime helper is imported by packaged server but not copied into resources | packaged app exits before readiness | `npm run validate:electron` + packaged smoke |
+| Hosted MCP server mode is missing from Electron main | packaged summary route looks valid but returned `command + args` cannot be spawned | `npm test` + packaged MCP smoke |
 | Host-specific install path drifts from actual packaging output | readiness and docs show the wrong open path | `npm test` on the host plus manual packaging smoke |
 | UI language changes but server text stays in the old language | mixed-language dashboard after reload or refresh | bilingual smoke with `PATCH /api/settings/language` then `GET /api/app/readiness` |
 | Server never reaches readiness | Electron main exits with non-zero after wait loop | packaged smoke run stderr / exit code |
@@ -179,6 +182,8 @@ Contract details:
   - Launch `build/electron/mac-arm64/AI OS.app/Contents/MacOS/AI OS` with fixed `AI_SPACE_APP_PORT` and isolated `AI_SPACE_STORAGE_DIR`.
   - Assert `curl http://127.0.0.1:<port>/api/app/readiness` returns `install.mode = electron-cross-platform`.
   - Assert the window shows Start/Settings content instead of a blank renderer.
+  - Assert `GET /api/mcp/hosted-server` returns a packaged launch command.
+  - Assert a real MCP client can connect using packaged `command + args`.
 
 ### 7. Wrong vs Correct
 

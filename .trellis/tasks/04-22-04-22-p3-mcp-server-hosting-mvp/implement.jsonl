@@ -1,0 +1,7 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend development guide"}
+{"file": ".trellis/spec/backend/future-mcp-server-boundary-spike.md", "reason": "Hosted server must stay product-owned and bounded"}
+{"file": ".trellis/spec/backend/mcp-transport-runtime.md", "reason": "Current MCP SDK usage and packaging constraints"}
+{"file": ".trellis/spec/backend/electron-desktop-shell.md", "reason": "Packaged resource and smoke expectations"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Feature spans backend script, product API, settings UI, tests, and packaging"}

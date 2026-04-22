@@ -30,6 +30,10 @@ assert(
   config.extraResources.some((entry) => entry.to === "product/apps/space-desktop" && entry.filter?.includes("scripts/mcp-runtime.mjs")),
   "space-desktop MCP runtime helper must be copied for packaged Electron runs.",
 );
+assert(
+  config.extraResources.some((entry) => entry.to === "product/apps/space-desktop" && entry.filter?.includes("scripts/mcp-hosted-server.mjs")),
+  "space-desktop MCP hosted server helper must be copied for packaged Electron runs.",
+);
 
 process.stdout.write("Electron config is valid.\n");
 

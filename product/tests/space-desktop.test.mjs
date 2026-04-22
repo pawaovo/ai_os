@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const productRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const expectedHostBuildCommand = process.platform === "win32"
@@ -158,6 +160,7 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   const packageJson = JSON.parse(await readFile(resolve(productRoot, "package.json"), "utf8"));
   const packageScript = await readFile(resolve(productRoot, "apps/space-desktop/scripts/package-macos.mjs"), "utf8");
   const prepareElectronPackageScript = await readFile(resolve(productRoot, "apps/space-desktop/scripts/prepare-electron-package-output.mjs"), "utf8");
+  const validateElectronConfigScript = await readFile(resolve(productRoot, "apps/space-desktop/scripts/validate-electron-config.mjs"), "utf8");
   const electronMain = await readFile(resolve(productRoot, "apps/space-desktop/electron-app/main.cjs"), "utf8");
   const electronAppPackage = JSON.parse(await readFile(resolve(productRoot, "apps/space-desktop/electron-app/package.json"), "utf8"));
   const electronConfig = await readFile(resolve(productRoot, "electron-builder.config.cjs"), "utf8");
@@ -204,6 +207,14 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(html, /id="mcp-health"/);
   assert.match(html, /id="mcp-runtime-status"/);
   assert.match(html, /id="mcp-runtime-tools"/);
+  assert.match(html, /id="mcp-hosted-server-title"/);
+  assert.match(html, /id="mcp-hosted-server-status"/);
+  assert.match(html, /id="mcp-hosted-server-transport"/);
+  assert.match(html, /id="mcp-hosted-server-command"/);
+  assert.match(html, /id="mcp-hosted-server-command-line"/);
+  assert.match(html, /id="mcp-hosted-server-tools"/);
+  assert.match(html, /id="mcp-hosted-server-resources"/);
+  assert.match(html, /id="mcp-hosted-server-help"/);
   assert.match(html, /id="agent-runtime-title"/);
   assert.match(html, /id="agent-runtime-list"/);
   assert.match(html, /id="agent-runtime-help"/);
@@ -326,20 +337,27 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(electronMain, /sandbox:\s*true/);
   assert.match(electronMain, /webSecurity:\s*true/);
   assert.match(electronMain, /AI_SPACE_DESKTOP_SHELL/);
+  assert.match(electronMain, /--mcp-hosted-server/);
+  assert.match(electronMain, /runHostedMcpServerMode/);
+  assert.match(electronMain, /mcp-hosted-server\.mjs/);
   assert.match(electronConfig, /appId:\s*"ai\.os\.personal"/);
   assert.match(electronConfig, /app:\s*"apps\/space-desktop\/electron-app"/);
   assert.match(electronConfig, /afterPack:\s*"apps\/space-desktop\/scripts\/after-pack-electron\.mjs"/);
   assert.match(electronConfig, /productName:\s*"AI OS"/);
+  assert.match(electronConfig, /scripts\/mcp-hosted-server\.mjs/);
   assert.match(electronConfig, /scripts\/mcp-runtime\.mjs/);
   assert.match(electronConfig, /win:\s*{/);
   assert.match(electronConfig, /target:\s*"nsis"/);
   assert.match(electronConfig, /target:\s*"portable"/);
   assert.match(electronConfig, /product\/node_modules\/@ai-os/);
+  assert.match(validateElectronConfigScript, /scripts\/mcp-hosted-server\.mjs/);
   assert.match(devServer, /ElectronSafeStorageSecretStore/);
   assert.match(devServer, /WindowsProtectedFileSecretStore/);
   assert.match(devServer, /process\.platform === "darwin"\) return new KeychainSecretStore/);
   assert.match(devServer, /\/api\/settings\/language/);
   assert.match(devServer, /createAppReadinessSummary\(language\)/);
+  assert.match(devServer, /\/api\/mcp\/hosted-server/);
+  assert.match(devServer, /createHostedMcpServerSummary/);
   assert.match(devServer, /resolveMacElectronAppPath/);
   assert.match(devServer, /win-unpacked/);
   assert.match(devServer, /safeStorage/);
@@ -357,6 +375,7 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(browserSource, /promptAppInstallationCapability/);
   assert.match(browserSource, /loadMcpConfig/);
   assert.match(browserSource, /saveMcpConfigFromForm/);
+  assert.match(browserSource, /\/api\/mcp\/hosted-server/);
   assert.match(browserSource, /loadAgentRuntimes/);
   assert.match(browserSource, /renderAgentRuntimes/);
   assert.match(browserSource, /localizeExecutorChoice/);
@@ -904,6 +923,127 @@ test("space desktop MCP args parser preserves quoted and escaped segments", asyn
       "escaped value",
     ]);
   } finally {
+    await appServer.stop();
+    await rm(storageDir, { recursive: true, force: true });
+  }
+});
+
+test("space desktop hosted MCP server exposes a real stdio contract for external MCP clients", async () => {
+  const storageDir = await mkdtemp(`${tmpdir()}/ai-os-mcp-hosted-`);
+  const appPort = await getAvailablePort();
+  const appServer = startSpaceDesktopServer({
+    port: appPort,
+    storageDir,
+  });
+  let client;
+  let transport;
+
+  try {
+    await waitForHttp(`http://127.0.0.1:${appPort}/`);
+
+    const workspace = await postJson(`http://127.0.0.1:${appPort}/api/workspaces`, {
+      name: "Hosted MCP Workspace",
+      path: storageDir,
+    });
+    await patchJson(`http://127.0.0.1:${appPort}/api/settings/workspace-selection`, {
+      workspaceId: workspace.workspace.id,
+    });
+    const thread = await postJson(`http://127.0.0.1:${appPort}/api/threads`, {
+      title: "Hosted MCP Thread",
+    });
+    const artifact = await postJson(`http://127.0.0.1:${appPort}/api/artifacts`, {
+      title: "Hosted MCP Artifact",
+      content: "# Hosted MCP Artifact\n\nCreated by HTTP API for hosted MCP integration coverage.",
+      workspaceId: workspace.workspace.id,
+      threadId: thread.thread.id,
+      source: "manual",
+    });
+
+    const payload = await getJson(`http://127.0.0.1:${appPort}/api/mcp/hosted-server`);
+    const hostedServer = payload.hostedServer;
+
+    assert.equal(hostedServer.status, "ready");
+    assert.equal(hostedServer.transport, "stdio");
+    assert.equal(typeof hostedServer.detail, "string");
+    assert.equal(typeof hostedServer.command, "string");
+    assert.equal(Array.isArray(hostedServer.args), true);
+    assert.equal(hostedServer.args.length > 0, true);
+    assert.equal(typeof hostedServer.commandLine, "string");
+    assert.equal(hostedServer.commandLine, formatCommandLine(hostedServer.command, hostedServer.args));
+    assert.equal(Array.isArray(hostedServer.tools), true);
+    assert.equal(Array.isArray(hostedServer.resources), true);
+    assert.equal(hostedServer.tools.some((tool) => isWorkspaceCatalogEntry(tool)), true);
+    assert.equal(hostedServer.tools.some((tool) => isArtifactOrCapabilityCatalogEntry(tool)), true);
+    assert.equal(hostedServer.resources.some((resource) => isWorkspaceCatalogEntry(resource)), true);
+    assert.equal(hostedServer.resources.some((resource) => isArtifactOrCapabilityCatalogEntry(resource)), true);
+
+    transport = new StdioClientTransport({
+      command: hostedServer.command,
+      args: hostedServer.args,
+      stderr: "pipe",
+    });
+    client = new Client({
+      name: "space-desktop-test",
+      version: "1.0.0",
+    });
+
+    await client.connect(transport, { timeout: 4_000 });
+
+    assert.equal(client.getServerVersion()?.name, "ai-os-hosted-server");
+    assert.equal(client.getServerVersion()?.version, "1.0.0");
+    assert.equal(Boolean(client.getServerCapabilities()?.tools), true);
+    assert.equal(Boolean(client.getServerCapabilities()?.resources), true);
+
+    const listedTools = await client.listTools(undefined, { timeout: 4_000 });
+    const listedResources = await client.listResources(undefined, { timeout: 4_000 });
+    const workspaceTool = findCatalogEntry(listedTools.tools, isWorkspaceCatalogEntry);
+    const detailTool = findCatalogEntry(listedTools.tools, isArtifactOrCapabilityCatalogEntry);
+    const workspaceResource = findCatalogEntry(listedResources.resources, isWorkspaceCatalogEntry);
+    const detailResource = findCatalogEntry(listedResources.resources, isArtifactOrCapabilityCatalogEntry);
+
+    assert.notEqual(workspaceTool, undefined);
+    assert.notEqual(detailTool, undefined);
+    assert.notEqual(workspaceResource, undefined);
+    assert.notEqual(detailResource, undefined);
+
+    assert.deepEqual(
+      listedTools.tools.map((tool) => tool.name).sort(),
+      hostedServer.tools.map((tool) => tool.name).sort(),
+    );
+    assert.deepEqual(
+      listedResources.resources.map((resource) => resource.uri).sort(),
+      hostedServer.resources.map((resource) => resource.uri).sort(),
+    );
+
+    for (const resource of hostedServer.resources) {
+      const listedResource = listedResources.resources.find((item) => item.uri === resource.uri);
+      assert.notEqual(listedResource, undefined);
+      assert.equal(listedResource.title, resource.title);
+    }
+
+    const workspaceResourceResult = await client.readResource({ uri: workspaceResource.uri }, { timeout: 4_000 });
+    const detailResourceResult = await client.readResource({ uri: detailResource.uri }, { timeout: 4_000 });
+    const workspaceToolResult = await client.callTool({ name: workspaceTool.name }, undefined, { timeout: 4_000 });
+    const detailToolResult = await client.callTool({ name: detailTool.name }, undefined, { timeout: 4_000 });
+    const workspaceResourceText = readMcpText(workspaceResourceResult.contents);
+    const detailResourceText = readMcpText(detailResourceResult.contents);
+    const workspaceToolText = readMcpText(workspaceToolResult.content);
+    const detailToolText = readMcpText(detailToolResult.content);
+
+    assertHostedWorkspaceSummary(workspaceResourceText, {
+      workspaceName: workspace.workspace.name,
+      threadCount: 1,
+      artifactCount: 1,
+    });
+    assertHostedWorkspaceSummary(workspaceToolText, {
+      workspaceName: workspace.workspace.name,
+      threadCount: 1,
+      artifactCount: 1,
+    });
+    assertHostedArtifactOrCapabilitySummary(detailResource, detailResourceText, artifact.artifact.title);
+    assertHostedArtifactOrCapabilitySummary(detailTool, detailToolText, artifact.artifact.title);
+  } finally {
+    await closeMcpClientQuietly(client, transport);
     await appServer.stop();
     await rm(storageDir, { recursive: true, force: true });
   }
@@ -2184,6 +2324,88 @@ function startSpaceDesktopServer({ port, storageDir, envOverrides = {} }) {
       return stderr;
     },
   };
+}
+
+function formatCommandLine(command, args = []) {
+  return [command, ...args].map(quoteCommandPart).join(" ");
+}
+
+function quoteCommandPart(value) {
+  return /\s/.test(value) ? JSON.stringify(value) : value;
+}
+
+function findCatalogEntry(entries, predicate) {
+  return entries.find(predicate);
+}
+
+function isWorkspaceCatalogEntry(entry) {
+  return /\bworkspace\b/i.test(readCatalogText(entry));
+}
+
+function isArtifactOrCapabilityCatalogEntry(entry) {
+  return /(artifact|capabilit)/i.test(readCatalogText(entry));
+}
+
+function readCatalogText(entry) {
+  return [
+    entry?.name,
+    entry?.title,
+    entry?.uri,
+    entry?.description,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function readMcpText(items = []) {
+  return items
+    .map((item) => {
+      if (!item) return "";
+      if (typeof item.text === "string") return item.text;
+      if (item.type === "text" && typeof item.text === "string") return item.text;
+      if (item.type === "resource" && item.resource && typeof item.resource.text === "string") return item.resource.text;
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function assertHostedWorkspaceSummary(text, { workspaceName, threadCount, artifactCount }) {
+  assert.match(text, /# Active Workspace/);
+  assert.match(text, new RegExp(`Name:\\s+${escapeRegExp(workspaceName)}`));
+  assert.match(text, new RegExp(`Threads:\\s+${threadCount}`));
+  assert.match(text, new RegExp(`Artifacts:\\s+${artifactCount}`));
+  assert.match(text, /Enabled capabilities:\s+\d+\/\d+/);
+}
+
+function assertHostedArtifactOrCapabilitySummary(entry, text, artifactTitle) {
+  if (/artifact/i.test(readCatalogText(entry))) {
+    assert.match(text, /# Recent Artifacts/);
+    assert.match(text, new RegExp(escapeRegExp(artifactTitle)));
+    return;
+  }
+
+  assert.match(text, /# Enabled Capabilities/);
+  assert.match(text, /(Workspace Summary|Memory Brief|Automation Overview)/);
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+async function closeMcpClientQuietly(client, transport) {
+  if (client) {
+    try {
+      await client.close();
+      return;
+    } catch {}
+  }
+
+  if (transport) {
+    try {
+      await transport.close();
+    } catch {}
+  }
 }
 
 async function startMockOpenAiProvider() {

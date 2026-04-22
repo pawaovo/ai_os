@@ -17,10 +17,11 @@ The current product step includes:
 - workspace runtime
 - Prompt App Draft contract
 - local MCP client config projection
+- local stdio MCP hosted server MVP
 
 The current product step does **not** include:
 
-- MCP server hosting
+- HTTP or streamable MCP hosting
 - transport session lifecycle
 - marketplace/server discovery
 - remote bridge/session relay
@@ -48,7 +49,7 @@ The current product step does **not** include:
 #### Future MCP Server Layer Should Own
 
 - server capability advertisement
-- server lifecycle and isolation
+- broader server lifecycle and isolation
 - transport/session negotiation
 - server-side tool exposure boundary
 
@@ -61,7 +62,7 @@ The current product step does **not** include:
 
 ### 5. Stop Rules
 
-- Do not implement MCP server hosting before MCP client config is stable.
+- Do not implement broader hosted server discovery or remote publish flows before local hosted server boundaries are stable.
 - Do not put workspace, run, or artifact ownership into an MCP server layer.
 - Do not mix provider transport and MCP server transport into one config contract.
 - Do not treat MCP server work as a prerequisite for current local Prompt App or workspace runtime flows.
@@ -84,4 +85,4 @@ The current product step does **not** include:
 
 ### 7. Validation
 
-This spike is documentation-only. No product test changes are required for the first boundary note.
+This spike remains a boundary document. Concrete local hosted server behavior is defined in `mcp-server-hosting-mvp.md`.

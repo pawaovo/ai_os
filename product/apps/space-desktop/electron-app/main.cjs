@@ -4,53 +4,84 @@ const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 
 const appName = "AI OS";
+const hostedMcpServerMode = process.argv.includes("--mcp-hosted-server");
 
 let mainWindow;
 let serverUrl;
 
 app.setName(appName);
 
-const singleInstanceLock = app.requestSingleInstanceLock();
-if (!singleInstanceLock) {
-  app.quit();
+if (!hostedMcpServerMode) {
+  const singleInstanceLock = app.requestSingleInstanceLock();
+  if (!singleInstanceLock) {
+    app.quit();
+  }
 }
 
-app.on("second-instance", () => {
-  if (!mainWindow) return;
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  mainWindow.focus();
-});
+if (hostedMcpServerMode) {
+  runHostedMcpServerMode().catch((error) => {
+    process.stderr.write(`Electron hosted MCP server failed: ${error instanceof Error ? error.message : String(error)}\n`);
+    app.exit(1);
+  });
+} else {
+  app.on("second-instance", () => {
+    if (!mainWindow) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  });
 
-app.whenReady().then(async () => {
-  const port = await resolvePort();
-  const productRoot = resolveProductRoot();
-  serverUrl = `http://127.0.0.1:${port}`;
+  app.whenReady().then(async () => {
+    const port = await resolvePort();
+    const productRoot = resolveProductRoot();
+    serverUrl = `http://127.0.0.1:${port}`;
 
-  process.env.PORT = String(port);
-  process.env.AI_SPACE_SKIP_BUILD = "1";
-  process.env.AI_SPACE_DESKTOP_SHELL = "electron";
-  process.env.AI_SPACE_STORAGE_DIR = process.env.AI_SPACE_STORAGE_DIR
-    ?? path.join(app.getPath("userData"), "profile");
+    process.env.PORT = String(port);
+    process.env.AI_SPACE_SKIP_BUILD = "1";
+    process.env.AI_SPACE_DESKTOP_SHELL = "electron";
+    process.env.AI_SPACE_STORAGE_DIR = process.env.AI_SPACE_STORAGE_DIR
+      ?? path.join(app.getPath("userData"), "profile");
 
-  await import(pathToFileURL(path.join(productRoot, "apps/space-desktop/scripts/dev-server.mjs")).href);
-  await waitForServer(`${serverUrl}/api/app/readiness`);
-  createMainWindow();
-}).catch((error) => {
-  process.stderr.write(`Electron main process failed: ${error instanceof Error ? error.message : String(error)}\n`);
-  app.exit(1);
-});
+    await import(pathToFileURL(path.join(productRoot, "apps/space-desktop/scripts/dev-server.mjs")).href);
+    await waitForServer(`${serverUrl}/api/app/readiness`);
+    createMainWindow();
+  }).catch((error) => {
+    process.stderr.write(`Electron main process failed: ${error instanceof Error ? error.message : String(error)}\n`);
+    app.exit(1);
+  });
 
-app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0 && serverUrl) createMainWindow();
-});
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0 && serverUrl) createMainWindow();
+  });
 
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
-});
+  app.on("window-all-closed", () => {
+    if (process.platform !== "darwin") app.quit();
+  });
+}
 
 function resolveProductRoot() {
   if (app.isPackaged) return path.join(process.resourcesPath, "product");
   return path.resolve(__dirname, "../../..");
+}
+
+async function runHostedMcpServerMode() {
+  await app.whenReady();
+  process.env.AI_SPACE_SKIP_BUILD = "1";
+  process.env.AI_SPACE_DESKTOP_SHELL = "electron";
+  process.env.AI_SPACE_STORAGE_DIR = resolveHostedMcpStorageRoot();
+  const productRoot = resolveProductRoot();
+  const hostedServer = await import(pathToFileURL(path.join(productRoot, "apps/space-desktop/scripts/mcp-hosted-server.mjs")).href);
+  await hostedServer.runHostedMcpServer({
+    storageRoot: process.env.AI_SPACE_STORAGE_DIR,
+  });
+}
+
+function resolveHostedMcpStorageRoot() {
+  const flagIndex = process.argv.indexOf("--storage-dir");
+  if (flagIndex >= 0 && process.argv[flagIndex + 1]) {
+    return path.resolve(process.argv[flagIndex + 1]);
+  }
+  return process.env.AI_SPACE_STORAGE_DIR
+    ?? path.join(app.getPath("userData"), "profile");
 }
 
 function createMainWindow() {
