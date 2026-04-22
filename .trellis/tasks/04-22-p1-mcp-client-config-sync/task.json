@@ -3,45 +3,20 @@
   "name": "p1-mcp-client-config-sync",
   "title": "P1 MCP Client Config Sync",
   "description": "",
-  "status": "planning",
-  "dev_type": null,
+  "status": "completed",
+  "dev_type": "fullstack",
   "scope": null,
   "package": null,
   "priority": "P2",
   "creator": "zzz",
   "assignee": "zzz",
   "createdAt": "2026-04-22",
-  "completedAt": null,
+  "completedAt": "2026-04-22",
   "branch": null,
   "base_branch": "codex/bilingual-app-language-toggle",
   "worktree_path": null,
-  "current_phase": 0,
-  "next_action": [
-    {
-      "phase": 1,
-      "action": "brainstorm"
-    },
-    {
-      "phase": 2,
-      "action": "research"
-    },
-    {
-      "phase": 3,
-      "action": "implement"
-    },
-    {
-      "phase": 4,
-      "action": "check"
-    },
-    {
-      "phase": 5,
-      "action": "update-spec"
-    },
-    {
-      "phase": 6,
-      "action": "record-session"
-    }
-  ],
+  "current_phase": 6,
+  "next_action": [],
   "commit": null,
   "pr_url": null,
   "subtasks": [],

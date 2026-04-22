@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createServer } from "node:http";
+import { accessSync, constants as fsConstants } from "node:fs";
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -143,6 +144,16 @@ async function handleRequest(request, response) {
 
   if (request.method === "PATCH" && pathname === "/api/settings/workspace-selection") {
     await handleWorkspaceSelection(request, response);
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/mcp/config") {
+    await handleGetMcpConfig(response);
+    return;
+  }
+
+  if (request.method === "PATCH" && pathname === "/api/mcp/config") {
+    await handleSetMcpConfig(request, response);
     return;
   }
 
@@ -723,6 +734,32 @@ async function handleWorkspaceSelection(request, response) {
     const workspaceId = readRequiredString(body.workspaceId, "workspaceId");
     appStore.activateWorkspace(workspaceId);
     writeJson(response, 200, { activeWorkspaceId: workspaceId });
+  } catch (error) {
+    writeJson(response, 400, { error: sanitizeErrorMessage(error) });
+  }
+}
+
+async function handleGetMcpConfig(response) {
+  writeJson(response, 200, appStore.getMcpConfigSummary(appStore.getSetting("activeWorkspaceId")));
+}
+
+async function handleSetMcpConfig(request, response) {
+  try {
+    const body = await readJsonBody(request);
+    const scope = readRequiredString(body.scope, "scope");
+    const config = parseMcpClientConfigInput(body);
+
+    if (scope === "global") {
+      appStore.setMcpGlobalConfig(config);
+    } else if (scope === "workspace") {
+      const workspaceId = appStore.getSetting("activeWorkspaceId");
+      if (!workspaceId) throw new Error("Select a workspace before saving a workspace MCP override.");
+      appStore.setWorkspaceMcpConfig(workspaceId, config);
+    } else {
+      throw new Error("Unsupported MCP config scope.");
+    }
+
+    writeJson(response, 200, appStore.getMcpConfigSummary(appStore.getSetting("activeWorkspaceId")));
   } catch (error) {
     writeJson(response, 400, { error: sanitizeErrorMessage(error) });
   }
@@ -2833,6 +2870,24 @@ function readOptionalString(value) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }
 
+function parseMcpClientConfigInput(value) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("MCP config body must be a JSON object.");
+  }
+
+  const enabledRaw = value.enabled;
+  if (typeof enabledRaw !== "boolean") {
+    throw new Error("MCP config field is required: enabled");
+  }
+
+  return {
+    enabled: enabledRaw,
+    transport: "stdio",
+    command: readOptionalString(value.command),
+    argsText: readOptionalString(value.argsText),
+  };
+}
+
 function readRequiredBoolean(value, field) {
   if (typeof value !== "boolean") throw new Error(`Missing required field: ${field}`);
   return value;
@@ -2918,6 +2973,7 @@ class SqliteAppStore {
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         path TEXT,
+        mcp_config_json TEXT,
         trust_level TEXT NOT NULL DEFAULT 'strict',
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
@@ -3078,6 +3134,7 @@ class SqliteAppStore {
     `);
     this.addColumnIfMissing("threads", "workspace_id", "TEXT");
     this.addColumnIfMissing("workspaces", "trust_level", "TEXT NOT NULL DEFAULT 'strict'");
+    this.addColumnIfMissing("workspaces", "mcp_config_json", "TEXT");
     this.addColumnIfMissing("approvals", "executor_choice", "TEXT NOT NULL DEFAULT 'mock'");
     this.addColumnIfMissing("runs", "memory_usage_json", "TEXT");
     this.addColumnIfMissing("runs", "memory_trace_json", "TEXT");
@@ -3140,6 +3197,38 @@ class SqliteAppStore {
 
   deleteSetting(key) {
     this.db.prepare("DELETE FROM app_settings WHERE key = ?").run(key);
+  }
+
+  getMcpGlobalConfig() {
+    return parseStoredJson(this.getSetting("mcp_global_config_json"), undefined);
+  }
+
+  setMcpGlobalConfig(config) {
+    this.setSetting("mcp_global_config_json", JSON.stringify(config));
+    return this.getMcpGlobalConfig();
+  }
+
+  getWorkspaceMcpConfig(workspaceId) {
+    if (!workspaceId) return undefined;
+    const row = this.db.prepare("SELECT mcp_config_json FROM workspaces WHERE id = ?").get(workspaceId);
+    return parseStoredJson(row?.mcp_config_json, undefined);
+  }
+
+  setWorkspaceMcpConfig(workspaceId, config) {
+    this.db.prepare("UPDATE workspaces SET mcp_config_json = ?, updated_at = ? WHERE id = ?")
+      .run(JSON.stringify(config), nowIso(), workspaceId);
+    return this.getWorkspaceMcpConfig(workspaceId);
+  }
+
+  getMcpConfigSummary(workspaceId) {
+    const globalConfig = this.getMcpGlobalConfig();
+    const workspaceOverride = this.getWorkspaceMcpConfig(workspaceId);
+    const resolvedConfig = resolveMcpClientConfig(globalConfig, workspaceOverride, workspaceId);
+    return {
+      ...(globalConfig ? { globalConfig } : {}),
+      ...(workspaceOverride ? { workspaceOverride } : {}),
+      resolvedConfig,
+    };
   }
 
   listWorkspaces() {
@@ -4285,6 +4374,75 @@ function createDefaultPromptAppRuntimeBinding(input = {}) {
     toolPolicy: "workspace-default",
     artifactPolicy: "workspace-artifact",
   };
+}
+
+function resolveMcpClientConfig(globalConfig, workspaceOverride, workspaceId) {
+  const source = workspaceOverride ? "workspace" : globalConfig ? "global" : "none";
+  const base = workspaceOverride ?? globalConfig ?? { enabled: false, transport: "stdio" };
+  const commandHealth = evaluateLocalCommandHealth(base.command);
+
+  return {
+    enabled: base.enabled,
+    transport: "stdio",
+    ...(base.command ? { command: base.command } : {}),
+    ...(base.argsText ? { argsText: base.argsText } : {}),
+    args: parseArgsText(base.argsText),
+    source,
+    ...(workspaceId ? { workspaceId } : {}),
+    health: {
+      status: !base.enabled
+        ? "disabled"
+        : !base.command
+          ? "not-configured"
+          : commandHealth.available
+            ? "ready"
+            : "failed",
+      detail: !base.enabled
+        ? "MCP client config is disabled."
+        : !base.command
+          ? "Set an MCP client command to resolve an effective config."
+          : commandHealth.message,
+    },
+  };
+}
+
+function parseArgsText(value) {
+  if (!value) return [];
+  return value.split(/\s+/).map((item) => item.trim()).filter(Boolean);
+}
+
+function evaluateLocalCommandHealth(command) {
+  if (!command) {
+    return {
+      available: false,
+      message: "No MCP client command configured.",
+    };
+  }
+
+  try {
+    if (command.includes("/") || command.includes("\\")) {
+      accessSync(resolve(command), fsConstants.X_OK);
+      return {
+        available: true,
+        message: `Command is available: ${resolve(command)}`,
+      };
+    }
+
+    const lookupCommand = process.platform === "win32" ? "where" : "which";
+    const resolvedCommand = execFileSync(lookupCommand, [command], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim().split(/\r?\n/)[0];
+    return {
+      available: true,
+      message: `Command is available: ${resolvedCommand}`,
+    };
+  } catch {
+    return {
+      available: false,
+      message: `Command is not available on PATH: ${command}`,
+    };
+  }
 }
 
 function createPromptAppInstallation(row) {

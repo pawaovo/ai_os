@@ -330,6 +330,23 @@ interface CapabilitySummary extends CapabilityRecord {}
 interface RecipeSummary extends PromptAppDraftRecord {}
 interface RecipeTestSummary extends RecipeTestRecord {}
 
+interface McpClientConfigRecord {
+  enabled: boolean;
+  transport: "stdio";
+  command?: string;
+  argsText?: string;
+}
+
+interface McpResolvedConfig extends McpClientConfigRecord {
+  source: "global" | "workspace" | "none";
+  args: string[];
+  workspaceId?: string;
+  health: {
+    status: string;
+    detail: string;
+  };
+}
+
 interface LiveRunState {
   sessionId?: string;
   runId: string;
@@ -380,6 +397,12 @@ const state = {
   capabilityRuns: [] as CapabilityRunRecord[],
   recipes: [] as RecipeSummary[],
   recipeTests: [] as RecipeTestSummary[],
+  mcpConfig: undefined as {
+    globalConfig?: McpClientConfigRecord;
+    workspaceOverride?: McpClientConfigRecord;
+    resolvedConfig: McpResolvedConfig;
+  } | undefined,
+  mcpConfigScope: "global" as "global" | "workspace",
   memoryUsage: [] as RetrievedMemory[],
   executorStatuses: [] as ExecutorStatusSummary[],
   appReadiness: undefined as AppReadinessSummary | undefined,
@@ -549,6 +572,15 @@ const elements = {
   artifactPreview: getElement("artifact-preview", HTMLElement),
   artifactHelp: getElement("artifact-help", HTMLElement),
   languageSelect: getElement("language-select", HTMLSelectElement),
+  mcpConfigForm: getElement("mcp-config-form", HTMLFormElement),
+  mcpConfigScope: getElement("mcp-config-scope", HTMLSelectElement),
+  mcpEnabledSelect: getElement("mcp-enabled-select", HTMLSelectElement),
+  mcpCommandInput: getElement("mcp-command-input", HTMLInputElement),
+  mcpArgsInput: getElement("mcp-args-input", HTMLInputElement),
+  mcpSaveButton: getElement("mcp-save-button", HTMLButtonElement),
+  mcpSource: getElement("mcp-source", HTMLElement),
+  mcpHealth: getElement("mcp-health", HTMLElement),
+  mcpHelp: getElement("mcp-help", HTMLElement),
 };
 
 elements.navButtons.forEach((button) => {
@@ -559,6 +591,16 @@ elements.navButtons.forEach((button) => {
 
 elements.languageSelect.addEventListener("change", () => {
   void saveLanguageSetting();
+});
+
+elements.mcpConfigScope.addEventListener("change", () => {
+  state.mcpConfigScope = elements.mcpConfigScope.value === "workspace" ? "workspace" : "global";
+  renderMcpConfig();
+});
+
+elements.mcpConfigForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void saveMcpConfigFromForm();
 });
 
 elements.appReadinessList.addEventListener("click", (event) => {
@@ -779,6 +821,7 @@ async function initializeAppState(): Promise<void> {
   await loadCapabilityRuns();
   await loadRecipes();
   await loadRecipeTests();
+  await loadMcpConfig();
   await loadAppReadiness();
 }
 
@@ -1034,6 +1077,24 @@ function applyStaticTranslations(): void {
   setControlLabel(elements.languageSelect, t("language.label"));
   setOptionText(elements.languageSelect, "en", t("language.en"));
   setOptionText(elements.languageSelect, "zh-CN", t("language.zh-CN"));
+  setControlLabel(elements.mcpConfigScope, t("mcp.scope"));
+  setOptionText(elements.mcpConfigScope, "global", t("mcp.scope.global"));
+  setOptionText(elements.mcpConfigScope, "workspace", t("mcp.scope.workspace"));
+  setControlLabel(elements.mcpEnabledSelect, t("mcp.enabled"));
+  setOptionText(elements.mcpEnabledSelect, "enabled", t("mcp.enabled.true"));
+  setOptionText(elements.mcpEnabledSelect, "disabled", t("mcp.enabled.false"));
+  setControlLabel(elements.mcpCommandInput, t("mcp.command"));
+  setPlaceholder(elements.mcpCommandInput, t("mcp.command.placeholder"));
+  setControlLabel(elements.mcpArgsInput, t("mcp.args"));
+  setPlaceholder(elements.mcpArgsInput, t("mcp.args.placeholder"));
+  elements.mcpSaveButton.textContent = t("mcp.button.save");
+  setMcpGridLabel(0, t("mcp.source"));
+  setMcpGridLabel(1, t("mcp.health"));
+  if (!state.mcpConfig) {
+    elements.mcpHelp.textContent = t("mcp.help.default");
+    elements.mcpSource.textContent = t("dynamic.none");
+    elements.mcpHealth.textContent = translatedToken("not-configured");
+  }
   renderSettingsList();
 
   setText(".capability-detail-panel .eyebrow", t("capability-detail.eyebrow"));
@@ -1191,6 +1252,11 @@ function setMetricLabel(index: number, text: string): void {
 
 function setApprovalGridLabel(index: number, text: string): void {
   const label = document.querySelectorAll<HTMLElement>(".approval-detail-grid span")[index * 2];
+  if (label) label.textContent = text;
+}
+
+function setMcpGridLabel(index: number, text: string): void {
+  const label = document.querySelectorAll<HTMLElement>(".mcp-config-grid span")[index];
   if (label) label.textContent = text;
 }
 
@@ -1555,6 +1621,7 @@ async function refreshWorkspaceScopedData(): Promise<void> {
   await loadCapabilities();
   await loadRecipes();
   await loadRecipeTests();
+  await loadMcpConfig();
   await loadAppReadiness();
 }
 
@@ -1721,6 +1788,78 @@ function fillWorkspaceForm(workspace: WorkspaceSummary): void {
 
 function getActiveWorkspace(): WorkspaceSummary | undefined {
   return state.workspaces.find((workspace) => workspace.id === state.activeWorkspaceId);
+}
+
+async function loadMcpConfig(): Promise<void> {
+  try {
+    const payload = await apiJson<{
+      globalConfig?: McpClientConfigRecord;
+      workspaceOverride?: McpClientConfigRecord;
+      resolvedConfig: McpResolvedConfig;
+    }>("/api/mcp/config");
+    state.mcpConfig = payload;
+    if (state.mcpConfigScope === "workspace" && !state.activeWorkspaceId) {
+      state.mcpConfigScope = "global";
+    }
+    renderMcpConfig();
+  } catch (error) {
+    elements.mcpHelp.textContent = errorToMessage(error, t("mcp.loadFailed"));
+    state.mcpConfig = undefined;
+    renderMcpConfig();
+  }
+}
+
+function renderMcpConfig(): void {
+  const scope = state.mcpConfigScope;
+  elements.mcpConfigScope.value = scope;
+  const selectedConfig = scope === "workspace"
+    ? state.mcpConfig?.workspaceOverride
+    : state.mcpConfig?.globalConfig;
+  elements.mcpEnabledSelect.value = (selectedConfig?.enabled ?? false) ? "enabled" : "disabled";
+  elements.mcpCommandInput.value = selectedConfig?.command ?? "";
+  elements.mcpArgsInput.value = selectedConfig?.argsText ?? "";
+  elements.mcpSource.textContent = state.mcpConfig?.resolvedConfig
+    ? translateKeyOrFallback(`mcp.sourceValue.${state.mcpConfig.resolvedConfig.source}`, state.mcpConfig.resolvedConfig.source)
+    : t("dynamic.none");
+  elements.mcpHealth.textContent = state.mcpConfig?.resolvedConfig
+    ? translatedToken(state.mcpConfig.resolvedConfig.health.status)
+    : translatedToken("not-configured");
+
+  if (!state.mcpConfig) {
+    elements.mcpHelp.textContent = t("mcp.help.default");
+    return;
+  }
+
+  elements.mcpHelp.textContent = t("mcp.help.resolved", {
+    source: translateKeyOrFallback(`mcp.sourceValue.${state.mcpConfig.resolvedConfig.source}`, state.mcpConfig.resolvedConfig.source),
+    detail: state.mcpConfig.resolvedConfig.health.detail,
+  });
+}
+
+async function saveMcpConfigFromForm(): Promise<void> {
+  elements.mcpSaveButton.disabled = true;
+  try {
+    const payload = await apiJson<{
+      globalConfig?: McpClientConfigRecord;
+      workspaceOverride?: McpClientConfigRecord;
+      resolvedConfig: McpResolvedConfig;
+    }>("/api/mcp/config", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        scope: state.mcpConfigScope,
+        enabled: elements.mcpEnabledSelect.value === "enabled",
+        command: elements.mcpCommandInput.value,
+        argsText: elements.mcpArgsInput.value,
+      }),
+    });
+    state.mcpConfig = payload;
+    renderMcpConfig();
+  } catch (error) {
+    elements.mcpHelp.textContent = errorToMessage(error, t("mcp.saveFailed"));
+  } finally {
+    elements.mcpSaveButton.disabled = false;
+  }
 }
 
 async function loadProviders(): Promise<void> {

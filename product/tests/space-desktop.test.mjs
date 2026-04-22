@@ -195,6 +195,11 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(html, /Capabilities And Forge/);
   assert.match(html, /Local Install/);
   assert.match(html, /id="settings-title"/);
+  assert.match(html, /id="mcp-config-form"/);
+  assert.match(html, /id="mcp-config-scope"/);
+  assert.match(html, /id="mcp-command-input"/);
+  assert.match(html, /id="mcp-source"/);
+  assert.match(html, /id="mcp-health"/);
   assert.match(html, /id="memory-title"/);
   assert.match(html, /id="memory-form"/);
   assert.match(html, /id="memory-scope"/);
@@ -326,6 +331,8 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(browserSource, /promptAppBindingWorkspace/);
   assert.match(browserSource, /renderPromptAppInstallation/);
   assert.match(browserSource, /promptAppInstallationCapability/);
+  assert.match(browserSource, /loadMcpConfig/);
+  assert.match(browserSource, /saveMcpConfigFromForm/);
   assert.match(browserSource, /localizeExecutorChoice/);
   assert.match(browserSource, /localizeApprovalCategory/);
   assert.match(browserSource, /dynamic\.readiness\.summary/);
@@ -741,6 +748,67 @@ test("space desktop dev server persists providers, threads, and messages without
     await restartedServer?.stop();
     await appServer.stop();
     await providerServer.stop();
+    await rm(storageDir, { recursive: true, force: true });
+  }
+});
+
+test("space desktop MCP config sync resolves global defaults and workspace overrides", async () => {
+  const storageDir = await mkdtemp(`${tmpdir()}/ai-os-mcp-`);
+  const appPort = await getAvailablePort();
+  const appServer = startSpaceDesktopServer({
+    port: appPort,
+    storageDir,
+  });
+
+  try {
+    await waitForHttp(`http://127.0.0.1:${appPort}/`);
+
+    const empty = await getJson(`http://127.0.0.1:${appPort}/api/mcp/config`);
+    assert.equal(empty.resolvedConfig.source, "none");
+    assert.equal(empty.resolvedConfig.health.status, "disabled");
+
+    const globalConfig = await patchJson(`http://127.0.0.1:${appPort}/api/mcp/config`, {
+      scope: "global",
+      enabled: true,
+      command: process.execPath,
+      argsText: "--version",
+    });
+    assert.equal(globalConfig.globalConfig.command, process.execPath);
+    assert.equal(globalConfig.resolvedConfig.source, "global");
+    assert.equal(globalConfig.resolvedConfig.health.status, "ready");
+    assert.deepEqual(globalConfig.resolvedConfig.args, ["--version"]);
+
+    const workspace = await postJson(`http://127.0.0.1:${appPort}/api/workspaces`, {
+      name: "MCP Workspace",
+      path: storageDir,
+    });
+    const otherWorkspace = await postJson(`http://127.0.0.1:${appPort}/api/workspaces`, {
+      name: "Other MCP Workspace",
+      path: storageDir,
+    });
+    await patchJson(`http://127.0.0.1:${appPort}/api/settings/workspace-selection`, {
+      workspaceId: workspace.workspace.id,
+    });
+
+    const workspaceOverride = await patchJson(`http://127.0.0.1:${appPort}/api/mcp/config`, {
+      scope: "workspace",
+      enabled: true,
+      command: "definitely-missing-mcp-command",
+      argsText: "--stdio",
+    });
+    assert.equal(workspaceOverride.workspaceOverride.command, "definitely-missing-mcp-command");
+    assert.equal(workspaceOverride.resolvedConfig.source, "workspace");
+    assert.equal(workspaceOverride.resolvedConfig.health.status, "failed");
+
+    await patchJson(`http://127.0.0.1:${appPort}/api/settings/workspace-selection`, {
+      workspaceId: otherWorkspace.workspace.id,
+    });
+    const switched = await getJson(`http://127.0.0.1:${appPort}/api/mcp/config`);
+    assert.equal(switched.resolvedConfig.source, "global");
+    assert.equal(switched.workspaceOverride, undefined);
+    assert.equal(switched.resolvedConfig.health.status, "ready");
+  } finally {
+    await appServer.stop();
     await rm(storageDir, { recursive: true, force: true });
   }
 });

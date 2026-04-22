@@ -17,6 +17,7 @@ This directory contains guidelines for backend development. Fill in each file wi
 | [Directory Structure](./directory-structure.md) | Module organization and file layout | To fill |
 | [Database Guidelines](./database-guidelines.md) | ORM patterns, queries, migrations | To fill |
 | [Electron Desktop Shell](./electron-desktop-shell.md) | Runtime, packaging, env, and secret-store contracts for the Electron product shell | Active |
+| [MCP Client Config Sync](./mcp-client-config-sync.md) | Local MCP default/override config projection and health contract | Active |
 | [Prompt App Contract](./prompt-app-contract.md) | Shared Prompt App Draft contract layered on top of the existing recipe flow | Active |
 | [Recipe Prompt App Bridge](./recipe-prompt-app-bridge.md) | Installation and rerun bridge from Prompt App Draft into local capability execution | Active |
 | [Workspace Long Run Continuation](./workspace-long-run-continuation.md) | Persisted run runtime checkpoints and safe first-step continuation rules | Active |

@@ -337,6 +337,40 @@
               </select>
             </label>
           </div>
+          <form id="mcp-config-form" class="stack-form compact-stack-form">
+            <label>
+              MCP Scope
+              <select id="mcp-config-scope">
+                <option value="global" selected>Global Default</option>
+                <option value="workspace">Workspace Override</option>
+              </select>
+            </label>
+            <label>
+              Enabled
+              <select id="mcp-enabled-select">
+                <option value="enabled" selected>Enabled</option>
+                <option value="disabled">Disabled</option>
+              </select>
+            </label>
+            <label>
+              MCP Command
+              <input id="mcp-command-input" placeholder="codex-mcp" autocomplete="off" />
+            </label>
+            <label>
+              MCP Args
+              <input id="mcp-args-input" placeholder="--stdio" autocomplete="off" />
+            </label>
+            <div class="button-grid">
+              <button id="mcp-save-button" type="submit">Save MCP Config</button>
+            </div>
+          </form>
+          <div class="approval-detail-grid mcp-config-grid">
+            <span>MCP Source</span>
+            <strong id="mcp-source">none</strong>
+            <span>MCP Health</span>
+            <strong id="mcp-health">not configured</strong>
+          </div>
+          <p id="mcp-help" class="inline-help">MCP config is local-only and resolves from global defaults plus optional workspace overrides.</p>
           <ul class="settings-list">
             <li><strong>Start</strong><span>Use the V1.0 readiness dashboard to see what is configured and what to do next.</span></li>
             <li><strong>Providers</strong><span>Configure custom provider base URLs, API keys, and models in the Providers page.</span></li>
