@@ -198,6 +198,11 @@ async function handleRequest(request, response) {
     return;
   }
 
+  if (request.method === "GET" && pathname === "/api/mailbox") {
+    await handleListMailboxItems(response);
+    return;
+  }
+
   if (request.method === "GET" && pathname === "/api/artifacts") {
     await handleListArtifacts(response);
     return;
@@ -897,6 +902,10 @@ async function handleRemoteBridgeRunApproval(request, response, sessionId, runId
   } catch (error) {
     writeJson(response, resolveRemoteBridgeHttpStatus(error), { error: sanitizeErrorMessage(error) });
   }
+}
+
+async function handleListMailboxItems(response) {
+  writeJson(response, 200, appStore.listMailboxItems(appStore.getSetting("activeWorkspaceId")));
 }
 
 async function handleListArtifacts(response) {
@@ -1848,6 +1857,58 @@ function createAgentTaskSummary(role, title, executorChoice) {
   };
 }
 
+function nextAgentRole(role) {
+  switch (role) {
+    case "planner":
+      return "worker";
+    case "worker":
+      return "reviewer";
+    default:
+      return undefined;
+  }
+}
+
+function markTaskInboundMailboxHandled(task) {
+  if (!task?.inboundMailboxItemId) return;
+  appStore.updateMailboxItem(task.inboundMailboxItemId, {
+    status: "handled",
+    handledAt: nowIso(),
+  });
+}
+
+function createOrchestrationMailboxItem(orchestration, task, recipientLabel, input) {
+  return appStore.createMailboxItem({
+    workspaceId: orchestration.workspaceId,
+    ...(task.childRunId ? { runId: task.childRunId } : {}),
+    orchestrationId: orchestration.id,
+    flowKind: "agent-orchestration",
+    senderKind: "agent-role",
+    senderLabel: titleCase(task.role),
+    recipientKind: input.recipientKind ?? "agent-role",
+    recipientLabel,
+    title: input.title,
+    body: input.body,
+    status: input.status ?? "delivered",
+  });
+}
+
+function createRemoteBridgeMailboxItem(session, input) {
+  return appStore.createMailboxItem({
+    workspaceId: session.workspaceId,
+    ...(session.threadId ? { threadId: session.threadId } : {}),
+    ...(input.runId ? { runId: input.runId } : {}),
+    remoteBridgeSessionId: session.id,
+    flowKind: "remote-bridge",
+    senderKind: "remote-principal",
+    senderLabel: session.principalLabel,
+    recipientKind: input.recipientKind ?? "local-runtime",
+    recipientLabel: input.recipientLabel ?? "Local Runtime",
+    title: input.title,
+    body: input.body,
+    status: input.status ?? "delivered",
+  });
+}
+
 async function runAgentOrchestration(orchestrationId, input) {
   appStore.updateAgentOrchestration(orchestrationId, {
     status: "running",
@@ -1862,6 +1923,7 @@ async function runAgentOrchestration(orchestrationId, input) {
     const orchestration = requireAgentOrchestration(orchestrationId);
     const task = orchestration.tasks.find((entry) => entry.role === role);
     if (!task) throw new Error(`Missing orchestration task for role ${role}.`);
+    markTaskInboundMailboxHandled(task);
 
     const runtime = runtimeMap.get(task.runtimeId);
     const runtimeTitle = runtime?.title ?? task.runtimeTitle ?? task.executorChoice;
@@ -1924,12 +1986,46 @@ async function runAgentOrchestration(orchestrationId, input) {
       });
 
       if (completedRun.status !== "completed") {
+        createOrchestrationMailboxItem(orchestration, {
+          ...task,
+          childRunId: completedRun.id,
+        }, "User", {
+          recipientKind: "user",
+          title: `${titleCase(role)} Failed`,
+          body: resultSummary,
+        });
         appStore.updateAgentOrchestration(orchestrationId, {
           status: "failed",
           summary: `${titleCase(role)} failed. ${resultSummary}`,
           completedAt: nowIso(),
         });
         return;
+      }
+
+      const nextRole = nextAgentRole(role);
+      if (nextRole) {
+        const downstreamTask = orchestration.tasks.find((entry) => entry.role === nextRole);
+        if (downstreamTask) {
+          const mailboxItem = createOrchestrationMailboxItem(orchestration, {
+            ...task,
+            childRunId: completedRun.id,
+          }, titleCase(nextRole), {
+            title: `${titleCase(role)} Handoff`,
+            body: resultSummary,
+          });
+          updateAgentTask(orchestrationId, downstreamTask.id, {
+            inboundMailboxItemId: mailboxItem.id,
+          });
+        }
+      } else {
+        createOrchestrationMailboxItem(orchestration, {
+          ...task,
+          childRunId: completedRun.id,
+        }, "User", {
+          recipientKind: "user",
+          title: `${titleCase(role)} Summary`,
+          body: resultSummary,
+        });
       }
 
       previousResultSummary = resultSummary;
@@ -1939,6 +2035,11 @@ async function runAgentOrchestration(orchestrationId, input) {
         status: "failed",
         resultSummary: detail,
         completedAt: nowIso(),
+      });
+      createOrchestrationMailboxItem(orchestration, task, "User", {
+        recipientKind: "user",
+        title: `${titleCase(role)} Failed`,
+        body: detail,
       });
       appStore.updateAgentOrchestration(orchestrationId, {
         status: "failed",
@@ -2144,6 +2245,10 @@ async function createRemoteBridgeSession(request, input) {
     type: "session.created",
     message: `Remote bridge session created for ${session.principalLabel}.`,
   });
+  createRemoteBridgeMailboxItem(session, {
+    title: "Remote Session Created",
+    body: `Remote bridge session created for ${session.principalLabel}.`,
+  });
 
   return {
     session: appStore.getRemoteBridgeSession(session.id),
@@ -2244,6 +2349,11 @@ async function startRemoteBridgeRun(session, input) {
     type: "run.started",
     message: `${session.principalLabel} started remote bridge run ${childSession.runId}.`,
   });
+  createRemoteBridgeMailboxItem(session, {
+    runId: childSession.runId,
+    title: "Remote Run Started",
+    body: `${session.principalLabel} started remote bridge run ${childSession.runId}.`,
+  });
   return {
     session: appStore.getRemoteBridgeSession(session.id),
     run: appStore.getRun(childSession.runId),
@@ -2274,6 +2384,11 @@ async function resolveRemoteBridgeRunApproval(session, runId, decision) {
     ...(approvalId ? { approvalId } : {}),
     type: "approval.resolved",
     message: `${session.principalLabel} resolved remote approval with decision ${decision}.`,
+  });
+  createRemoteBridgeMailboxItem(session, {
+    runId: run.id,
+    title: "Remote Approval Resolved",
+    body: `${session.principalLabel} resolved remote approval with decision ${decision}.`,
   });
   return {
     session: appStore.getRemoteBridgeSession(session.id),
@@ -3938,6 +4053,25 @@ class SqliteAppStore {
         message TEXT NOT NULL,
         created_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS mailbox_items (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        thread_id TEXT,
+        run_id TEXT,
+        orchestration_id TEXT,
+        remote_bridge_session_id TEXT,
+        flow_kind TEXT NOT NULL,
+        sender_kind TEXT NOT NULL,
+        sender_label TEXT NOT NULL,
+        recipient_kind TEXT NOT NULL,
+        recipient_label TEXT NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        handled_at TEXT
+      );
     `);
     this.addColumnIfMissing("threads", "workspace_id", "TEXT");
     this.addColumnIfMissing("workspaces", "trust_level", "TEXT NOT NULL DEFAULT 'strict'");
@@ -4084,6 +4218,7 @@ class SqliteAppStore {
     this.db.prepare("DELETE FROM agent_orchestrations WHERE workspace_id = ?").run(id);
     this.db.prepare("DELETE FROM remote_bridge_sessions WHERE workspace_id = ?").run(id);
     this.db.prepare("DELETE FROM remote_bridge_events WHERE workspace_id = ?").run(id);
+    this.db.prepare("DELETE FROM mailbox_items WHERE workspace_id = ?").run(id);
     this.db.prepare("DELETE FROM memories WHERE workspace_id = ?").run(id);
     if (this.getSetting("activeWorkspaceId") === id) {
       this.db.prepare("DELETE FROM app_settings WHERE key = 'activeWorkspaceId'").run();
@@ -5083,6 +5218,73 @@ class SqliteAppStore {
     `).all(sessionId).map(remoteBridgeEventRowToSummary);
   }
 
+  createMailboxItem(input) {
+    const timestamp = input.createdAt ?? nowIso();
+    const id = input.id ?? randomUUID();
+    this.db.prepare(`
+      INSERT INTO mailbox_items (
+        id, workspace_id, thread_id, run_id, orchestration_id, remote_bridge_session_id,
+        flow_kind, sender_kind, sender_label, recipient_kind, recipient_label,
+        title, body, status, created_at, updated_at, handled_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      input.workspaceId,
+      input.threadId ?? null,
+      input.runId ?? null,
+      input.orchestrationId ?? null,
+      input.remoteBridgeSessionId ?? null,
+      input.flowKind,
+      input.senderKind,
+      input.senderLabel,
+      input.recipientKind,
+      input.recipientLabel,
+      input.title,
+      input.body,
+      input.status ?? "delivered",
+      timestamp,
+      timestamp,
+      input.handledAt ?? null,
+    );
+    return this.getMailboxItem(id);
+  }
+
+  updateMailboxItem(id, input) {
+    const current = this.getMailboxItem(id);
+    if (!current) throw new Error("Mailbox item not found.");
+    this.db.prepare(`
+      UPDATE mailbox_items
+      SET
+        status = ?,
+        title = ?,
+        body = ?,
+        updated_at = ?,
+        handled_at = ?
+      WHERE id = ?
+    `).run(
+      input.status ?? current.status,
+      input.title ?? current.title,
+      input.body ?? current.body,
+      input.updatedAt ?? nowIso(),
+      input.handledAt ?? current.handledAt ?? null,
+      id,
+    );
+    return this.getMailboxItem(id);
+  }
+
+  getMailboxItem(id) {
+    const row = this.db.prepare("SELECT * FROM mailbox_items WHERE id = ?").get(id);
+    return row ? mailboxItemRowToSummary(row) : undefined;
+  }
+
+  listMailboxItems(workspaceId) {
+    const rows = workspaceId
+      ? this.db.prepare("SELECT * FROM mailbox_items WHERE workspace_id = ? ORDER BY created_at DESC").all(workspaceId)
+      : this.db.prepare("SELECT * FROM mailbox_items ORDER BY created_at DESC").all();
+    return { items: rows.map(mailboxItemRowToSummary) };
+  }
+
   remoteBridgeSessionOwnsRun(sessionId, runId) {
     const row = this.db.prepare(`
       SELECT 1 AS ok
@@ -5373,6 +5575,28 @@ function remoteBridgeEventRowToSummary(row) {
     type: row.type,
     message: row.message,
     createdAt: row.created_at,
+  };
+}
+
+function mailboxItemRowToSummary(row) {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    ...(row.thread_id ? { threadId: row.thread_id } : {}),
+    ...(row.run_id ? { runId: row.run_id } : {}),
+    ...(row.orchestration_id ? { orchestrationId: row.orchestration_id } : {}),
+    ...(row.remote_bridge_session_id ? { remoteBridgeSessionId: row.remote_bridge_session_id } : {}),
+    flowKind: row.flow_kind,
+    senderKind: row.sender_kind,
+    senderLabel: row.sender_label,
+    recipientKind: row.recipient_kind,
+    recipientLabel: row.recipient_label,
+    title: row.title,
+    body: row.body,
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    ...(row.handled_at ? { handledAt: row.handled_at } : {}),
   };
 }
 

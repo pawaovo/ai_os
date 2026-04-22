@@ -440,6 +440,25 @@ interface RemoteBridgeConnectSummary {
   runApprovalUrlTemplate: string;
 }
 
+interface MailboxItemSummary {
+  id: string;
+  workspaceId: string;
+  flowKind: string;
+  senderKind: string;
+  senderLabel: string;
+  recipientKind: string;
+  recipientLabel: string;
+  title: string;
+  body: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+  handledAt?: string;
+  runId?: string;
+  orchestrationId?: string;
+  remoteBridgeSessionId?: string;
+}
+
 interface AgentRuntimeSummary {
   id: string;
   kind: string;
@@ -536,6 +555,8 @@ const state = {
   remoteBridgeEvents: [] as RemoteBridgeEventSummary[],
   remoteBridgeConnect: undefined as RemoteBridgeConnectSummary | undefined,
   remoteBridgeSessionError: undefined as string | undefined,
+  mailboxItems: [] as MailboxItemSummary[],
+  mailboxError: undefined as string | undefined,
   mcpConfig: undefined as {
     globalConfig?: McpClientConfigRecord;
     workspaceOverride?: McpClientConfigRecord;
@@ -766,6 +787,8 @@ const elements = {
   remoteBridgeConnect: getElement("remote-bridge-connect", HTMLElement),
   remoteBridgeAuditList: getElement("remote-bridge-audit-list", HTMLElement),
   remoteBridgeHelp: getElement("remote-bridge-help", HTMLElement),
+  mailboxList: getElement("mailbox-list", HTMLElement),
+  mailboxHelp: getElement("mailbox-help", HTMLElement),
 };
 
 elements.navButtons.forEach((button) => {
@@ -798,6 +821,13 @@ elements.remoteBridgeSessionList.addEventListener("click", (event) => {
     ? event.target.closest<HTMLButtonElement>("button[data-remote-bridge-session-id]")
     : null;
   if (target?.dataset.remoteBridgeSessionId) void openRemoteBridgeSession(target.dataset.remoteBridgeSessionId);
+});
+
+elements.mailboxList.addEventListener("click", (event) => {
+  const target = event.target instanceof HTMLElement
+    ? event.target.closest<HTMLButtonElement>("button[data-mailbox-run-id]")
+    : null;
+  if (target?.dataset.mailboxRunId) void openRun(target.dataset.mailboxRunId);
 });
 
 elements.appReadinessList.addEventListener("click", (event) => {
@@ -1042,6 +1072,7 @@ async function initializeAppState(): Promise<void> {
   await loadMcpConfig();
   await loadHostedMcpServer();
   await loadRemoteBridgePilot();
+  await loadMailbox();
   await loadAppReadiness();
 }
 
@@ -1383,6 +1414,10 @@ function applyStaticTranslations(): void {
   syncLocalizedInputValue(elements.remoteBridgePrincipalInput, "remoteBridge.principalLabel.default");
   elements.remoteBridgeCreateButton.textContent = t("remoteBridge.button.create");
   renderRemoteBridgePilot();
+  setText(".mailbox-panel .eyebrow", t("mailbox.eyebrow"));
+  setText(".mailbox-panel .mini-label", t("mailbox.mini"));
+  setText("#mailbox-title", t("mailbox.title"));
+  renderMailbox();
   renderSettingsList();
 
   setText(".capability-detail-panel .eyebrow", t("capability-detail.eyebrow"));
@@ -1582,6 +1617,7 @@ function renderSettingsList(): void {
     ["settings.item.executors.title", "settings.item.executors.detail"],
     ["settings.item.agents.title", "settings.item.agents.detail"],
     ["settings.item.remoteBridge.title", "settings.item.remoteBridge.detail"],
+    ["settings.item.mailbox.title", "settings.item.mailbox.detail"],
     ["settings.item.workspaceTrust.title", "settings.item.workspaceTrust.detail"],
     ["settings.item.automation.title", "settings.item.automation.detail"],
     ["settings.item.memory.title", "settings.item.memory.detail"],
@@ -1646,6 +1682,7 @@ async function saveLanguageSetting(): Promise<void> {
   await loadAgentOrchestrations();
   await loadHostedMcpServer();
   await loadRemoteBridgePilot();
+  await loadMailbox();
   await loadArtifacts();
   await loadAppReadiness();
   renderChatMessages();
@@ -1938,6 +1975,7 @@ async function refreshWorkspaceScopedData(): Promise<void> {
   await loadMcpConfig();
   await loadHostedMcpServer();
   await loadRemoteBridgePilot();
+  await loadMailbox();
   await loadAppReadiness();
 }
 
@@ -1970,6 +2008,19 @@ async function loadRemoteBridgePilot(): Promise<void> {
   }
 
   renderRemoteBridgePilot();
+}
+
+async function loadMailbox(): Promise<void> {
+  try {
+    const payload = await apiJson<{ items: MailboxItemSummary[] }>("/api/mailbox");
+    state.mailboxItems = payload.items;
+    state.mailboxError = undefined;
+  } catch (error) {
+    state.mailboxItems = [];
+    state.mailboxError = errorToMessage(error, t("mailbox.loadFailed"));
+  }
+
+  renderMailbox();
 }
 
 async function createRemoteBridgeSessionFromForm(): Promise<void> {
@@ -2071,6 +2122,50 @@ function renderRemoteBridgePilot(): void {
   elements.remoteBridgeHelp.textContent = state.remoteBridgeSessionError
     ?? state.remoteBridgePilotError
     ?? describeRemoteBridgeHelp(activeSession);
+}
+
+function renderMailbox(): void {
+  if (state.mailboxItems.length === 0) {
+    elements.mailboxList.replaceChildren(createListItem(t("mailbox.none")));
+    elements.mailboxHelp.textContent = state.mailboxError ?? t("mailbox.help.default");
+    return;
+  }
+
+  elements.mailboxList.replaceChildren(
+    ...state.mailboxItems.map((item) => createMailboxListItem(item)),
+  );
+  elements.mailboxHelp.textContent = t("mailbox.help.count", { count: state.mailboxItems.length });
+}
+
+function createMailboxListItem(item: MailboxItemSummary): HTMLLIElement {
+  const wrapper = document.createElement("li");
+  const button = document.createElement("button");
+  const title = document.createElement("span");
+  const meta = document.createElement("span");
+  const badge = document.createElement("span");
+
+  button.type = "button";
+  button.className = "list-button";
+  if (item.runId) {
+    button.dataset.mailboxRunId = item.runId;
+  } else {
+    button.disabled = true;
+  }
+  title.className = "item-title";
+  title.textContent = `${item.title} / ${item.senderLabel} -> ${item.recipientLabel}`;
+  meta.className = "item-meta";
+  meta.textContent = [
+    translateKeyOrFallback(`mailbox.flow.${item.flowKind}`, item.flowKind),
+    formatDate(item.createdAt),
+    localizeKnownText(item.body),
+  ].join(" / ");
+  badge.className = "source-badge";
+  badge.dataset.source = item.status;
+  badge.textContent = translatedToken(item.status);
+
+  button.append(title, meta, badge);
+  wrapper.append(button);
+  return wrapper;
 }
 
 function localizeRemoteBridgeTransport(value: string): string {

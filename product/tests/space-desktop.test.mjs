@@ -250,6 +250,9 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(html, /id="agent-orchestration-list-title"/);
   assert.match(html, /id="agent-orchestration-list"/);
   assert.match(html, /id="agent-orchestration-list-help"/);
+  assert.match(html, /id="mailbox-title"/);
+  assert.match(html, /id="mailbox-list"/);
+  assert.match(html, /id="mailbox-help"/);
   assert.match(html, /id="memory-title"/);
   assert.match(html, /id="memory-form"/);
   assert.match(html, /id="memory-scope"/);
@@ -397,6 +400,7 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(browserSource, /saveMcpConfigFromForm/);
   assert.match(browserSource, /\/api\/mcp\/hosted-server/);
   assert.match(browserSource, /\/api\/remote-bridge\/pilot/);
+  assert.match(browserSource, /\/api\/mailbox/);
   assert.match(browserSource, /loadAgentRuntimes/);
   assert.match(browserSource, /renderAgentRuntimes/);
   assert.match(browserSource, /localizeExecutorChoice/);
@@ -1474,6 +1478,91 @@ test("remote bridge pilot rejects missing or invalid bearer tokens", async () =>
     assert.equal(invalidToken.ok, false);
     assert.equal(invalidToken.status, 403);
     assert.match(invalidToken.payload.error, /invalid/);
+  } finally {
+    await appServer.stop();
+    await rm(storageDir, { recursive: true, force: true });
+  }
+});
+
+test("mailbox runtime records orchestration handoffs and remote bridge events with workspace scoping", async () => {
+  const storageDir = await mkdtemp(`${tmpdir()}/ai-os-mailbox-`);
+  const appPort = await getAvailablePort();
+  const appServer = startSpaceDesktopServer({
+    port: appPort,
+    storageDir,
+  });
+
+  try {
+    const baseUrl = `http://127.0.0.1:${appPort}`;
+    await waitForHttp(`${baseUrl}/`);
+
+    const workspace = await postJson(`${baseUrl}/api/workspaces`, {
+      name: "Mailbox Workspace",
+      path: storageDir,
+    });
+    const otherWorkspace = await postJson(`${baseUrl}/api/workspaces`, {
+      name: "Other Mailbox Workspace",
+      path: storageDir,
+    });
+    await patchJson(`${baseUrl}/api/settings/workspace-selection`, {
+      workspaceId: workspace.workspace.id,
+    });
+
+    const orchestration = await postJson(`${baseUrl}/api/agent-orchestrations/start`, {
+      goal: "Prepare a concise mailbox handoff summary.",
+      executorChoice: "mock",
+      timeoutMs: 5000,
+    });
+    await waitForOrchestration(appPort, orchestration.orchestration.id, (item) => item.status === "completed");
+
+    const remote = await postJson(`${baseUrl}/api/remote-bridge/pilot/sessions`, {
+      principalLabel: "Mailbox Remote",
+      workspaceId: workspace.workspace.id,
+    });
+    const authHeaders = remoteBridgeAuthHeaders(remote.connect.bearerToken);
+    const started = await postJson(
+      remote.connect.runStartUrl,
+      {
+        goal: "review the workspace and pause for approval before the final summary",
+        executorChoice: "mock",
+        timeoutMs: 5000,
+      },
+      authHeaders,
+    );
+    const awaitingApproval = await waitForRemoteBridgeLive(
+      remote.connect,
+      started.run.id,
+      (live) => Boolean(live.pendingApproval),
+    );
+    assert.equal(awaitingApproval.pendingApproval?.stage, "runtime");
+    await postJson(
+      remoteBridgeRunApprovalUrl(remote.connect, started.run.id),
+      { decision: "grant" },
+      authHeaders,
+    );
+    await waitForRemoteBridgeLive(
+      remote.connect,
+      started.run.id,
+      (live) => live.status === "completed",
+    );
+
+    const mailbox = await getJson(`${baseUrl}/api/mailbox`);
+    assert.equal(Array.isArray(mailbox.items), true);
+    assert.equal(mailbox.items.length >= 4, true);
+    assert.equal(mailbox.items.some((item) => item.flowKind === "agent-orchestration"), true);
+    assert.equal(mailbox.items.some((item) => item.flowKind === "remote-bridge"), true);
+    assert.equal(mailbox.items.some((item) => item.status === "handled"), true);
+    assert.equal(mailbox.items.some((item) => item.status === "delivered"), true);
+    assert.equal(mailbox.items.some((item) => item.runId), true);
+    assert.equal(mailbox.items.some((item) => /Planner Handoff|Reviewer Summary/.test(item.title)), true);
+    assert.equal(mailbox.items.some((item) => /Remote Session Created|Remote Approval Resolved/.test(item.title)), true);
+    assert.equal(mailbox.items.every((item) => item.workspaceId === workspace.workspace.id), true);
+
+    await patchJson(`${baseUrl}/api/settings/workspace-selection`, {
+      workspaceId: otherWorkspace.workspace.id,
+    });
+    const switched = await getJson(`${baseUrl}/api/mailbox`);
+    assert.deepEqual(switched.items, []);
   } finally {
     await appServer.stop();
     await rm(storageDir, { recursive: true, force: true });

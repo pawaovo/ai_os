@@ -1,0 +1,8 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend development guide"}
+{"file": ".trellis/spec/backend/multi-agent-coordination-mailbox.md", "reason": "Mailbox boundary and traceability rules"}
+{"file": ".trellis/spec/backend/agent-hub-orchestration-mvp.md", "reason": "Mailbox should integrate with orchestration handoffs without replacing child runs"}
+{"file": ".trellis/spec/backend/remote-bridge-pilot-mvp.md", "reason": "Remote bridge events should write mailbox items and stay auditable"}
+{"file": ".trellis/spec/frontend/multi-agent-product-surface.md", "reason": "Mailbox should be shown as additive agents surface, not separate team IDE"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Feature spans persistence, orchestration hooks, remote bridge hooks, UI, and tests"}
