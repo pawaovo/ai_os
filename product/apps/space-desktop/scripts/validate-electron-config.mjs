@@ -26,6 +26,10 @@ assert(config.mac?.target?.includes("dir"), "mac dir target is required for loca
 assert(Array.isArray(config.win?.target) && config.win.target.length >= 2, "Windows targets must include installer and portable outputs.");
 assert(config.extraResources.some((entry) => entry.to === "product/apps/space-desktop"), "space-desktop runtime must be copied.");
 assert(config.extraResources.some((entry) => entry.to === "product/node_modules/@ai-os/provider-registry"), "workspace packages must be available under runtime node_modules.");
+assert(
+  config.extraResources.some((entry) => entry.to === "product/apps/space-desktop" && entry.filter?.includes("scripts/mcp-runtime.mjs")),
+  "space-desktop MCP runtime helper must be copied for packaged Electron runs.",
+);
 
 process.stdout.write("Electron config is valid.\n");
 

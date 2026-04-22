@@ -10,6 +10,7 @@ import { dirname, join, normalize, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { createMcpRuntimeProbeCache } from "./mcp-runtime.mjs";
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const productRoot = resolve(appRoot, "../..");
@@ -17,6 +18,8 @@ const publicRoot = join(appRoot, "public");
 const port = Number.parseInt(process.env.PORT ?? "5173", 10);
 const executorTimeoutMs = Number.parseInt(process.env.AI_SPACE_EXECUTOR_TIMEOUT_MS ?? "60000", 10);
 const automationTickMs = Number.parseInt(process.env.AI_SPACE_AUTOMATION_TICK_MS ?? "1000", 10);
+const mcpProbeTimeoutMs = Number.parseInt(process.env.AI_SPACE_MCP_PROBE_TIMEOUT_MS ?? "4000", 10);
+const mcpProbeCacheTtlMs = Number.parseInt(process.env.AI_SPACE_MCP_PROBE_CACHE_TTL_MS ?? "5000", 10);
 const codexCommand = process.env.AI_SPACE_CODEX_COMMAND;
 const claudeCommand = process.env.AI_SPACE_CLAUDE_COMMAND;
 const storageRoot = resolve(process.env.AI_SPACE_STORAGE_DIR ?? join(homedir(), ".ai_os", "space-demo"));
@@ -67,6 +70,7 @@ await mkdir(storageRoot, { recursive: true });
 
 let processRunner;
 let appStore;
+let mcpRuntimeProbeCache;
 const runSessions = new Map();
 let automationInterval;
 const BUILT_IN_CAPABILITIES = [
@@ -745,7 +749,7 @@ async function handleWorkspaceSelection(request, response) {
 }
 
 async function handleGetMcpConfig(response) {
-  writeJson(response, 200, appStore.getMcpConfigSummary(appStore.getSetting("activeWorkspaceId")));
+  writeJson(response, 200, await getMcpConfigSummaryWithRuntime(appStore.getSetting("activeWorkspaceId")));
 }
 
 async function handleSetMcpConfig(request, response) {
@@ -764,7 +768,7 @@ async function handleSetMcpConfig(request, response) {
       throw new Error("Unsupported MCP config scope.");
     }
 
-    writeJson(response, 200, appStore.getMcpConfigSummary(appStore.getSetting("activeWorkspaceId")));
+    writeJson(response, 200, await getMcpConfigSummaryWithRuntime(appStore.getSetting("activeWorkspaceId")));
   } catch (error) {
     writeJson(response, 400, { error: sanitizeErrorMessage(error) });
   }
@@ -1564,7 +1568,7 @@ async function listExecutorStatuses() {
 async function listAgentRuntimeSummaries(workspaceId) {
   const executors = await listExecutorStatuses();
   const recipes = appStore.listRecipes(workspaceId).recipes.filter((recipe) => recipe.installation);
-  const mcp = appStore.getMcpConfigSummary(workspaceId).resolvedConfig;
+  const mcp = (await getMcpConfigSummaryWithRuntime(workspaceId)).resolvedConfig;
 
   return [
     ...executors.map((status) => ({
@@ -1594,9 +1598,10 @@ async function listAgentRuntimeSummaries(workspaceId) {
       kind: "mcp-client",
       title: "MCP Client",
       source: "local",
-      available: mcp.health.status === "ready",
-      status: mcp.health.status,
-      detail: mcp.health.detail,
+      available: mcp.runtime.status === "ready",
+      status: mcp.runtime.status,
+      detail: mcp.runtime.detail,
+      mcpRuntime: mcp.runtime,
       ...(workspaceId ? { workspaceId } : {}),
     },
   ];
@@ -1607,6 +1612,17 @@ function createExecutorRuntime() {
     runner: processRunner,
     ...(codexCommand ? { codexCommand } : {}),
     ...(claudeCommand ? { claudeCommand } : {}),
+  };
+}
+
+async function getMcpConfigSummaryWithRuntime(workspaceId) {
+  const summary = appStore.getMcpConfigSummary(workspaceId);
+  return {
+    ...summary,
+    resolvedConfig: {
+      ...summary.resolvedConfig,
+      runtime: await mcpRuntimeProbeCache.probe(summary.resolvedConfig),
+    },
   };
 }
 
@@ -4461,7 +4477,63 @@ function resolveMcpClientConfig(globalConfig, workspaceOverride, workspaceId) {
 
 function parseArgsText(value) {
   if (!value) return [];
-  return value.split(/\s+/).map((item) => item.trim()).filter(Boolean);
+  const args = [];
+  let current = "";
+  let quote = "";
+  let escaping = false;
+
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    const next = value[index + 1];
+
+    if (escaping) {
+      current += char;
+      escaping = false;
+      continue;
+    }
+
+    if (char === "\\") {
+      const shouldEscape = quote === "\""
+        || /\s/.test(next ?? "")
+        || next === "\""
+        || next === "'"
+        || next === "\\";
+      if (shouldEscape) {
+        escaping = true;
+        continue;
+      }
+      current += char;
+      continue;
+    }
+
+    if (quote) {
+      if (char === quote) {
+        quote = "";
+      } else {
+        current += char;
+      }
+      continue;
+    }
+
+    if (char === "\"" || char === "'") {
+      quote = char;
+      continue;
+    }
+
+    if (/\s/.test(char)) {
+      if (current.length > 0) {
+        args.push(current);
+        current = "";
+      }
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (escaping) current += "\\";
+  if (current.length > 0 || quote) args.push(current);
+  return args;
 }
 
 function evaluateLocalCommandHealth(command) {
@@ -5201,6 +5273,12 @@ class NotFoundError extends Error {}
 
 processRunner = new NodeProcessRunner(productRoot, executorTimeoutMs);
 appStore = new SqliteAppStore(join(storageRoot, "app.db"), createSecretStore(storageRoot));
+mcpRuntimeProbeCache = createMcpRuntimeProbeCache({
+  appVersion: APP_VERSION,
+  timeoutMs: mcpProbeTimeoutMs,
+  cacheTtlMs: mcpProbeCacheTtlMs,
+  now: nowIso,
+});
 automationInterval = setInterval(() => {
   void runDueAutomations().catch((error) => {
     process.stderr.write(`Automation tick failed: ${sanitizeErrorMessage(error)}\n`);

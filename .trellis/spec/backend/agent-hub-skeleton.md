@@ -32,10 +32,10 @@ Returns:
 - Registry may aggregate:
   - executor runtimes
   - installed Prompt App drafts
-  - MCP client projection
+  - MCP client projection plus additive runtime probe metadata
 - Registry must not define a second workspace runtime or run/session model.
 - Installed Prompt App entries must remain workspace-aware.
-- MCP client entry must reflect resolved config and health, not real transport sessions.
+- MCP client entry may reflect real short-lived transport probe status, but must not introduce a persistent MCP session manager.
 
 ### 4. Validation & Error Matrix
 
@@ -43,7 +43,7 @@ Returns:
 | --- | --- | --- |
 | Active workspace has installed Prompt App draft | registry includes prompt-app entry | `space-desktop.test.mjs` |
 | Switch to workspace without installed Prompt App | prompt-app entry disappears | `space-desktop.test.mjs` |
-| Global MCP config healthy | registry includes ready MCP client entry | `space-desktop.test.mjs` |
+| Global MCP config probes successfully | registry includes ready MCP client entry with structured runtime metadata | `space-desktop.test.mjs` |
 
 ### 5. Good / Base / Bad Cases
 
@@ -59,6 +59,7 @@ Returns:
 
 - Turning Agent Hub skeleton into a second run/session runtime.
 - Mixing remote orchestration into the first registry step.
+- Recomputing MCP runtime state differently from `/api/mcp/config`.
 
 ### 6. Tests Required
 

@@ -352,6 +352,16 @@ interface McpClientConfigRecord {
   argsText?: string;
 }
 
+interface McpRuntimeSummary {
+  transport: "stdio";
+  status: string;
+  detail: string;
+  probedAt: string;
+  toolCount?: number;
+  serverName?: string;
+  serverVersion?: string;
+}
+
 interface McpResolvedConfig extends McpClientConfigRecord {
   source: "global" | "workspace" | "none";
   args: string[];
@@ -360,6 +370,7 @@ interface McpResolvedConfig extends McpClientConfigRecord {
     status: string;
     detail: string;
   };
+  runtime: McpRuntimeSummary;
 }
 
 interface AgentRuntimeSummary {
@@ -374,6 +385,7 @@ interface AgentRuntimeSummary {
   recipeId?: string;
   capabilityId?: string;
   compatibility?: ExecutorStatusSummary["compatibility"];
+  mcpRuntime?: McpRuntimeSummary;
 }
 
 interface LiveRunState {
@@ -610,6 +622,8 @@ const elements = {
   mcpSaveButton: getElement("mcp-save-button", HTMLButtonElement),
   mcpSource: getElement("mcp-source", HTMLElement),
   mcpHealth: getElement("mcp-health", HTMLElement),
+  mcpRuntimeStatus: getElement("mcp-runtime-status", HTMLElement),
+  mcpRuntimeTools: getElement("mcp-runtime-tools", HTMLElement),
   mcpHelp: getElement("mcp-help", HTMLElement),
   agentRuntimeList: getElement("agent-runtime-list", HTMLElement),
   agentRuntimeHelp: getElement("agent-runtime-help", HTMLElement),
@@ -1123,10 +1137,14 @@ function applyStaticTranslations(): void {
   elements.mcpSaveButton.textContent = t("mcp.button.save");
   setMcpGridLabel(0, t("mcp.source"));
   setMcpGridLabel(1, t("mcp.health"));
+  setMcpGridLabel(2, t("mcp.runtime.status"));
+  setMcpGridLabel(3, t("mcp.runtime.tools"));
   if (!state.mcpConfig) {
     elements.mcpHelp.textContent = t("mcp.help.default");
     elements.mcpSource.textContent = t("dynamic.none");
     elements.mcpHealth.textContent = translatedToken("not-configured");
+    elements.mcpRuntimeStatus.textContent = translatedToken("not-configured");
+    elements.mcpRuntimeTools.textContent = t("dynamic.none");
   } else {
     renderMcpConfig();
   }
@@ -1891,12 +1909,7 @@ function renderAgentRuntimes(): void {
   elements.agentRuntimeList.replaceChildren(
     ...state.agentRuntimes.map((runtime) => createStaticActionListItem(
       `${translateKeyOrFallback(`agentRuntime.kind.${runtime.kind}`, runtime.kind)} / ${runtime.title}`,
-      runtime.compatibility
-        ? t("agentRuntime.meta.compatibility", {
-            transport: translateKeyOrFallback(`dynamic.executor.transport.${runtime.compatibility.transport}`, runtime.compatibility.transport),
-            detail: runtime.detail,
-          })
-        : runtime.detail,
+      describeAgentRuntime(runtime),
       runtime.status,
     )),
   );
@@ -1918,6 +1931,12 @@ function renderMcpConfig(): void {
   elements.mcpHealth.textContent = state.mcpConfig?.resolvedConfig
     ? translatedToken(state.mcpConfig.resolvedConfig.health.status)
     : translatedToken("not-configured");
+  elements.mcpRuntimeStatus.textContent = state.mcpConfig?.resolvedConfig
+    ? translatedToken(state.mcpConfig.resolvedConfig.runtime.status)
+    : translatedToken("not-configured");
+  elements.mcpRuntimeTools.textContent = state.mcpConfig?.resolvedConfig
+    ? formatMcpToolCount(state.mcpConfig.resolvedConfig.runtime)
+    : t("dynamic.none");
 
   if (!state.mcpConfig) {
     elements.mcpHelp.textContent = t("mcp.help.default");
@@ -1926,7 +1945,7 @@ function renderMcpConfig(): void {
 
   elements.mcpHelp.textContent = t("mcp.help.resolved", {
     source: translateKeyOrFallback(`mcp.sourceValue.${state.mcpConfig.resolvedConfig.source}`, state.mcpConfig.resolvedConfig.source),
-    detail: state.mcpConfig.resolvedConfig.health.detail,
+    detail: describeMcpRuntimeHelp(state.mcpConfig.resolvedConfig.runtime),
   });
 }
 
@@ -1949,11 +1968,78 @@ async function saveMcpConfigFromForm(): Promise<void> {
     });
     state.mcpConfig = payload;
     renderMcpConfig();
+    await loadAgentRuntimes();
   } catch (error) {
     elements.mcpHelp.textContent = errorToMessage(error, t("mcp.saveFailed"));
   } finally {
     elements.mcpSaveButton.disabled = false;
   }
+}
+
+function describeAgentRuntime(runtime: AgentRuntimeSummary): string {
+  if (runtime.kind === "mcp-client" && runtime.mcpRuntime) {
+    const parts = [
+      runtime.detail,
+      formatMcpRuntimeServerMeta(runtime.mcpRuntime),
+      formatMcpRuntimeToolsMeta(runtime.mcpRuntime),
+      formatMcpRuntimeProbedAtMeta(runtime.mcpRuntime),
+    ].filter(Boolean);
+    return parts.join(" / ");
+  }
+
+  if (runtime.compatibility) {
+    return t("agentRuntime.meta.compatibility", {
+      transport: translateKeyOrFallback(`dynamic.executor.transport.${runtime.compatibility.transport}`, runtime.compatibility.transport),
+      detail: runtime.detail,
+    });
+  }
+
+  return runtime.detail;
+}
+
+function describeMcpRuntimeHelp(runtime: McpRuntimeSummary): string {
+  if (runtime.status === "ready") {
+    const parts = [
+      t("mcp.help.runtime.ready"),
+      runtime.serverName ? t("mcp.help.runtime.server", { server: formatMcpServer(runtime) }) : "",
+      runtime.toolCount !== undefined ? t("mcp.help.runtime.tools", { count: runtime.toolCount }) : "",
+      t("mcp.help.runtime.probedAt", { at: formatDate(runtime.probedAt) }),
+    ].filter(Boolean);
+    return parts.join(" ");
+  }
+
+  const parts = [
+    runtime.detail,
+    t("mcp.help.runtime.probedAt", { at: formatDate(runtime.probedAt) }),
+  ].filter(Boolean);
+  return parts.join(" ");
+}
+
+function formatMcpServer(runtime: McpRuntimeSummary): string {
+  if (runtime.serverName && runtime.serverVersion) return `${runtime.serverName} ${runtime.serverVersion}`;
+  return runtime.serverName ?? runtime.serverVersion ?? t("dynamic.none");
+}
+
+function formatMcpToolCount(runtime: McpRuntimeSummary): string {
+  return runtime.toolCount !== undefined ? t("mcp.runtime.tools.value", { count: runtime.toolCount }) : t("dynamic.none");
+}
+
+function formatMcpRuntimeServerMeta(runtime: McpRuntimeSummary): string {
+  return runtime.serverName
+    ? t("agentRuntime.meta.mcp.server", { server: formatMcpServer(runtime) })
+    : "";
+}
+
+function formatMcpRuntimeToolsMeta(runtime: McpRuntimeSummary): string {
+  return runtime.toolCount !== undefined
+    ? t("agentRuntime.meta.mcp.tools", { count: runtime.toolCount })
+    : "";
+}
+
+function formatMcpRuntimeProbedAtMeta(runtime: McpRuntimeSummary): string {
+  return runtime.probedAt
+    ? t("agentRuntime.meta.mcp.probedAt", { at: formatDate(runtime.probedAt) })
+    : "";
 }
 
 async function loadProviders(): Promise<void> {

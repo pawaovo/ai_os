@@ -35,6 +35,7 @@ interface McpResolvedConfig extends McpClientConfigRecord {
     status: string;
     detail: string;
   };
+  runtime?: McpRuntimeSummary;
 }
 ```
 
@@ -45,7 +46,8 @@ interface McpResolvedConfig extends McpClientConfigRecord {
 
 ### 3. Contracts
 
-- First step remains config-only. No real MCP transport session is required.
+- Base config ownership remains config-only.
+- Real MCP runtime probing is additive and documented in `mcp-transport-runtime.md`.
 - Resolved config source priority:
   1. workspace override
   2. global default

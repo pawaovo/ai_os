@@ -73,7 +73,7 @@ This scenario is cross-layer because one change fans out into package scripts, E
 - Packaged output root must remain `build/electron`.
 - Extra resources must copy:
   - `product/package.json`
-  - `product/apps/space-desktop/{package.json,README.md,dist,public,scripts/dev-server.mjs}`
+  - `product/apps/space-desktop/{package.json,README.md,dist,public,scripts/dev-server.mjs,scripts/mcp-runtime.mjs}`
   - built workspace package `dist/**` payloads under `product/packages/**`
   - built package payloads under `product/node_modules/@ai-os/*`
 - `after-pack-electron.mjs` must ensure `Contents/Resources/app/package.json` exists in the packaged app so Electron can resolve packaged metadata consistently.
@@ -130,6 +130,7 @@ Contract details:
 | --- | --- | --- |
 | Electron scripts missing or `main` points elsewhere | `validate-electron-config.mjs` fails | `npm run validate:electron` |
 | Packaged app resources drift from builder config | package config regression test fails | `node --test tests/*.test.mjs` |
+| New runtime helper is imported by packaged server but not copied into resources | packaged app exits before readiness | `npm run validate:electron` + packaged smoke |
 | Host-specific install path drifts from actual packaging output | readiness and docs show the wrong open path | `npm test` on the host plus manual packaging smoke |
 | UI language changes but server text stays in the old language | mixed-language dashboard after reload or refresh | bilingual smoke with `PATCH /api/settings/language` then `GET /api/app/readiness` |
 | Server never reaches readiness | Electron main exits with non-zero after wait loop | packaged smoke run stderr / exit code |

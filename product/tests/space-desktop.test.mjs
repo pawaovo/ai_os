@@ -14,6 +14,7 @@ const expectedHostBuildCommand = process.platform === "win32"
 const expectedHostOpenCommand = process.platform === "win32"
   ? "start \"\" \"product\\build\\electron\\win-unpacked\\AI OS.exe\""
   : `open "${process.arch === "arm64" ? "product/build/electron/mac-arm64/AI OS.app" : "product/build/electron/mac/AI OS.app"}"`;
+const mockMcpServerPath = resolve(productRoot, "tests/fixtures/mock-mcp-server.mjs");
 
 execFileSync(
   process.execPath,
@@ -200,6 +201,8 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(html, /id="mcp-command-input"/);
   assert.match(html, /id="mcp-source"/);
   assert.match(html, /id="mcp-health"/);
+  assert.match(html, /id="mcp-runtime-status"/);
+  assert.match(html, /id="mcp-runtime-tools"/);
   assert.match(html, /id="agent-runtime-title"/);
   assert.match(html, /id="agent-runtime-list"/);
   assert.match(html, /id="agent-runtime-help"/);
@@ -310,6 +313,7 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(electronConfig, /app:\s*"apps\/space-desktop\/electron-app"/);
   assert.match(electronConfig, /afterPack:\s*"apps\/space-desktop\/scripts\/after-pack-electron\.mjs"/);
   assert.match(electronConfig, /productName:\s*"AI OS"/);
+  assert.match(electronConfig, /scripts\/mcp-runtime\.mjs/);
   assert.match(electronConfig, /win:\s*{/);
   assert.match(electronConfig, /target:\s*"nsis"/);
   assert.match(electronConfig, /target:\s*"portable"/);
@@ -757,7 +761,7 @@ test("space desktop dev server persists providers, threads, and messages without
   }
 });
 
-test("space desktop MCP config sync resolves global defaults and workspace overrides", async () => {
+test("space desktop MCP config sync resolves real runtime probes and workspace overrides", async () => {
   const storageDir = await mkdtemp(`${tmpdir()}/ai-os-mcp-`);
   const appPort = await getAvailablePort();
   const appServer = startSpaceDesktopServer({
@@ -771,17 +775,23 @@ test("space desktop MCP config sync resolves global defaults and workspace overr
     const empty = await getJson(`http://127.0.0.1:${appPort}/api/mcp/config`);
     assert.equal(empty.resolvedConfig.source, "none");
     assert.equal(empty.resolvedConfig.health.status, "disabled");
+    assert.equal(empty.resolvedConfig.runtime.status, "disabled");
 
     const globalConfig = await patchJson(`http://127.0.0.1:${appPort}/api/mcp/config`, {
       scope: "global",
       enabled: true,
       command: process.execPath,
-      argsText: "--version",
+      argsText: mockMcpServerPath,
     });
     assert.equal(globalConfig.globalConfig.command, process.execPath);
     assert.equal(globalConfig.resolvedConfig.source, "global");
     assert.equal(globalConfig.resolvedConfig.health.status, "ready");
-    assert.deepEqual(globalConfig.resolvedConfig.args, ["--version"]);
+    assert.equal(globalConfig.resolvedConfig.runtime.status, "ready");
+    assert.equal(globalConfig.resolvedConfig.runtime.transport, "stdio");
+    assert.equal(globalConfig.resolvedConfig.runtime.serverName, "fixture-mcp");
+    assert.equal(globalConfig.resolvedConfig.runtime.serverVersion, "1.0.0");
+    assert.equal(globalConfig.resolvedConfig.runtime.toolCount, 2);
+    assert.deepEqual(globalConfig.resolvedConfig.args, [mockMcpServerPath]);
 
     const workspace = await postJson(`http://127.0.0.1:${appPort}/api/workspaces`, {
       name: "MCP Workspace",
@@ -804,6 +814,7 @@ test("space desktop MCP config sync resolves global defaults and workspace overr
     assert.equal(workspaceOverride.workspaceOverride.command, "definitely-missing-mcp-command");
     assert.equal(workspaceOverride.resolvedConfig.source, "workspace");
     assert.equal(workspaceOverride.resolvedConfig.health.status, "failed");
+    assert.equal(workspaceOverride.resolvedConfig.runtime.status, "failed");
 
     await patchJson(`http://127.0.0.1:${appPort}/api/settings/workspace-selection`, {
       workspaceId: otherWorkspace.workspace.id,
@@ -812,6 +823,69 @@ test("space desktop MCP config sync resolves global defaults and workspace overr
     assert.equal(switched.resolvedConfig.source, "global");
     assert.equal(switched.workspaceOverride, undefined);
     assert.equal(switched.resolvedConfig.health.status, "ready");
+    assert.equal(switched.resolvedConfig.runtime.status, "ready");
+    assert.equal(switched.resolvedConfig.runtime.toolCount, 2);
+  } finally {
+    await appServer.stop();
+    await rm(storageDir, { recursive: true, force: true });
+  }
+});
+
+test("space desktop MCP runtime timeout is reported separately from config health", async () => {
+  const storageDir = await mkdtemp(`${tmpdir()}/ai-os-mcp-timeout-`);
+  const appPort = await getAvailablePort();
+  const appServer = startSpaceDesktopServer({
+    port: appPort,
+    storageDir,
+    envOverrides: {
+      AI_SPACE_MCP_PROBE_TIMEOUT_MS: "250",
+    },
+  });
+
+  try {
+    await waitForHttp(`http://127.0.0.1:${appPort}/`);
+
+    const payload = await patchJson(`http://127.0.0.1:${appPort}/api/mcp/config`, {
+      scope: "global",
+      enabled: true,
+      command: process.execPath,
+      argsText: `${mockMcpServerPath} --delay-ms 1000`,
+    });
+
+    assert.equal(payload.resolvedConfig.health.status, "ready");
+    assert.equal(payload.resolvedConfig.runtime.status, "failed");
+    assert.match(payload.resolvedConfig.runtime.detail, /timed out/i);
+  } finally {
+    await appServer.stop();
+    await rm(storageDir, { recursive: true, force: true });
+  }
+});
+
+test("space desktop MCP args parser preserves quoted and escaped segments", async () => {
+  const storageDir = await mkdtemp(`${tmpdir()}/ai-os-mcp-args-`);
+  const appPort = await getAvailablePort();
+  const appServer = startSpaceDesktopServer({
+    port: appPort,
+    storageDir,
+  });
+
+  try {
+    await waitForHttp(`http://127.0.0.1:${appPort}/`);
+
+    const payload = await patchJson(`http://127.0.0.1:${appPort}/api/mcp/config`, {
+      scope: "global",
+      enabled: false,
+      command: process.execPath,
+      argsText: `${mockMcpServerPath} --label "value with space" 'single quoted' escaped\\ value`,
+    });
+
+    assert.deepEqual(payload.resolvedConfig.args, [
+      mockMcpServerPath,
+      "--label",
+      "value with space",
+      "single quoted",
+      "escaped value",
+    ]);
   } finally {
     await appServer.stop();
     await rm(storageDir, { recursive: true, force: true });
@@ -833,7 +907,7 @@ test("agent hub skeleton projects executors, installed prompt apps, and MCP clie
       scope: "global",
       enabled: true,
       command: process.execPath,
-      argsText: "--version",
+      argsText: mockMcpServerPath,
     });
 
     const workspace = await postJson(`http://127.0.0.1:${appPort}/api/workspaces`, {
@@ -862,7 +936,15 @@ test("agent hub skeleton projects executors, installed prompt apps, and MCP clie
     const runtimeRegistry = await getJson(`http://127.0.0.1:${appPort}/api/agent-runtimes`);
     assert.equal(runtimeRegistry.runtimes.some((runtime) => runtime.kind === "executor" && runtime.title === "mock"), true);
     assert.equal(runtimeRegistry.runtimes.some((runtime) => runtime.kind === "executor" && runtime.title === "codex" && runtime.compatibility.transport === "process-cli"), true);
-    assert.equal(runtimeRegistry.runtimes.some((runtime) => runtime.kind === "mcp-client" && runtime.status === "ready"), true);
+    assert.equal(
+      runtimeRegistry.runtimes.some((runtime) => (
+        runtime.kind === "mcp-client"
+        && runtime.status === "ready"
+        && runtime.mcpRuntime?.toolCount === 2
+        && runtime.mcpRuntime?.serverName === "fixture-mcp"
+      )),
+      true,
+    );
     assert.equal(runtimeRegistry.runtimes.some((runtime) => runtime.kind === "prompt-app" && runtime.capabilityId === exported.capability.id && runtime.workspaceId === workspace.workspace.id), true);
 
     await patchJson(`http://127.0.0.1:${appPort}/api/settings/workspace-selection`, {
@@ -870,7 +952,10 @@ test("agent hub skeleton projects executors, installed prompt apps, and MCP clie
     });
     const switchedRegistry = await getJson(`http://127.0.0.1:${appPort}/api/agent-runtimes`);
     assert.equal(switchedRegistry.runtimes.some((runtime) => runtime.kind === "prompt-app"), false);
-    assert.equal(switchedRegistry.runtimes.some((runtime) => runtime.kind === "mcp-client" && runtime.status === "ready"), true);
+    assert.equal(
+      switchedRegistry.runtimes.some((runtime) => runtime.kind === "mcp-client" && runtime.status === "ready" && runtime.mcpRuntime?.toolCount === 2),
+      true,
+    );
   } finally {
     await appServer.stop();
     await rm(storageDir, { recursive: true, force: true });
@@ -1935,7 +2020,7 @@ function createSseResponse(text) {
   );
 }
 
-function startSpaceDesktopServer({ port, storageDir }) {
+function startSpaceDesktopServer({ port, storageDir, envOverrides = {} }) {
   const child = spawn(
     process.execPath,
     ["./apps/space-desktop/scripts/dev-server.mjs"],
@@ -1947,6 +2032,7 @@ function startSpaceDesktopServer({ port, storageDir }) {
         AI_SPACE_SKIP_BUILD: "1",
         AI_SPACE_STORAGE_DIR: storageDir,
         AI_SPACE_SECRET_BACKEND: "file",
+        ...envOverrides,
       },
       stdio: ["ignore", "pipe", "pipe"],
     },

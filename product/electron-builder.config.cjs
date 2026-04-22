@@ -47,6 +47,7 @@ module.exports = {
         "dist/**",
         "public/**",
         "scripts/dev-server.mjs",
+        "scripts/mcp-runtime.mjs",
       ],
     },
     {

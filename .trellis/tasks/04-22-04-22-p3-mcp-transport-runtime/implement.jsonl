@@ -1,0 +1,9 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend development guide"}
+{"file": ".trellis/spec/backend/mcp-client-config-sync.md", "reason": "Current MCP config contract and payload shape"}
+{"file": ".trellis/spec/backend/agent-hub-skeleton.md", "reason": "Registry contract that currently projects MCP state"}
+{"file": ".trellis/spec/backend/future-mcp-server-boundary-spike.md", "reason": "Boundary to avoid overreaching into server hosting/orchestration"}
+{"file": ".trellis/spec/backend/electron-desktop-shell.md", "reason": "Electron packaging and readiness contract to keep validation aligned"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Feature spans backend API, persistence, renderer, and tests"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Avoid duplicating status projection and payload handling"}
