@@ -22,6 +22,7 @@ This directory contains guidelines for backend development. Fill in each file wi
 | [Electron Desktop Shell](./electron-desktop-shell.md) | Runtime, packaging, env, and secret-store contracts for the Electron product shell | Active |
 | [External Runtime Compatibility Contract](./external-runtime-compatibility-contract.md) | Additive external runtime compatibility metadata before Agent Hub work | Active |
 | [Future MCP Server Boundary Spike](./future-mcp-server-boundary-spike.md) | Documentation boundary for future MCP server layer beyond current product-owned runtime | Active |
+| [Local Setup Import And Reset](./local-setup-import-and-reset.md) | Backend discovery/import/reset contract for first-use onboarding and safe local data cleanup | Active |
 | [Remote Bridge Pilot MVP](./remote-bridge-pilot-mvp.md) | Single-channel authenticated remote bridge session layer that reuses existing local run and approval semantics | Active |
 | [Mailbox Runtime MVP](./mailbox-runtime-mvp.md) | Local mailbox persistence for orchestration and remote bridge handoff messages | Active |
 | [MCP Client Config Sync](./mcp-client-config-sync.md) | Local MCP default/override config projection and health contract | Active |

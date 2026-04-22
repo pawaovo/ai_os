@@ -570,6 +570,20 @@
           <p id="install-help" class="inline-help">The product desktop build uses Electron for macOS and Windows.</p>
         </section>
 
+        <section class="local-setup-panel panel page-section" data-pages="start settings providers" aria-labelledby="local-setup-title">
+          <div class="panel-heading">
+            <p class="eyebrow">First Use</p>
+            <span class="mini-label">local discovery</span>
+          </div>
+          <h2 id="local-setup-title">Local Setup Import</h2>
+          <div class="button-grid">
+            <button id="local-setup-refresh-button" type="button">Refresh Discovery</button>
+            <button id="local-setup-import-provider-button" type="button" class="secondary-button">Import Codex Provider</button>
+          </div>
+          <ul id="local-setup-list" class="action-list"></ul>
+          <p id="local-setup-help" class="inline-help">AI OS can detect local executors and import a provider from local Codex config.</p>
+        </section>
+
         <section class="agent-orchestration-list-panel panel page-section" data-pages="agents" aria-labelledby="agent-orchestration-list-title">
           <div class="panel-heading">
             <p class="eyebrow">Orchestrations</p>
@@ -714,6 +728,20 @@
           <h2 id="approval-history-title">Trust Decisions</h2>
           <ul id="approval-history-list" class="action-list"></ul>
           <p id="approval-history-help" class="inline-help">Risk decisions in the active workspace appear here.</p>
+        </section>
+
+        <section class="local-reset-panel panel page-section" data-pages="settings" aria-labelledby="local-data-reset-title">
+          <div class="panel-heading">
+            <p class="eyebrow">Local Reset</p>
+            <span class="mini-label">cleanup</span>
+          </div>
+          <h2 id="local-data-reset-title">Local Data Reset</h2>
+          <ul id="local-data-reset-list" class="action-list compact-list"></ul>
+          <div class="button-grid">
+            <button id="local-data-reset-generated-button" type="button" class="secondary-button">Clear Generated Data</button>
+            <button id="local-data-reset-profile-button" type="button" class="secondary-button">Reset Local Profile</button>
+          </div>
+          <p id="local-data-reset-help" class="inline-help">Clear generated records or fully reset the local profile after confirmation.</p>
         </section>
 
         <section class="automation-history-panel panel page-section" data-pages="automations" aria-labelledby="automation-history-title">

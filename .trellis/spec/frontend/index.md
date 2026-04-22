@@ -18,6 +18,7 @@ This directory contains guidelines for frontend development. Fill in each file w
 | [Component Guidelines](./component-guidelines.md) | Component patterns, props, composition | To fill |
 | [Desktop Readiness Contract](./desktop-readiness-contract.md) | Renderer/UI contract for app readiness and Electron install messaging | Active |
 | [Hook Guidelines](./hook-guidelines.md) | Custom hooks, data fetching patterns | To fill |
+| [First Use Onboarding Surface](./first-use-onboarding-surface.md) | Start/Settings surface for local setup discovery, provider import, and local reset actions | Active |
 | [Mailbox Surface](./mailbox-surface.md) | Agents surface contract for mailbox timeline items linked to orchestration and remote bridge flows | Active |
 | [MCP Hosted Server Surface](./mcp-hosted-server-surface.md) | Settings surface contract for the local Hosted MCP Server command and exported catalog | Active |
 | [Multi Agent Product Surface](./multi-agent-product-surface.md) | Boundary contract for the first read-only frontend surface of future multi-agent governance work | Active |

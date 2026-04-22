@@ -533,6 +533,56 @@ interface MultiAgentGovernanceSummary {
   activity: MultiAgentGovernanceItem[];
 }
 
+interface LocalSetupCommandSummary {
+  command: string;
+  available: boolean;
+  detail: string;
+  configFound?: boolean;
+  authFound?: boolean;
+}
+
+interface LocalSetupProviderImportSummary {
+  source: string;
+  available: boolean;
+  detail: string;
+  name?: string;
+  protocol?: ProviderProtocol;
+  baseUrl?: string;
+  modelId?: string;
+  apiKeyPreview?: string;
+}
+
+interface LocalDataSummary {
+  counts: {
+    workspaces: number;
+    providers: number;
+    threads: number;
+    runs: number;
+    artifacts: number;
+    approvals: number;
+    automations: number;
+    automationRuns: number;
+    memories: number;
+    recipes: number;
+    recipeTests: number;
+    capabilityRuns: number;
+    orchestrations: number;
+    remoteSessions: number;
+    mailboxItems: number;
+  };
+  generatedCount: number;
+  profileCount: number;
+}
+
+interface LocalSetupDiscoverySummary {
+  executors: {
+    codex: LocalSetupCommandSummary;
+    "claude-code": LocalSetupCommandSummary;
+  };
+  providerImport: LocalSetupProviderImportSummary;
+  localData: LocalDataSummary;
+}
+
 interface LiveRunState {
   sessionId?: string;
   runId: string;
@@ -583,6 +633,8 @@ const state = {
   capabilityRuns: [] as CapabilityRunRecord[],
   recipes: [] as RecipeSummary[],
   recipeTests: [] as RecipeTestSummary[],
+  localSetup: undefined as LocalSetupDiscoverySummary | undefined,
+  localSetupError: undefined as string | undefined,
   agentRuntimes: [] as AgentRuntimeSummary[],
   multiAgentGovernance: undefined as MultiAgentGovernanceSummary | undefined,
   multiAgentGovernanceError: undefined as string | undefined,
@@ -636,12 +688,20 @@ const elements = {
   appReadinessList: getElement("app-readiness-list", HTMLElement),
   appReadinessHelp: getElement("app-readiness-help", HTMLElement),
   startActionList: getElement("start-action-list", HTMLElement),
+  localSetupRefreshButton: getElement("local-setup-refresh-button", HTMLButtonElement),
+  localSetupImportProviderButton: getElement("local-setup-import-provider-button", HTMLButtonElement),
+  localSetupList: getElement("local-setup-list", HTMLElement),
+  localSetupHelp: getElement("local-setup-help", HTMLElement),
   metricThreadCount: getElement("metric-thread-count", HTMLElement),
   metricRunCount: getElement("metric-run-count", HTMLElement),
   metricArtifactCount: getElement("metric-artifact-count", HTMLElement),
   metricCapabilityCount: getElement("metric-capability-count", HTMLElement),
   installStatusList: getElement("install-status-list", HTMLElement),
   installHelp: getElement("install-help", HTMLElement),
+  localDataResetList: getElement("local-data-reset-list", HTMLElement),
+  localDataResetGeneratedButton: getElement("local-data-reset-generated-button", HTMLButtonElement),
+  localDataResetProfileButton: getElement("local-data-reset-profile-button", HTMLButtonElement),
+  localDataResetHelp: getElement("local-data-reset-help", HTMLElement),
   workspaceForm: getElement("workspace-form", HTMLFormElement),
   workspaceSelect: getElement("workspace-select", HTMLSelectElement),
   workspaceName: getElement("workspace-name", HTMLInputElement),
@@ -892,6 +952,22 @@ elements.installStatusList.addEventListener("click", (event) => {
   navigateFromReadinessList(event);
 });
 
+elements.localSetupRefreshButton.addEventListener("click", () => {
+  void loadLocalSetup();
+});
+
+elements.localSetupImportProviderButton.addEventListener("click", () => {
+  void importCodexProviderFromLocalSetup();
+});
+
+elements.localDataResetGeneratedButton.addEventListener("click", () => {
+  void resetLocalData("generated-data");
+});
+
+elements.localDataResetProfileButton.addEventListener("click", () => {
+  void resetLocalData("profile");
+});
+
 elements.workspaceForm.addEventListener("submit", (event) => {
   event.preventDefault();
   void createWorkspaceFromForm();
@@ -1128,6 +1204,7 @@ async function initializeAppState(): Promise<void> {
   await loadRemoteBridgePilot();
   await loadMailbox();
   await loadAppReadiness();
+  await loadLocalSetup();
 }
 
 function t(key: string, variables: Record<string, string | number> = {}): string {
@@ -1195,6 +1272,10 @@ function localizeOrchestrationRole(value: string): string {
 
 function localizeGovernanceKind(value: string): string {
   return translateKeyOrFallback(`agents.governance.activity.kind.${value}`, value);
+}
+
+function localizeProviderProtocol(value: ProviderProtocol): string {
+  return translateKeyOrFallback(`provider.protocol.${value}`, value);
 }
 
 function localizePageTarget(value: string): string {
@@ -1373,6 +1454,12 @@ function applyStaticTranslations(): void {
   setMetricLabel(2, t("start.metrics.artifacts"));
   setMetricLabel(3, t("start.metrics.capabilities"));
   setText(".start-panel h3", t("start.recommended"));
+  setText(".local-setup-panel .eyebrow", t("localSetup.eyebrow"));
+  setText(".local-setup-panel .mini-label", t("localSetup.mini"));
+  setText("#local-setup-title", t("localSetup.title"));
+  elements.localSetupRefreshButton.textContent = t("localSetup.button.refresh");
+  elements.localSetupImportProviderButton.textContent = t("localSetup.button.importProvider");
+  renderLocalSetup();
 
   setText(".chat-panel .eyebrow", t("chat.eyebrow"));
   setText(".chat-panel .mini-label", t("chat.mini"));
@@ -1517,6 +1604,7 @@ function applyStaticTranslations(): void {
   }
 
   setText(".install-panel .eyebrow", t("install.eyebrow"));
+  setText(".install-panel .mini-label", t("install.mini"));
   setText("#install-title", t("install.title"));
   if (!state.appReadiness) {
     elements.installHelp.textContent = t("install.help.default");
@@ -1586,6 +1674,13 @@ function applyStaticTranslations(): void {
   if (state.approvals.length === 0) {
     elements.approvalHistoryHelp.textContent = t("approval-history.help.default");
   }
+
+  setText(".local-reset-panel .eyebrow", t("localReset.eyebrow"));
+  setText(".local-reset-panel .mini-label", t("localReset.mini"));
+  setText("#local-data-reset-title", t("localReset.title"));
+  elements.localDataResetGeneratedButton.textContent = t("localReset.button.generated");
+  elements.localDataResetProfileButton.textContent = t("localReset.button.profile");
+  renderLocalDataReset();
 
   setText(".automation-history-panel .eyebrow", t("automation-history.eyebrow"));
   setText(".automation-history-panel .mini-label", t("automation-history.mini"));
@@ -1688,6 +1783,8 @@ function renderSettingsList(): void {
     ["settings.item.capabilities.title", "settings.item.capabilities.detail"],
     ["settings.item.hostedMcp.title", "settings.item.hostedMcp.detail"],
     ["settings.item.install.title", "settings.item.install.detail"],
+    ["settings.item.localSetup.title", "settings.item.localSetup.detail"],
+    ["settings.item.localReset.title", "settings.item.localReset.detail"],
   ] as const;
 
   list.replaceChildren(
@@ -1770,9 +1867,224 @@ function setActivePage(page: string): void {
 function navigateFromReadinessList(event: Event): void {
   const target = event.target instanceof HTMLElement
     ? event.target.closest<HTMLButtonElement>("button[data-readiness-target]")
-    : null;
+  : null;
   if (target?.dataset.readinessTarget) {
     setActivePage(target.dataset.readinessTarget);
+  }
+}
+
+async function loadLocalSetup(): Promise<void> {
+  try {
+    const payload = await apiJson<{ discovery: LocalSetupDiscoverySummary }>("/api/local-setup");
+    state.localSetup = payload.discovery;
+    state.localSetupError = undefined;
+  } catch (error) {
+    state.localSetup = undefined;
+    state.localSetupError = errorToMessage(error, t("localSetup.loadFailed"));
+  }
+
+  renderLocalSetup();
+  renderLocalDataReset();
+}
+
+function renderLocalSetup(): void {
+  const discovery = state.localSetup;
+  const providerImport = discovery?.providerImport;
+  elements.localSetupImportProviderButton.disabled = !providerImport?.available;
+
+  if (!discovery) {
+    elements.localSetupList.replaceChildren(createListItem(t("localSetup.none")));
+    elements.localSetupHelp.textContent = state.localSetupError ?? t("localSetup.help.default");
+    return;
+  }
+
+  elements.localSetupList.replaceChildren(
+    createStaticActionListItem(
+      t("localSetup.executor.codex"),
+      describeLocalSetupCommand(discovery.executors.codex, {
+        configFound: discovery.executors.codex.configFound,
+        authFound: discovery.executors.codex.authFound,
+      }),
+      discovery.executors.codex.available ? "completed" : "failed",
+    ),
+    createStaticActionListItem(
+      t("localSetup.executor.claude-code"),
+      describeLocalSetupCommand(discovery.executors["claude-code"]),
+      discovery.executors["claude-code"].available ? "completed" : "failed",
+    ),
+    createStaticActionListItem(
+      t("localSetup.providerImport.title"),
+      describeLocalSetupProviderImport(providerImport),
+      providerImport?.available ? "completed" : "idle",
+    ),
+  );
+
+  elements.localSetupHelp.textContent = providerImport?.available
+    ? t("localSetup.help.importReady", {
+        name: providerImport.name ?? t("dynamic.none"),
+        modelId: providerImport.modelId ?? t("dynamic.none"),
+      })
+    : t("localSetup.help.default");
+}
+
+function renderLocalDataReset(): void {
+  const localData = state.localSetup?.localData;
+  if (!localData) {
+    elements.localDataResetList.replaceChildren(createListItem(t("localReset.none")));
+    elements.localDataResetHelp.textContent = state.localSetupError ?? t("localReset.help.default");
+    return;
+  }
+
+  elements.localDataResetList.replaceChildren(
+    createStaticActionListItem(
+      t("localReset.generated.title"),
+      t("localReset.generated.detail", { count: localData.generatedCount }),
+      localData.generatedCount > 0 ? "optional" : "completed",
+    ),
+    createStaticActionListItem(
+      t("localReset.profile.title"),
+      t("localReset.profile.detail", { count: localData.profileCount }),
+      localData.profileCount > 0 ? "optional" : "completed",
+    ),
+    createStaticActionListItem(
+      t("localReset.providers.title"),
+      t("localReset.providers.detail", {
+        providers: localData.counts.providers,
+        workspaces: localData.counts.workspaces,
+      }),
+      localData.counts.providers > 0 || localData.counts.workspaces > 0 ? "optional" : "completed",
+    ),
+  );
+  elements.localDataResetHelp.textContent = t("localReset.help.default");
+}
+
+function describeLocalSetupCommand(
+  command: LocalSetupCommandSummary,
+  options: {
+    configFound?: boolean | undefined;
+    authFound?: boolean | undefined;
+  } = {},
+): string {
+  const parts = [
+    command.command,
+    command.available ? t("localSetup.status.available") : t("localSetup.status.missing"),
+  ];
+  if (options.configFound !== undefined) {
+    parts.push(options.configFound ? t("localSetup.status.configFound") : t("localSetup.status.configMissing"));
+  }
+  if (options.authFound !== undefined) {
+    parts.push(options.authFound ? t("localSetup.status.authFound") : t("localSetup.status.authMissing"));
+  }
+  return parts.join(" / ");
+}
+
+function describeLocalSetupProviderImport(providerImport?: LocalSetupProviderImportSummary): string {
+  if (!providerImport) return t("localSetup.providerImport.unavailable");
+  if (!providerImport.available) return providerImport.detail ? localizeKnownText(providerImport.detail) : t("localSetup.providerImport.unavailable");
+  return [
+    providerImport.name ?? t("dynamic.none"),
+    providerImport.protocol ? localizeProviderProtocol(providerImport.protocol) : t("dynamic.none"),
+    providerImport.modelId ?? t("dynamic.none"),
+    providerImport.apiKeyPreview ?? t("dynamic.none"),
+  ].join(" / ");
+}
+
+async function importCodexProviderFromLocalSetup(): Promise<void> {
+  elements.localSetupImportProviderButton.disabled = true;
+  try {
+    const payload = await apiJson<{
+      provider?: ProviderSummary;
+      discovery: LocalSetupDiscoverySummary;
+    }>("/api/local-setup/import", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ source: "codex-provider" }),
+    });
+    state.localSetup = payload.discovery;
+    state.localSetupError = undefined;
+    await loadProviders();
+    await loadAppReadiness();
+    renderLocalSetup();
+    renderLocalDataReset();
+    setActivePage("providers");
+    elements.localSetupHelp.textContent = t("localSetup.imported", {
+      name: payload.provider?.name ?? t("dynamic.none"),
+      preview: payload.provider?.apiKeyPreview ?? t("dynamic.none"),
+    });
+    elements.providerHelp.textContent = t("localSetup.imported", {
+      name: payload.provider?.name ?? t("dynamic.none"),
+      preview: payload.provider?.apiKeyPreview ?? t("dynamic.none"),
+    });
+    elements.providerHelp.dataset.dynamic = "true";
+  } catch (error) {
+    elements.localSetupHelp.textContent = errorToMessage(error, t("localSetup.importFailed"));
+  } finally {
+    elements.localSetupImportProviderButton.disabled = !(state.localSetup?.providerImport.available);
+  }
+}
+
+async function resetLocalData(mode: "generated-data" | "profile"): Promise<void> {
+  const message = mode === "profile"
+    ? t("localReset.confirm.profile")
+    : t("localReset.confirm.generated");
+  if (!globalThis.confirm(message)) return;
+
+  elements.localDataResetGeneratedButton.disabled = true;
+  elements.localDataResetProfileButton.disabled = true;
+  try {
+    const payload = await apiJson<{ discovery: LocalSetupDiscoverySummary }>("/api/local-data/reset", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        mode,
+        confirmText: "delete-local-data",
+      }),
+    });
+    state.localSetup = payload.discovery;
+    state.localSetupError = undefined;
+    stopRunPolling();
+    stopAgentOrchestrationPolling();
+    state.activeRunId = undefined;
+    state.liveRun = undefined;
+    state.runEvents = [];
+    state.activeOrchestrationId = undefined;
+    state.orchestrations = [];
+    state.mailboxItems = [];
+    state.remoteBridgePilot = undefined;
+    state.remoteBridgeSession = undefined;
+    state.remoteBridgeEvents = [];
+    state.remoteBridgeConnect = undefined;
+    await loadWorkspaces();
+    await loadProviders();
+    await loadThreads();
+    await loadArtifacts();
+    await loadRuns();
+    await loadApprovals();
+    await loadAutomations();
+    await loadAutomationRuns();
+    await loadMemories();
+    await loadCapabilities();
+    await loadCapabilityRuns();
+    await loadRecipes();
+    await loadRecipeTests();
+    await loadMcpConfig();
+    await loadAgentRuntimes();
+    await loadMultiAgentGovernance();
+    await loadAgentOrchestrations();
+    await loadHostedMcpServer();
+    await loadRemoteBridgePilot();
+    await loadMailbox();
+    await loadAppReadiness();
+    renderLocalSetup();
+    renderLocalDataReset();
+    elements.localDataResetHelp.textContent = t(
+      mode === "profile" ? "localReset.completed.profile" : "localReset.completed.generated",
+    );
+  } catch (error) {
+    elements.localDataResetHelp.textContent = errorToMessage(error, t("localReset.failed"));
+  } finally {
+    elements.localDataResetGeneratedButton.disabled = false;
+    elements.localDataResetProfileButton.disabled = false;
   }
 }
 
@@ -2042,6 +2354,7 @@ async function refreshWorkspaceScopedData(): Promise<void> {
   await loadRemoteBridgePilot();
   await loadMailbox();
   await loadAppReadiness();
+  await loadLocalSetup();
 }
 
 async function loadRemoteBridgePilot(): Promise<void> {
@@ -3323,6 +3636,7 @@ async function saveProviderFromForm(): Promise<void> {
     elements.providerHelp.dataset.dynamic = "true";
     await loadProviders();
     await loadAppReadiness();
+    await loadLocalSetup();
   } catch (error) {
     renderProviderError(errorToMessage(error, t("dynamic.provider.saveFailed")));
   } finally {
@@ -3348,6 +3662,7 @@ async function deleteSelectedProvider(): Promise<void> {
     elements.providerModel.value = "";
     await loadProviders();
     await loadAppReadiness();
+    await loadLocalSetup();
   } catch (error) {
     renderProviderError(errorToMessage(error, t("dynamic.provider.deleteFailed")));
   } finally {
@@ -4889,6 +5204,15 @@ function localizeKnownText(text: string): string {
     return t("dynamic.executor.available", {
       available: text.endsWith("true") ? translatedToken("ready") : translatedToken("failed"),
     });
+  }
+  if (text === "No local Codex config or auth files were found.") {
+    return t("localSetup.providerImport.unavailable");
+  }
+  if (text === "Local Codex config was found, but provider import fields are incomplete.") {
+    return t("localSetup.providerImport.incomplete");
+  }
+  if (text === "A provider can be imported from local Codex config.") {
+    return t("localSetup.help.default");
   }
   if (text === "Selected workspace path does not exist or is not a directory.") {
     return t("dynamic.run.workspacePathMissing");

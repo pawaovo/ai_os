@@ -24,6 +24,7 @@ const mcpProbeCacheTtlMs = Number.parseInt(process.env.AI_SPACE_MCP_PROBE_CACHE_
 const codexCommand = process.env.AI_SPACE_CODEX_COMMAND;
 const claudeCommand = process.env.AI_SPACE_CLAUDE_COMMAND;
 const storageRoot = resolve(process.env.AI_SPACE_STORAGE_DIR ?? join(homedir(), ".ai_os", "space-demo"));
+const localCodexRoot = resolve(process.env.AI_OS_LOCAL_CODEX_HOME ?? join(homedir(), ".codex"));
 const SPACE_RUNTIME_SPACE_ID = "space-local-runtime";
 const APP_VERSION = "1.0.0";
 const APP_RELEASE_NAME = "Personal AI OS";
@@ -125,6 +126,21 @@ async function handleRequest(request, response) {
 
   if (request.method === "PATCH" && pathname === "/api/settings/language") {
     await handleSetLanguageSetting(request, response);
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/local-setup") {
+    await handleGetLocalSetup(response);
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/local-setup/import") {
+    await handleImportLocalSetup(request, response);
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/local-data/reset") {
+    await handleResetLocalData(request, response);
     return;
   }
 
@@ -516,6 +532,202 @@ async function handleSetLanguageSetting(request, response) {
   const language = normalizeAppLanguage(body.language);
   appStore.setSetting("uiLanguage", language);
   writeJson(response, 200, { language });
+}
+
+async function handleGetLocalSetup(response) {
+  writeJson(response, 200, {
+    discovery: await createLocalSetupDiscoverySummary(),
+  });
+}
+
+async function handleImportLocalSetup(request, response) {
+  try {
+    const body = await readJsonBody(request);
+    const source = readRequiredString(body.source, "source");
+    if (source !== "codex-provider") {
+      throw new Error("Unsupported local setup import source.");
+    }
+
+    const imported = await importProviderFromCodexDiscovery();
+    writeJson(response, 200, {
+      provider: createProviderSettingsResponse(imported).provider,
+      discovery: await createLocalSetupDiscoverySummary(),
+    });
+  } catch (error) {
+    writeJson(response, 400, { error: sanitizeErrorMessage(error) });
+  }
+}
+
+async function handleResetLocalData(request, response) {
+  try {
+    const body = await readJsonBody(request);
+    const mode = normalizeLocalDataResetMode(body.mode);
+    const confirmText = readRequiredString(body.confirmText, "confirmText");
+    if (confirmText !== "delete-local-data") {
+      throw new Error("Explicit confirmation is required before deleting local data.");
+    }
+
+    await appStore.resetLocalData(mode);
+    runSessions.clear();
+    agentOrchestrationSessions.clear();
+    writeJson(response, 200, {
+      mode,
+      discovery: await createLocalSetupDiscoverySummary(),
+    });
+  } catch (error) {
+    writeJson(response, 400, { error: sanitizeErrorMessage(error) });
+  }
+}
+
+async function createLocalSetupDiscoverySummary() {
+  const codexCommandName = codexCommand?.trim() || "codex";
+  const claudeCommandName = claudeCommand?.trim() || "claude";
+  const codexCommandHealth = evaluateLocalCommandHealth(codexCommandName);
+  const claudeCommandHealth = evaluateLocalCommandHealth(claudeCommandName);
+  const codexProviderImport = await discoverCodexProviderImport();
+  const localData = appStore.getLocalDataSummary();
+
+  return {
+    executors: {
+      codex: {
+        command: codexCommandName,
+        available: codexCommandHealth.available,
+        detail: codexCommandHealth.message,
+        configFound: codexProviderImport.configFound,
+        authFound: codexProviderImport.authFound,
+      },
+      "claude-code": {
+        command: claudeCommandName,
+        available: claudeCommandHealth.available,
+        detail: claudeCommandHealth.message,
+      },
+    },
+    providerImport: {
+      source: "codex-provider",
+      available: codexProviderImport.available,
+      detail: codexProviderImport.detail,
+      ...(codexProviderImport.name ? { name: codexProviderImport.name } : {}),
+      ...(codexProviderImport.protocol ? { protocol: codexProviderImport.protocol } : {}),
+      ...(codexProviderImport.baseUrl ? { baseUrl: codexProviderImport.baseUrl } : {}),
+      ...(codexProviderImport.modelId ? { modelId: codexProviderImport.modelId } : {}),
+      ...(codexProviderImport.apiKeyPreview ? { apiKeyPreview: codexProviderImport.apiKeyPreview } : {}),
+    },
+    localData,
+  };
+}
+
+async function discoverCodexProviderImport() {
+  const configPath = join(localCodexRoot, "config.toml");
+  const authPath = join(localCodexRoot, "auth.json");
+  let configText = "";
+  let auth = {};
+
+  try {
+    configText = await readFile(configPath, "utf8");
+  } catch {
+    configText = "";
+  }
+
+  try {
+    auth = JSON.parse(await readFile(authPath, "utf8"));
+  } catch {
+    auth = {};
+  }
+
+  const providerKey = matchText(configText, /^model_provider\s*=\s*"([^"]+)"/m);
+  const modelId = matchText(configText, /^model\s*=\s*"([^"]+)"/m);
+  const directBaseUrl = matchText(configText, /^base_url\s*=\s*"([^"]+)"/m);
+  const baseUrl = directBaseUrl || (providerKey
+    ? matchText(configText, new RegExp(`^\\[model_providers\\.${escapeRegExp(providerKey)}\\][\\s\\S]*?^base_url\\s*=\\s*"([^"]+)"`, "m"))
+    : undefined);
+  const apiKey = readStringProperty(auth.OPENAI_API_KEY)
+    || readStringProperty(auth.api_key)
+    || readStringProperty(auth.key)
+    || readStringProperty(auth.token);
+  const detectedProtocol = baseUrl ? createProviderCatalogResponse(baseUrl).detectedProtocol : undefined;
+
+  if (!configText && !Object.keys(auth).length) {
+    return {
+      available: false,
+      configFound: false,
+      authFound: false,
+      detail: "No local Codex config or auth files were found.",
+    };
+  }
+
+  if (!baseUrl || !modelId || !apiKey) {
+    return {
+      available: false,
+      configFound: Boolean(configText),
+      authFound: Boolean(apiKey),
+      detail: "Local Codex config was found, but provider import fields are incomplete.",
+      ...(baseUrl ? { baseUrl } : {}),
+      ...(modelId ? { modelId } : {}),
+      ...(apiKey ? { apiKeyPreview: maskLocalSecret(apiKey) } : {}),
+      ...(detectedProtocol ? { protocol: detectedProtocol } : {}),
+    };
+  }
+
+  return {
+    available: true,
+    configFound: Boolean(configText),
+    authFound: true,
+    name: providerKey ? `Imported from Codex (${providerKey})` : "Imported from Codex",
+    protocol: detectedProtocol ?? "openai-compatible",
+    baseUrl,
+    modelId,
+    apiKey,
+    apiKeyPreview: maskLocalSecret(apiKey),
+    detail: "A provider can be imported from local Codex config.",
+  };
+}
+
+async function importProviderFromCodexDiscovery() {
+  const discovery = await discoverCodexProviderImport();
+  if (!discovery.available || !discovery.baseUrl || !discovery.modelId || !discovery.apiKey || !discovery.protocol) {
+    throw new Error(discovery.detail || "No importable local Codex provider was found.");
+  }
+
+  const providers = await appStore.listProviders();
+  const existing = providers.find((provider) =>
+    provider.protocol === discovery.protocol
+    && provider.baseUrl === discovery.baseUrl
+    && provider.modelId === discovery.modelId,
+  );
+
+  return appStore.writeProvider({
+    ...(existing?.id ? { id: existing.id } : {}),
+    name: discovery.name,
+    protocol: discovery.protocol,
+    baseUrl: discovery.baseUrl,
+    apiKey: discovery.apiKey,
+    modelId: discovery.modelId,
+  });
+}
+
+function normalizeLocalDataResetMode(value) {
+  const normalized = readRequiredString(value, "mode");
+  if (normalized === "generated-data" || normalized === "profile") return normalized;
+  throw new Error("Unsupported local data reset mode.");
+}
+
+function matchText(text, pattern) {
+  const match = pattern.exec(text);
+  return match?.[1]?.trim();
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function readStringProperty(value) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function maskLocalSecret(value) {
+  const normalized = String(value ?? "").trim();
+  if (normalized.length <= 8) return "••••••••";
+  return `${normalized.slice(0, 3)}••••${normalized.slice(-3)}`;
 }
 
 async function createAppReadinessSummary(language) {
@@ -4415,6 +4627,107 @@ class SqliteAppStore {
         timestamp,
       );
     }
+  }
+
+  getLocalDataSummary() {
+    const counts = {
+      workspaces: this.countRows("workspaces"),
+      providers: this.countRows("providers"),
+      threads: this.countRows("threads"),
+      runs: this.countRows("runs"),
+      artifacts: this.countRows("artifacts"),
+      approvals: this.countRows("approvals"),
+      automations: this.countRows("automations"),
+      automationRuns: this.countRows("automation_runs"),
+      memories: this.countRows("memories"),
+      recipes: this.countRows("recipes"),
+      recipeTests: this.countRows("recipe_tests"),
+      capabilityRuns: this.countRows("capability_runs"),
+      orchestrations: this.countRows("agent_orchestrations"),
+      remoteSessions: this.countRows("remote_bridge_sessions"),
+      mailboxItems: this.countRows("mailbox_items"),
+    };
+    const generatedCount = counts.threads
+      + counts.runs
+      + counts.artifacts
+      + counts.approvals
+      + counts.automations
+      + counts.automationRuns
+      + counts.memories
+      + counts.recipes
+      + counts.recipeTests
+      + counts.capabilityRuns
+      + counts.orchestrations
+      + counts.remoteSessions
+      + counts.mailboxItems;
+    return {
+      counts,
+      generatedCount,
+      profileCount: generatedCount + counts.workspaces + counts.providers,
+    };
+  }
+
+  countRows(table) {
+    return this.db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count;
+  }
+
+  async resetLocalData(mode) {
+    const savedLanguage = this.getSetting("uiLanguage");
+    if (mode === "profile") {
+      const providerRows = this.db.prepare("SELECT id FROM providers").all();
+      for (const row of providerRows) {
+        await this.secretStore.deleteProviderApiKey(row.id);
+      }
+    }
+
+    this.db.exec(`
+      DELETE FROM messages;
+      DELETE FROM threads;
+      DELETE FROM run_events;
+      DELETE FROM runs;
+      DELETE FROM approvals;
+      DELETE FROM artifacts;
+      DELETE FROM automation_runs;
+      DELETE FROM automations;
+      DELETE FROM memories;
+      DELETE FROM recipe_tests;
+      DELETE FROM recipes;
+      DELETE FROM capability_runs;
+      DELETE FROM agent_orchestrations;
+      DELETE FROM remote_bridge_events;
+      DELETE FROM remote_bridge_sessions;
+      DELETE FROM mailbox_items;
+    `);
+
+    if (mode === "profile") {
+      this.db.exec(`
+        DELETE FROM providers;
+        DELETE FROM workspaces;
+      `);
+      this.db.prepare(`
+        DELETE FROM app_settings
+        WHERE key IN (
+          'activeWorkspaceId',
+          'activeProviderId',
+          'activeModelId',
+          'activeThreadId',
+          'mcp_global_config_json'
+        )
+      `).run();
+    } else {
+      this.db.prepare(`
+        DELETE FROM app_settings
+        WHERE key IN (
+          'activeThreadId'
+        )
+      `).run();
+    }
+
+    if (savedLanguage) {
+      this.setSetting("uiLanguage", savedLanguage);
+    }
+    this.syncBuiltInCapabilities();
+    return this.getLocalDataSummary();
   }
 
   getSetting(key) {

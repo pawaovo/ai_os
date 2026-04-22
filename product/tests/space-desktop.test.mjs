@@ -197,6 +197,16 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(html, /id="metric-capability-count"/);
   assert.match(html, /id="install-title"/);
   assert.match(html, /id="install-status-list"/);
+  assert.match(html, /id="local-setup-title"/);
+  assert.match(html, /id="local-setup-refresh-button"/);
+  assert.match(html, /id="local-setup-import-provider-button"/);
+  assert.match(html, /id="local-setup-list"/);
+  assert.match(html, /id="local-setup-help"/);
+  assert.match(html, /id="local-data-reset-title"/);
+  assert.match(html, /id="local-data-reset-list"/);
+  assert.match(html, /id="local-data-reset-generated-button"/);
+  assert.match(html, /id="local-data-reset-profile-button"/);
+  assert.match(html, /id="local-data-reset-help"/);
   assert.match(html, /Capabilities And Forge/);
   assert.match(html, /Local Install/);
   assert.match(html, /id="settings-title"/);
@@ -386,6 +396,10 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(devServer, /WindowsProtectedFileSecretStore/);
   assert.match(devServer, /process\.platform === "darwin"\) return new KeychainSecretStore/);
   assert.match(devServer, /\/api\/settings\/language/);
+  assert.match(devServer, /\/api\/local-setup/);
+  assert.match(devServer, /\/api\/local-data\/reset/);
+  assert.match(devServer, /importProviderFromCodexDiscovery/);
+  assert.match(devServer, /AI_OS_LOCAL_CODEX_HOME/);
   assert.match(devServer, /createAppReadinessSummary\(language\)/);
   assert.match(devServer, /\/api\/mcp\/hosted-server/);
   assert.match(devServer, /createHostedMcpServerSummary/);
@@ -401,6 +415,9 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(browserSource, /x-ai-os-language/);
   assert.match(browserSource, /loadLanguageSetting/);
   assert.match(browserSource, /saveLanguageSetting/);
+  assert.match(browserSource, /loadLocalSetup/);
+  assert.match(browserSource, /importCodexProviderFromLocalSetup/);
+  assert.match(browserSource, /resetLocalData\(/);
   assert.match(browserSource, /renderWorkspaceRuntime/);
   assert.match(browserSource, /workspaceRuntimeList/);
   assert.match(browserSource, /renderWorkspaceNativeSurface/);
@@ -430,6 +447,10 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(i18nSource, /"language\.zh-CN": "中文"/);
   assert.match(i18nSource, /"nav\.start": "开始"/);
   assert.match(i18nSource, /"nav\.start": "Start"/);
+  assert.match(i18nSource, /"localSetup\.title": "Local Setup Import"/);
+  assert.match(i18nSource, /"localSetup\.title": "本机配置导入"/);
+  assert.match(i18nSource, /"localReset\.title": "Local Data Reset"/);
+  assert.match(i18nSource, /"localReset\.title": "本地数据重置"/);
   assert.match(i18nSource, /"recipe-editor\.binding\.workspace": "Workspace"/);
   assert.match(i18nSource, /"agents\.governance\.title": "Multi-Agent Overview"/);
   assert.match(i18nSource, /"agents\.governance\.title": "多 Agent 总览"/);
@@ -839,6 +860,119 @@ test("space desktop dev server persists providers, threads, and messages without
     await appServer.stop();
     await providerServer.stop();
     await rm(storageDir, { recursive: true, force: true });
+  }
+});
+
+test("local setup discovery can import Codex provider config and reset local data safely", async () => {
+  const storageDir = await mkdtemp(`${tmpdir()}/ai-os-local-setup-`);
+  const codexHome = await mkdtemp(`${tmpdir()}/ai-os-local-codex-`);
+  const appPort = await getAvailablePort();
+  const appServer = startSpaceDesktopServer({
+    port: appPort,
+    storageDir,
+    envOverrides: {
+      AI_OS_LOCAL_CODEX_HOME: codexHome,
+      AI_SPACE_CODEX_COMMAND: process.execPath,
+      AI_SPACE_CLAUDE_COMMAND: process.execPath,
+    },
+  });
+
+  try {
+    await writeFile(
+      `${codexHome}/config.toml`,
+      [
+        'model_provider = "packycode"',
+        'model = "gpt-5.4"',
+        "",
+        "[model_providers.packycode]",
+        'base_url = "https://example.test/v1"',
+      ].join("\n"),
+      "utf8",
+    );
+    await writeFile(
+      `${codexHome}/auth.json`,
+      JSON.stringify({
+        auth_mode: "api-key",
+        OPENAI_API_KEY: "sk-local-setup-secret",
+      }),
+      "utf8",
+    );
+
+    await waitForHttp(`http://127.0.0.1:${appPort}/`);
+
+    const initialDiscovery = await getJson(`http://127.0.0.1:${appPort}/api/local-setup`);
+    assert.equal(initialDiscovery.discovery.executors.codex.available, true);
+    assert.equal(initialDiscovery.discovery.executors["claude-code"].available, true);
+    assert.equal(initialDiscovery.discovery.providerImport.available, true);
+    assert.equal(initialDiscovery.discovery.providerImport.baseUrl, "https://example.test/v1");
+    assert.equal(initialDiscovery.discovery.providerImport.modelId, "gpt-5.4");
+    assert.equal(initialDiscovery.discovery.localData.generatedCount, 0);
+    assert.equal(initialDiscovery.discovery.localData.profileCount, 0);
+
+    const imported = await postJson(`http://127.0.0.1:${appPort}/api/local-setup/import`, {
+      source: "codex-provider",
+    });
+    assert.equal(imported.provider.name, "Imported from Codex (packycode)");
+    assert.equal(imported.provider.baseUrl, "https://example.test/v1");
+    assert.equal(imported.provider.modelId, "gpt-5.4");
+    assert.equal(typeof imported.provider.apiKeyPreview, "string");
+    assert.equal(imported.discovery.localData.counts.providers, 1);
+
+    const workspace = await postJson(`http://127.0.0.1:${appPort}/api/workspaces`, {
+      name: "Setup Workspace",
+      path: storageDir,
+    });
+    const thread = await postJson(`http://127.0.0.1:${appPort}/api/threads`, {
+      title: "Setup Thread",
+    });
+    await postJson(`http://127.0.0.1:${appPort}/api/artifacts`, {
+      title: "Setup Artifact",
+      content: "# setup artifact",
+      workspaceId: workspace.workspace.id,
+      threadId: thread.thread.id,
+      source: "manual",
+    });
+    await postJson(`http://127.0.0.1:${appPort}/api/memories`, {
+      title: "Setup Memory",
+      content: "Remember setup state.",
+      scope: "workspace",
+      sensitivity: "low",
+    });
+
+    const populatedDiscovery = await getJson(`http://127.0.0.1:${appPort}/api/local-setup`);
+    assert.equal(populatedDiscovery.discovery.localData.counts.workspaces, 1);
+    assert.equal(populatedDiscovery.discovery.localData.counts.providers, 1);
+    assert.equal(populatedDiscovery.discovery.localData.generatedCount >= 3, true);
+
+    const clearedGenerated = await postJson(`http://127.0.0.1:${appPort}/api/local-data/reset`, {
+      mode: "generated-data",
+      confirmText: "delete-local-data",
+    });
+    assert.equal(clearedGenerated.discovery.localData.counts.providers, 1);
+    assert.equal(clearedGenerated.discovery.localData.counts.workspaces, 1);
+    assert.equal(clearedGenerated.discovery.localData.generatedCount, 0);
+
+    const providersAfterGenerated = await getJson(`http://127.0.0.1:${appPort}/api/providers`);
+    const workspacesAfterGenerated = await getJson(`http://127.0.0.1:${appPort}/api/workspaces`);
+    assert.equal(providersAfterGenerated.providers.length, 1);
+    assert.equal(workspacesAfterGenerated.workspaces.length, 1);
+
+    const resetProfile = await postJson(`http://127.0.0.1:${appPort}/api/local-data/reset`, {
+      mode: "profile",
+      confirmText: "delete-local-data",
+    });
+    assert.equal(resetProfile.discovery.localData.counts.providers, 0);
+    assert.equal(resetProfile.discovery.localData.counts.workspaces, 0);
+    assert.equal(resetProfile.discovery.localData.generatedCount, 0);
+
+    const providersAfterProfile = await getJson(`http://127.0.0.1:${appPort}/api/providers`);
+    const workspacesAfterProfile = await getJson(`http://127.0.0.1:${appPort}/api/workspaces`);
+    assert.equal(providersAfterProfile.providers.length, 0);
+    assert.equal(workspacesAfterProfile.workspaces.length, 0);
+  } finally {
+    await appServer.stop();
+    await rm(storageDir, { recursive: true, force: true });
+    await rm(codexHome, { recursive: true, force: true });
   }
 });
 
