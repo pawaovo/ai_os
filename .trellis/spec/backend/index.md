@@ -17,6 +17,7 @@ This directory contains guidelines for backend development. Fill in each file wi
 | [Directory Structure](./directory-structure.md) | Module organization and file layout | To fill |
 | [Database Guidelines](./database-guidelines.md) | ORM patterns, queries, migrations | To fill |
 | [Agent Hub Skeleton](./agent-hub-skeleton.md) | Read-only runtime registry layer that aggregates executors, Prompt App installs, and MCP projection | Active |
+| [Agent Hub Orchestration MVP](./agent-hub-orchestration-mvp.md) | Local-first orchestration layer that sequences planner, worker, and reviewer child runs through existing run sessions | Active |
 | [Channel Pilot Remote Session Continuation](./channel-pilot-remote-session-continuation.md) | Boundary contract for a single remote channel pilot that reuses local continuation semantics | Active |
 | [Electron Desktop Shell](./electron-desktop-shell.md) | Runtime, packaging, env, and secret-store contracts for the Electron product shell | Active |
 | [External Runtime Compatibility Contract](./external-runtime-compatibility-contract.md) | Additive external runtime compatibility metadata before Agent Hub work | Active |

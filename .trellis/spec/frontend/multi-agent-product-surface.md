@@ -1,15 +1,104 @@
 # Multi Agent Product Surface
 
-> Boundary document for the first frontend surface of future multi-agent governance work.
+> Executable contract for the first additive Agents product surface in the local-first desktop app.
 
-## Scope
+## Scenario: Agents Page MVP
 
-- read-only summary surface only
-- no canvas
-- no mailbox editor
-- no team IDE
+### 1. Scope / Trigger
 
-## Contracts
+- Trigger: changing `product/apps/space-desktop/public/index.html` Agents sections.
+- Trigger: changing `product/apps/space-desktop/src/browser.ts` orchestration page logic.
+- Trigger: changing `product/apps/space-desktop/src/i18n.ts` orchestration page copy.
+- Trigger: changing orchestration surface tests in `product/tests/space-desktop.test.mjs`.
 
-- Frontend should render backend governance summary as-is.
-- First surface must remain additive to the current product navigation and local-first runtime.
+### 2. Signatures
+
+#### Navigation
+
+- new page target: `agents`
+
+#### Required DOM ids
+
+- `agent-orchestration-form-title`
+- `agent-orchestration-form`
+- `agent-orchestration-goal-input`
+- `agent-orchestration-start-button`
+- `agent-orchestration-form-help`
+- `agent-orchestration-status`
+- `agent-orchestration-detail-title`
+- `agent-orchestration-current-goal`
+- `agent-orchestration-current-summary`
+- `agent-orchestration-meta-list`
+- `agent-task-title`
+- `agent-task-list`
+- `agent-task-help`
+- `agent-orchestration-list-title`
+- `agent-orchestration-list`
+- `agent-orchestration-list-help`
+
+#### Frontend API Calls
+
+```ts
+GET /api/agent-orchestrations
+POST /api/agent-orchestrations/start
+GET /api/agent-orchestrations/:id
+```
+
+### 3. Contracts
+
+- Agents surface must remain additive to current navigation.
+- First surface stays local-first:
+  - no canvas
+  - no mailbox editor
+  - no remote control center
+- Frontend must render backend orchestration summary as-is.
+- Task child runs must reuse existing Runs page instead of duplicating run detail UI.
+- Starting an orchestration only needs a single goal field in MVP.
+- When an orchestration is active and non-terminal, frontend may poll `GET /api/agent-orchestrations/:id`.
+- Translation keys for Agents must exist in both English and Chinese.
+
+### 4. Validation & Error Matrix
+
+| Condition | Expected Behavior | Validation Point |
+| --- | --- | --- |
+| No orchestration exists | list and detail areas show empty-state copy | `space-desktop.test.mjs` + manual UI smoke |
+| Start orchestration succeeds | Agents page opens, active orchestration detail renders, polling begins | manual UI smoke |
+| Active orchestration has child run ids | task items expose open-run buttons that reuse existing run detail flow | manual UI smoke |
+| Detail request fails | help text surfaces error instead of blank panel | browser runtime behavior |
+
+### 5. Good / Base / Bad Cases
+
+#### Good
+
+- User can start a local orchestration from one goal.
+- User can see current status, task list, runtime assignment, and child run linkage.
+- User can jump straight into the existing Runs view for a child run.
+
+#### Base
+
+- First page is intentionally compact and summary-driven.
+
+#### Bad
+
+- Building a second run-detail panel under Agents.
+- Reconstructing orchestration state by scanning all runs in frontend code.
+- Introducing remote/team UI before local orchestration is stable.
+
+### 6. Tests Required
+
+- `cd product && npm test`
+  - assert static Agents page ids
+  - assert orchestration APIs integrate with page assumptions
+- Packaged smoke:
+  - assert packaged `/` includes Agents nav and core ids
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+- Add an Agents nav item but leave no working start form or task detail surface.
+- Duplicate live run transcript and event log inside the Agents page.
+
+#### Correct
+
+- Add one compact Agents page that starts orchestrations, shows aggregate detail, and deep-links child runs into the existing Runs experience.

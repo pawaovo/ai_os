@@ -1,0 +1,10 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend development guide"}
+{"file": ".trellis/spec/backend/agent-hub-skeleton.md", "reason": "Current Agent Hub registry contract and additive boundary"}
+{"file": ".trellis/spec/backend/multi-agent-coordination-mailbox.md", "reason": "Mailbox boundary so MVP orchestration does not create a second runtime store"}
+{"file": ".trellis/spec/frontend/multi-agent-product-surface.md", "reason": "Minimal additive frontend surface for future multi-agent work"}
+{"file": ".trellis/spec/backend/external-runtime-compatibility-contract.md", "reason": "Runtime compatibility must be consumed instead of guessed"}
+{"file": ".trellis/spec/backend/workspace-runtime-contract.md", "reason": "Do not create a second workspace runtime while adding orchestration"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Feature spans backend API, persistence, renderer, and tests"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Need to reuse existing run/session logic instead of forking a second execution flow"}

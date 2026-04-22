@@ -388,6 +388,27 @@ interface AgentRuntimeSummary {
   mcpRuntime?: McpRuntimeSummary;
 }
 
+interface AgentOrchestrationTaskSummary {
+  id: string;
+  role: string;
+  title: string;
+  status: string;
+  runtimeId: string;
+  runtimeTitle: string;
+  childRunId?: string;
+  resultSummary?: string;
+}
+
+interface AgentOrchestrationSummary {
+  id: string;
+  goal: string;
+  status: string;
+  createdAt: string;
+  completedAt?: string;
+  summary?: string;
+  tasks: AgentOrchestrationTaskSummary[];
+}
+
 interface LiveRunState {
   sessionId?: string;
   runId: string;
@@ -439,6 +460,7 @@ const state = {
   recipes: [] as RecipeSummary[],
   recipeTests: [] as RecipeTestSummary[],
   agentRuntimes: [] as AgentRuntimeSummary[],
+  orchestrations: [] as AgentOrchestrationSummary[],
   mcpConfig: undefined as {
     globalConfig?: McpClientConfigRecord;
     workspaceOverride?: McpClientConfigRecord;
@@ -450,12 +472,14 @@ const state = {
   appReadiness: undefined as AppReadinessSummary | undefined,
   liveRun: undefined as LiveRunState | undefined,
   runPoller: undefined as number | undefined,
+  orchestrationPoller: undefined as number | undefined,
   activeThreadId: undefined as string | undefined,
   activeProviderId: undefined as string | undefined,
   activeWorkspaceId: undefined as string | undefined,
   activeArtifactId: undefined as string | undefined,
   activeArtifact: undefined as ArtifactSummary | undefined,
   activeRunId: undefined as string | undefined,
+  activeOrchestrationId: undefined as string | undefined,
   activeCapabilityId: undefined as string | undefined,
   activeRecipeId: undefined as string | undefined,
   activePage: "start",
@@ -492,6 +516,18 @@ const elements = {
   workspaceHelp: getElement("workspace-help", HTMLElement),
   workspaceRuntimeList: getElement("workspace-runtime-list", HTMLElement),
   workspaceRuntimeHelp: getElement("workspace-runtime-help", HTMLElement),
+  agentOrchestrationForm: getElement("agent-orchestration-form", HTMLFormElement),
+  agentOrchestrationGoalInput: getElement("agent-orchestration-goal-input", HTMLTextAreaElement),
+  agentOrchestrationStartButton: getElement("agent-orchestration-start-button", HTMLButtonElement),
+  agentOrchestrationFormHelp: getElement("agent-orchestration-form-help", HTMLElement),
+  agentOrchestrationStatus: getElement("agent-orchestration-status", HTMLElement),
+  agentOrchestrationCurrentGoal: getElement("agent-orchestration-current-goal", HTMLElement),
+  agentOrchestrationCurrentSummary: getElement("agent-orchestration-current-summary", HTMLElement),
+  agentOrchestrationMetaList: getElement("agent-orchestration-meta-list", HTMLElement),
+  agentTaskList: getElement("agent-task-list", HTMLElement),
+  agentTaskHelp: getElement("agent-task-help", HTMLElement),
+  agentOrchestrationList: getElement("agent-orchestration-list", HTMLElement),
+  agentOrchestrationListHelp: getElement("agent-orchestration-list-help", HTMLElement),
   workspaceSurfaceHelp: getElement("workspace-surface-help", HTMLElement),
   workspaceArtifactSurfaceMeta: getElement("workspace-artifact-surface-meta", HTMLElement),
   workspaceArtifactSurfacePreview: getElement("workspace-artifact-surface-preview", HTMLElement),
@@ -660,6 +696,25 @@ elements.installStatusList.addEventListener("click", (event) => {
 elements.workspaceForm.addEventListener("submit", (event) => {
   event.preventDefault();
   void createWorkspaceFromForm();
+});
+
+elements.agentOrchestrationForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void startAgentOrchestrationFromForm();
+});
+
+elements.agentOrchestrationList.addEventListener("click", (event) => {
+  const target = event.target instanceof HTMLElement
+    ? event.target.closest<HTMLButtonElement>("button[data-orchestration-id]")
+    : null;
+  if (target?.dataset.orchestrationId) void openAgentOrchestration(target.dataset.orchestrationId);
+});
+
+elements.agentTaskList.addEventListener("click", (event) => {
+  const target = event.target instanceof HTMLElement
+    ? event.target.closest<HTMLButtonElement>("button[data-agent-child-run-id]")
+    : null;
+  if (target?.dataset.agentChildRunId) void openAgentTaskChildRun(target.dataset.agentChildRunId);
 });
 
 elements.workspaceSelect.addEventListener("change", () => {
@@ -868,6 +923,7 @@ async function initializeAppState(): Promise<void> {
   await loadRecipes();
   await loadRecipeTests();
   await loadAgentRuntimes();
+  await loadAgentOrchestrations();
   await loadMcpConfig();
   await loadAppReadiness();
 }
@@ -931,12 +987,17 @@ function localizeApprovalCategory(value: string): string {
   return translateKeyOrFallback(`dynamic.approval.category.${value}`, value);
 }
 
+function localizeOrchestrationRole(value: string): string {
+  return translateKeyOrFallback(`agents.role.${value}`, value);
+}
+
 function localizePageTarget(value: string): string {
   switch (value) {
     case "start":
     case "space":
     case "chat":
     case "runs":
+    case "agents":
     case "automations":
     case "artifacts":
     case "approvals":
@@ -964,6 +1025,7 @@ function applyStaticTranslations(): void {
   setNavText("space", t("nav.space"));
   setNavText("chat", t("nav.chat"));
   setNavText("runs", t("nav.runs"));
+  setNavText("agents", t("nav.agents"));
   setNavText("automations", t("nav.automations"));
   setNavText("artifacts", t("nav.artifacts"));
   setNavText("approvals", t("nav.approvals"));
@@ -996,6 +1058,27 @@ function applyStaticTranslations(): void {
   if (!state.activeWorkspaceId) {
     elements.workspaceRuntimeHelp.textContent = t("workspace.runtime.help.default");
   }
+
+  setText(".agent-orchestration-form-panel .eyebrow", t("agents.eyebrow"));
+  setText(".agent-orchestration-form-panel .mini-label", t("agents.mini"));
+  setText("#agent-orchestration-form-title", t("agents.form.title"));
+  setControlLabel(elements.agentOrchestrationGoalInput, t("agents.form.goal"));
+  syncLocalizedInputValue(elements.agentOrchestrationGoalInput, "agents.form.goal.default");
+  elements.agentOrchestrationStartButton.textContent = t("agents.form.button.start");
+  if (state.orchestrations.length === 0) {
+    elements.agentOrchestrationFormHelp.textContent = t("agents.form.help.default");
+  }
+
+  setText(".agent-orchestration-detail-panel .eyebrow", t("agents.eyebrow"));
+  setText("#agent-orchestration-detail-title", t("agents.detail.title"));
+  setText("#agent-task-title", t("agents.tasks.title"));
+
+  setText(".agent-orchestration-list-panel .eyebrow", t("agents.list.eyebrow"));
+  setText(".agent-orchestration-list-panel .mini-label", t("agents.list.mini"));
+  setText("#agent-orchestration-list-title", t("agents.list.title"));
+  renderAgentOrchestrationList();
+  renderAgentOrchestrationDetail(getActiveOrchestration());
+
   setText(".workspace-surface-panel .eyebrow", t("workspace.surface.eyebrow"));
   setText(".workspace-surface-panel .mini-label", t("workspace.surface.mini"));
   setText("#workspace-surface-title", t("workspace.surface.title"));
@@ -1351,6 +1434,7 @@ function renderSettingsList(): void {
     ["settings.item.start.title", "settings.item.start.detail"],
     ["settings.item.providers.title", "settings.item.providers.detail"],
     ["settings.item.executors.title", "settings.item.executors.detail"],
+    ["settings.item.agents.title", "settings.item.agents.detail"],
     ["settings.item.workspaceTrust.title", "settings.item.workspaceTrust.detail"],
     ["settings.item.automation.title", "settings.item.automation.detail"],
     ["settings.item.memory.title", "settings.item.memory.detail"],
@@ -1411,6 +1495,7 @@ async function saveLanguageSetting(): Promise<void> {
   await loadRecipes();
   await loadRecipeTests();
   await loadAgentRuntimes();
+  await loadAgentOrchestrations();
   await loadArtifacts();
   await loadAppReadiness();
   renderChatMessages();
@@ -1699,6 +1784,7 @@ async function refreshWorkspaceScopedData(): Promise<void> {
   await loadRecipes();
   await loadRecipeTests();
   await loadAgentRuntimes();
+  await loadAgentOrchestrations();
   await loadMcpConfig();
   await loadAppReadiness();
 }
@@ -1914,6 +2000,308 @@ function renderAgentRuntimes(): void {
     )),
   );
   elements.agentRuntimeHelp.textContent = t("agentRuntime.help.count", { count: state.agentRuntimes.length });
+}
+
+async function loadAgentOrchestrations(): Promise<void> {
+  try {
+    const payload = await apiJson<{ orchestrations: AgentOrchestrationSummary[] }>("/api/agent-orchestrations");
+    state.orchestrations = sortAgentOrchestrations(payload.orchestrations);
+    const activeOrchestration = state.orchestrations.find((item) => item.id === state.activeOrchestrationId)
+      ?? state.orchestrations[0];
+    state.activeOrchestrationId = activeOrchestration?.id;
+    if (!elements.agentOrchestrationFormHelp.dataset.dynamic) {
+      elements.agentOrchestrationFormHelp.textContent = t("agents.form.help.default");
+    }
+    elements.agentOrchestrationListHelp.dataset.dynamic = "";
+    renderAgentOrchestrationList();
+    renderAgentOrchestrationDetail(activeOrchestration);
+    syncAgentOrchestrationPolling(activeOrchestration);
+  } catch (error) {
+    stopAgentOrchestrationPolling();
+    state.orchestrations = [];
+    state.activeOrchestrationId = undefined;
+    renderAgentOrchestrationList();
+    renderAgentOrchestrationDetail(undefined);
+    const message = errorToMessage(error, t("agents.list.loadFailed"));
+    elements.agentOrchestrationListHelp.textContent = message;
+    elements.agentOrchestrationListHelp.dataset.dynamic = "true";
+    elements.agentTaskHelp.textContent = message;
+  }
+}
+
+async function startAgentOrchestrationFromForm(): Promise<void> {
+  const goal = elements.agentOrchestrationGoalInput.value.trim();
+  if (!goal) {
+    elements.agentOrchestrationFormHelp.textContent = t("agents.form.goalRequired");
+    elements.agentOrchestrationFormHelp.dataset.dynamic = "true";
+    return;
+  }
+
+  elements.agentOrchestrationStartButton.disabled = true;
+  try {
+    const payload = await apiJson<{ orchestration: AgentOrchestrationSummary }>("/api/agent-orchestrations/start", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ goal }),
+    });
+    const orchestration = payload.orchestration;
+    state.activeOrchestrationId = orchestration.id;
+    state.orchestrations = upsertAgentOrchestration(orchestration);
+    elements.agentOrchestrationFormHelp.textContent = t("agents.form.started", {
+      id: truncate(orchestration.id, 24),
+    });
+    elements.agentOrchestrationFormHelp.dataset.dynamic = "true";
+    renderAgentOrchestrationList();
+    renderAgentOrchestrationDetail(orchestration);
+    setActivePage("agents");
+    syncAgentOrchestrationPolling(orchestration);
+  } catch (error) {
+    elements.agentOrchestrationFormHelp.textContent = errorToMessage(error, t("agents.form.startFailed"));
+    elements.agentOrchestrationFormHelp.dataset.dynamic = "true";
+  } finally {
+    elements.agentOrchestrationStartButton.disabled = false;
+  }
+}
+
+async function openAgentOrchestration(orchestrationId: string): Promise<void> {
+  if (!orchestrationId) return;
+
+  state.activeOrchestrationId = orchestrationId;
+  renderAgentOrchestrationList();
+  renderAgentOrchestrationDetail(getActiveOrchestration());
+
+  try {
+    const payload = await apiJson<{ orchestration: AgentOrchestrationSummary }>(
+      `/api/agent-orchestrations/${encodeURIComponent(orchestrationId)}`,
+    );
+    state.orchestrations = upsertAgentOrchestration(payload.orchestration);
+    renderAgentOrchestrationList();
+    renderAgentOrchestrationDetail(payload.orchestration);
+    syncAgentOrchestrationPolling(payload.orchestration);
+  } catch (error) {
+    const message = errorToMessage(error, t("agents.list.openFailed"));
+    elements.agentOrchestrationListHelp.textContent = message;
+    elements.agentOrchestrationListHelp.dataset.dynamic = "true";
+    elements.agentTaskHelp.textContent = message;
+  }
+}
+
+async function openAgentTaskChildRun(runId: string): Promise<void> {
+  if (!runId) return;
+
+  setActivePage("runs");
+  await loadRuns().catch(() => undefined);
+  await openRun(runId);
+}
+
+function renderAgentOrchestrationList(): void {
+  if (state.orchestrations.length === 0) {
+    elements.agentOrchestrationList.replaceChildren(createListItem(t("agents.list.none")));
+    if (!elements.agentOrchestrationListHelp.dataset.dynamic) {
+      elements.agentOrchestrationListHelp.textContent = t("agents.list.help.default");
+    }
+    return;
+  }
+
+  elements.agentOrchestrationList.replaceChildren(
+    ...state.orchestrations.map((orchestration) => createActionListItem({
+      id: orchestration.id,
+      idName: "orchestrationId",
+      title: orchestration.goal,
+      meta: [
+        translatedToken(orchestration.status),
+        formatDate(orchestration.createdAt),
+        orchestration.completedAt ? formatDate(orchestration.completedAt) : t("agents.detail.meta.inProgress"),
+        orchestration.summary?.trim()
+          ? localizeKnownText(orchestration.summary)
+          : t("agents.list.taskCount", { count: orchestration.tasks.length }),
+      ].join(" / "),
+      pressed: orchestration.id === state.activeOrchestrationId,
+      source: orchestration.status,
+    })),
+  );
+  elements.agentOrchestrationListHelp.textContent = t("agents.list.help.count", { count: state.orchestrations.length });
+  elements.agentOrchestrationListHelp.dataset.dynamic = "true";
+}
+
+function renderAgentOrchestrationDetail(orchestration: AgentOrchestrationSummary | undefined): void {
+  if (!orchestration) {
+    elements.agentOrchestrationStatus.textContent = translatedToken("idle");
+    elements.agentOrchestrationStatus.dataset.phase = "idle";
+    elements.agentOrchestrationCurrentGoal.textContent = t("agents.detail.empty");
+    elements.agentOrchestrationCurrentSummary.textContent = t("agents.detail.help.default");
+    elements.agentOrchestrationMetaList.replaceChildren(
+      createStaticActionListItem(t("agents.detail.meta.status"), translatedToken("idle"), "idle"),
+      createStaticActionListItem(t("agents.detail.meta.created"), t("dynamic.none"), "idle"),
+      createStaticActionListItem(t("agents.detail.meta.tasks"), t("agents.detail.taskCount", { count: 0 }), "idle"),
+    );
+    elements.agentTaskList.replaceChildren(createListItem(t("agents.tasks.none")));
+    elements.agentTaskHelp.textContent = t("agents.tasks.help.default");
+    return;
+  }
+
+  elements.agentOrchestrationStatus.textContent = translatedToken(orchestration.status);
+  elements.agentOrchestrationStatus.dataset.phase = normalizePhase(orchestration.status);
+  elements.agentOrchestrationCurrentGoal.textContent = orchestration.goal;
+  elements.agentOrchestrationCurrentSummary.textContent = orchestration.summary?.trim()
+    ? localizeKnownText(orchestration.summary)
+    : t("agents.detail.summary.fallback", { count: orchestration.tasks.length });
+  elements.agentOrchestrationMetaList.replaceChildren(
+    createStaticActionListItem(t("agents.detail.meta.status"), translatedToken(orchestration.status), orchestration.status),
+    createStaticActionListItem(t("agents.detail.meta.created"), formatDate(orchestration.createdAt), "completed"),
+    createStaticActionListItem(
+      t("agents.detail.meta.completed"),
+      orchestration.completedAt ? formatDate(orchestration.completedAt) : t("agents.detail.meta.inProgress"),
+      orchestration.completedAt ? "completed" : normalizePhase(orchestration.status),
+    ),
+    createStaticActionListItem(
+      t("agents.detail.meta.tasks"),
+      t("agents.detail.taskCount", { count: orchestration.tasks.length }),
+      orchestration.tasks.length > 0 ? "completed" : "idle",
+    ),
+  );
+
+  if (orchestration.tasks.length === 0) {
+    elements.agentTaskList.replaceChildren(createListItem(t("agents.tasks.none")));
+    elements.agentTaskHelp.textContent = t("agents.tasks.help.default");
+    return;
+  }
+
+  elements.agentTaskList.replaceChildren(
+    ...orchestration.tasks.map((task) => createAgentTaskListItem(task)),
+  );
+  elements.agentTaskHelp.textContent = isOrchestrationTerminalStatus(orchestration.status)
+    ? t("agents.tasks.help.completed", { count: orchestration.tasks.length })
+    : t("agents.tasks.help.active", { count: orchestration.tasks.length });
+}
+
+function createAgentTaskListItem(task: AgentOrchestrationTaskSummary): HTMLLIElement {
+  const item = document.createElement("li");
+  const content = document.createElement("div");
+  const title = document.createElement("span");
+  const primaryMeta = document.createElement("span");
+  const secondaryMeta = document.createElement("span");
+  const badge = document.createElement("span");
+
+  content.className = "list-button";
+  title.className = "item-title";
+  title.textContent = task.title;
+  primaryMeta.className = "item-meta";
+  primaryMeta.textContent = [
+    localizeOrchestrationRole(task.role),
+    translatedToken(task.status),
+    `${t("agents.tasks.runtime.label")} ${formatAgentTaskRuntime(task)}`,
+  ].join(" / ");
+  secondaryMeta.className = "item-meta";
+  secondaryMeta.textContent = [
+    `${t("agents.tasks.childRun.label")} ${task.childRunId ? truncate(task.childRunId, 24) : t("agents.tasks.childRun.none")}`,
+    `${t("agents.tasks.result.label")} ${task.resultSummary ? localizeKnownText(task.resultSummary) : t("agents.tasks.result.none")}`,
+  ].join(" / ");
+  badge.className = "source-badge";
+  badge.dataset.source = normalizePhase(task.status);
+  badge.textContent = translatedToken(task.status);
+  content.append(title, primaryMeta, secondaryMeta, badge);
+  item.append(content);
+
+  if (task.childRunId) {
+    const openRunButton = document.createElement("button");
+    openRunButton.type = "button";
+    openRunButton.className = "secondary-button";
+    openRunButton.dataset.agentChildRunId = task.childRunId;
+    openRunButton.textContent = t("agents.tasks.button.openRun");
+    item.append(openRunButton);
+  }
+
+  return item;
+}
+
+function formatAgentTaskRuntime(task: AgentOrchestrationTaskSummary): string {
+  const title = task.runtimeTitle.trim();
+  if (title && task.runtimeId) return `${title} / ${task.runtimeId}`;
+  return title || task.runtimeId || t("agents.tasks.runtime.unassigned");
+}
+
+function getActiveOrchestration(): AgentOrchestrationSummary | undefined {
+  return state.orchestrations.find((item) => item.id === state.activeOrchestrationId);
+}
+
+function upsertAgentOrchestration(orchestration: AgentOrchestrationSummary): AgentOrchestrationSummary[] {
+  const next = state.orchestrations.filter((item) => item.id !== orchestration.id);
+  next.push(orchestration);
+  return sortAgentOrchestrations(next);
+}
+
+function sortAgentOrchestrations(orchestrations: AgentOrchestrationSummary[]): AgentOrchestrationSummary[] {
+  return [...orchestrations].sort((left, right) => {
+    const leftTime = new Date(left.createdAt).getTime();
+    const rightTime = new Date(right.createdAt).getTime();
+    return (Number.isFinite(rightTime) ? rightTime : 0) - (Number.isFinite(leftTime) ? leftTime : 0);
+  });
+}
+
+function syncAgentOrchestrationPolling(orchestration: AgentOrchestrationSummary | undefined): void {
+  if (!orchestration || isOrchestrationTerminalStatus(orchestration.status)) {
+    stopAgentOrchestrationPolling();
+    return;
+  }
+
+  stopAgentOrchestrationPolling();
+  state.orchestrationPoller = window.setInterval(() => {
+    void pollAgentOrchestration(orchestration.id);
+  }, 1000);
+  void pollAgentOrchestration(orchestration.id);
+}
+
+function stopAgentOrchestrationPolling(): void {
+  if (state.orchestrationPoller === undefined) return;
+  window.clearInterval(state.orchestrationPoller);
+  state.orchestrationPoller = undefined;
+}
+
+async function pollAgentOrchestration(orchestrationId: string): Promise<void> {
+  try {
+    const payload = await apiJson<{ orchestration: AgentOrchestrationSummary }>(
+      `/api/agent-orchestrations/${encodeURIComponent(orchestrationId)}`,
+    );
+    state.orchestrations = upsertAgentOrchestration(payload.orchestration);
+    if (state.activeOrchestrationId === payload.orchestration.id) {
+      renderAgentOrchestrationDetail(payload.orchestration);
+    }
+    renderAgentOrchestrationList();
+
+    if (isOrchestrationTerminalStatus(payload.orchestration.status)) {
+      stopAgentOrchestrationPolling();
+    }
+  } catch (error) {
+    stopAgentOrchestrationPolling();
+    elements.agentTaskHelp.textContent = errorToMessage(error, t("agents.list.openFailed"));
+  }
+}
+
+function isOrchestrationTerminalStatus(status: string): boolean {
+  return status === "completed" || status === "failed" || status === "interrupted";
+}
+
+function normalizePhase(status: string | undefined): string {
+  switch (status) {
+    case "pending":
+    case "queued":
+    case "created":
+      return "queued";
+    case "planning":
+    case "running":
+      return "running";
+    case "completed":
+      return "completed";
+    case "failed":
+      return "failed";
+    case "awaiting-approval":
+      return "awaiting-approval";
+    case "interrupted":
+      return "interrupted";
+    default:
+      return "idle";
+  }
 }
 
 function renderMcpConfig(): void {
@@ -3541,7 +3929,7 @@ function createReadinessListItem(input: AppReadinessCheck): HTMLLIElement {
 
 function createActionListItem(input: {
   id: string;
-  idName: "artifactId" | "runId" | "approvalId" | "memoryId" | "capabilityId" | "recipeId" | "recipeTestId";
+  idName: "artifactId" | "runId" | "approvalId" | "memoryId" | "capabilityId" | "recipeId" | "recipeTestId" | "orchestrationId";
   title: string;
   meta: string;
   pressed: boolean;

@@ -180,6 +180,7 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(html, /data-page-target="memory"/);
   assert.match(html, /data-page-target="capabilities"/);
   assert.match(html, /data-page-target="forge"/);
+  assert.match(html, /data-page-target="agents"/);
   assert.match(html, /data-page-target="settings"/);
   assert.match(html, /id="language-select"/);
   assert.match(html, /id="readiness-title"/);
@@ -206,6 +207,22 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(html, /id="agent-runtime-title"/);
   assert.match(html, /id="agent-runtime-list"/);
   assert.match(html, /id="agent-runtime-help"/);
+  assert.match(html, /id="agent-orchestration-form-title"/);
+  assert.match(html, /id="agent-orchestration-form"/);
+  assert.match(html, /id="agent-orchestration-goal-input"/);
+  assert.match(html, /id="agent-orchestration-start-button"/);
+  assert.match(html, /id="agent-orchestration-form-help"/);
+  assert.match(html, /id="agent-orchestration-status"/);
+  assert.match(html, /id="agent-orchestration-detail-title"/);
+  assert.match(html, /id="agent-orchestration-current-goal"/);
+  assert.match(html, /id="agent-orchestration-current-summary"/);
+  assert.match(html, /id="agent-orchestration-meta-list"/);
+  assert.match(html, /id="agent-task-title"/);
+  assert.match(html, /id="agent-task-list"/);
+  assert.match(html, /id="agent-task-help"/);
+  assert.match(html, /id="agent-orchestration-list-title"/);
+  assert.match(html, /id="agent-orchestration-list"/);
+  assert.match(html, /id="agent-orchestration-list-help"/);
   assert.match(html, /id="memory-title"/);
   assert.match(html, /id="memory-form"/);
   assert.match(html, /id="memory-scope"/);
@@ -954,6 +971,114 @@ test("agent hub skeleton projects executors, installed prompt apps, and MCP clie
     assert.equal(switchedRegistry.runtimes.some((runtime) => runtime.kind === "prompt-app"), false);
     assert.equal(
       switchedRegistry.runtimes.some((runtime) => runtime.kind === "mcp-client" && runtime.status === "ready" && runtime.mcpRuntime?.toolCount === 2),
+      true,
+    );
+  } finally {
+    await appServer.stop();
+    await rm(storageDir, { recursive: true, force: true });
+  }
+});
+
+test("agent orchestrations can complete a planner worker reviewer flow through child runs", async () => {
+  const storageDir = await mkdtemp(`${tmpdir()}/ai-os-agent-orchestration-`);
+  const appPort = await getAvailablePort();
+  const appServer = startSpaceDesktopServer({
+    port: appPort,
+    storageDir,
+  });
+
+  try {
+    await waitForHttp(`http://127.0.0.1:${appPort}/`);
+
+    const workspace = await postJson(`http://127.0.0.1:${appPort}/api/workspaces`, {
+      name: "Agent Orchestration Workspace",
+      path: storageDir,
+    });
+    assert.equal(workspace.workspace.name, "Agent Orchestration Workspace");
+
+    const started = await postJson(`http://127.0.0.1:${appPort}/api/agent-orchestrations/start`, {
+      goal: "Prepare a concise multi-agent workspace status brief.",
+      executorChoice: "mock",
+      timeoutMs: 5000,
+    });
+    assert.equal(typeof started.orchestration.id, "string");
+    assert.equal(started.orchestration.goal, "Prepare a concise multi-agent workspace status brief.");
+
+    const completed = await waitForOrchestration(
+      appPort,
+      started.orchestration.id,
+      (orchestration) => orchestration.status === "completed",
+    );
+    const taskRoles = completed.tasks.map((task) => task.role);
+    assert.equal(taskRoles.includes("planner"), true);
+    assert.equal(taskRoles.includes("worker"), true);
+    assert.equal(taskRoles.includes("reviewer"), true);
+
+    for (const task of completed.tasks) {
+      assert.equal(Object.hasOwn(task, "runtime"), true);
+      assert.equal(typeof task.status, "string");
+      assert.equal(typeof task.runtime, "object");
+      assert.notEqual(task.runtime, null);
+    }
+
+    const linkedTask = completed.tasks.find((task) => typeof task.runtime?.runId === "string");
+    assert.notEqual(linkedTask, undefined);
+    assert.equal(linkedTask.runtime.runId.length > 0, true);
+
+    const orchestrationList = await getJson(`http://127.0.0.1:${appPort}/api/agent-orchestrations`);
+    assert.equal(
+      orchestrationList.orchestrations.some((item) => item.id === completed.id && item.status === "completed"),
+      true,
+    );
+  } finally {
+    await appServer.stop();
+    await rm(storageDir, { recursive: true, force: true });
+  }
+});
+
+test("agent orchestration fails when a deterministic child run failure is triggered", async () => {
+  const storageDir = await mkdtemp(`${tmpdir()}/ai-os-agent-orchestration-fail-`);
+  const appPort = await getAvailablePort();
+  const appServer = startSpaceDesktopServer({
+    port: appPort,
+    storageDir,
+  });
+
+  try {
+    await waitForHttp(`http://127.0.0.1:${appPort}/`);
+
+    await postJson(`http://127.0.0.1:${appPort}/api/workspaces`, {
+      name: "Agent Orchestration Failure Workspace",
+      path: storageDir,
+    });
+
+    const started = await postJson(`http://127.0.0.1:${appPort}/api/agent-orchestrations/start`, {
+      goal: "Prepare a concise multi-agent workspace status brief.",
+      executorChoice: "mock",
+      timeoutMs: 5000,
+      deterministicFailureTaskRole: "worker",
+    });
+
+    const failed = await waitForOrchestration(
+      appPort,
+      started.orchestration.id,
+      (orchestration) => orchestration.status === "failed" || orchestration.status === "completed",
+    );
+    assert.equal(failed.status, "failed");
+    const workerTask = failed.tasks.find((task) => task.role === "worker");
+    assert.notEqual(workerTask, undefined);
+    assert.equal(workerTask.status, "failed");
+    assert.equal(Object.hasOwn(workerTask, "runtime"), true);
+    assert.equal(typeof workerTask.runtime, "object");
+    assert.notEqual(workerTask.runtime, null);
+    assert.equal(typeof workerTask.runtime.runId, "string");
+
+    const failedRun = await waitForLiveRun(appPort, workerTask.runtime.runId, (live) => live.status === "failed");
+    assert.equal(failedRun.status, "failed");
+
+    const orchestrationList = await getJson(`http://127.0.0.1:${appPort}/api/agent-orchestrations`);
+    assert.equal(
+      orchestrationList.orchestrations.some((item) => item.id === failed.id && item.status === "failed"),
       true,
     );
   } finally {
@@ -2149,6 +2274,20 @@ async function waitForLiveRun(port, runId, predicate) {
   }
 
   throw new Error(`Timed out waiting for live run ${runId}: ${JSON.stringify(lastLive)}`);
+}
+
+async function waitForOrchestration(port, orchestrationId, predicate) {
+  const startedAt = Date.now();
+  let lastOrchestration;
+
+  while (Date.now() - startedAt < 5000) {
+    const payload = await getJson(`http://127.0.0.1:${port}/api/agent-orchestrations/${orchestrationId}`);
+    lastOrchestration = payload.orchestration;
+    if (predicate(lastOrchestration)) return lastOrchestration;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  throw new Error(`Timed out waiting for orchestration ${orchestrationId}: ${JSON.stringify(lastOrchestration)}`);
 }
 
 async function getJson(url, headers = undefined) {

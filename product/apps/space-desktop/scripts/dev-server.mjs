@@ -72,6 +72,7 @@ let processRunner;
 let appStore;
 let mcpRuntimeProbeCache;
 const runSessions = new Map();
+const agentOrchestrationSessions = new Map();
 let automationInterval;
 const BUILT_IN_CAPABILITIES = [
   {
@@ -223,6 +224,21 @@ async function handleRequest(request, response) {
 
   if (request.method === "GET" && pathname === "/api/agent-runtimes") {
     await handleListAgentRuntimes(response);
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/agent-orchestrations") {
+    await handleListAgentOrchestrations(response);
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/agent-orchestrations/start") {
+    await handleStartAgentOrchestration(request, response);
+    return;
+  }
+
+  if (request.method === "GET" && isAgentOrchestrationPath(pathname)) {
+    await handleGetAgentOrchestration(response, agentOrchestrationIdFromPath(pathname));
     return;
   }
 
@@ -876,6 +892,32 @@ async function handleListAgentRuntimes(response) {
   writeJson(response, 200, {
     runtimes: await listAgentRuntimeSummaries(appStore.getSetting("activeWorkspaceId")),
   });
+}
+
+async function handleListAgentOrchestrations(response) {
+  writeJson(response, 200, appStore.listAgentOrchestrations(appStore.getSetting("activeWorkspaceId")));
+}
+
+async function handleGetAgentOrchestration(response, orchestrationId) {
+  const orchestration = appStore.getAgentOrchestration(orchestrationId);
+  const activeWorkspaceId = appStore.getSetting("activeWorkspaceId");
+  if (!orchestration || (activeWorkspaceId && orchestration.workspaceId !== activeWorkspaceId)) {
+    writeJson(response, 404, { error: "Agent orchestration not found in active workspace." });
+    return;
+  }
+
+  writeJson(response, 200, { orchestration });
+}
+
+async function handleStartAgentOrchestration(request, response) {
+  try {
+    const body = await readJsonBody(request);
+    const input = parseAgentOrchestrationStartInput(body);
+    const orchestration = await createAgentOrchestration(input);
+    writeJson(response, 202, { orchestration });
+  } catch (error) {
+    writeJson(response, 400, { error: sanitizeErrorMessage(error) });
+  }
 }
 
 async function handleListRecipes(response) {
@@ -1607,6 +1649,309 @@ async function listAgentRuntimeSummaries(workspaceId) {
   ];
 }
 
+function parseAgentOrchestrationStartInput(body) {
+  const goal = readRequiredString(body.goal, "goal");
+  const requestedExecutorChoice = body.workerExecutorChoice ?? body.executorChoice;
+  const workerExecutorChoice = requestedExecutorChoice !== undefined
+    ? normalizeAgentExecutorChoice(requestedExecutorChoice)
+    : "mock";
+  const deterministicFailureTaskRole = normalizeDeterministicFailureTaskRole(readOptionalString(body.deterministicFailureTaskRole));
+  const testMode = readOptionalString(body.testMode);
+
+  return {
+    goal,
+    workerExecutorChoice,
+    ...(body.timeoutMs !== undefined ? { timeoutMs: readOptionalPositiveNumber(body.timeoutMs) } : {}),
+    ...(deterministicFailureTaskRole ? { deterministicFailureTaskRole } : {}),
+    ...(testMode ? { testMode } : {}),
+  };
+}
+
+function normalizeAgentExecutorChoice(value) {
+  const normalized = readRequiredString(value, "workerExecutorChoice");
+  if (normalized === "mock" || normalized === "codex" || normalized === "claude-code") {
+    return normalized;
+  }
+  throw new Error("Unsupported worker executor choice.");
+}
+
+function normalizeDeterministicFailureTaskRole(value) {
+  if (!value) return undefined;
+  if (value === "planner" || value === "worker" || value === "reviewer") return value;
+  throw new Error("Unsupported deterministic failure task role.");
+}
+
+async function createAgentOrchestration(input) {
+  const workspace = await requireRunnableWorkspace();
+  const threadId = appStore.getSetting("activeThreadId");
+  const orchestrationId = `orchestration-${randomUUID()}`;
+  const orchestration = appStore.createAgentOrchestration({
+    id: orchestrationId,
+    goal: input.goal,
+    workspaceId: workspace.id,
+    status: "queued",
+    summary: "Queued local agent orchestration.",
+    tasks: createAgentOrchestrationTasks(input),
+    createdAt: nowIso(),
+  });
+
+  const promise = runAgentOrchestration(orchestration.id, {
+    ...input,
+    threadId,
+  })
+    .catch((error) => {
+      appStore.updateAgentOrchestration(orchestration.id, {
+        status: "failed",
+        summary: sanitizeErrorMessage(error),
+        completedAt: nowIso(),
+      });
+    })
+    .finally(() => {
+      agentOrchestrationSessions.delete(orchestration.id);
+    });
+
+  agentOrchestrationSessions.set(orchestration.id, { promise });
+  return orchestration;
+}
+
+function createAgentOrchestrationTasks(input) {
+  return [
+    createAgentTaskSummary("planner", "Plan Goal", "mock"),
+    createAgentTaskSummary("worker", "Execute Goal", input.workerExecutorChoice ?? "mock"),
+    createAgentTaskSummary("reviewer", "Review Outcome", "mock"),
+  ];
+}
+
+function createAgentTaskSummary(role, title, executorChoice) {
+  return {
+    id: `agent-task-${randomUUID()}`,
+    role,
+    title,
+    status: "queued",
+    executorChoice,
+    runtimeId: `agent-runtime-${executorChoice}`,
+    runtimeTitle: executorChoice,
+    runtime: {
+      id: `agent-runtime-${executorChoice}`,
+      title: executorChoice,
+    },
+    createdAt: nowIso(),
+  };
+}
+
+async function runAgentOrchestration(orchestrationId, input) {
+  appStore.updateAgentOrchestration(orchestrationId, {
+    status: "running",
+    summary: "Agent orchestration started.",
+  });
+
+  let previousResultSummary = "";
+  const runtimeRegistry = await listAgentRuntimeSummaries(appStore.getSetting("activeWorkspaceId"));
+  const runtimeMap = new Map(runtimeRegistry.map((runtime) => [runtime.id, runtime]));
+
+  for (const role of ["planner", "worker", "reviewer"]) {
+    const orchestration = requireAgentOrchestration(orchestrationId);
+    const task = orchestration.tasks.find((entry) => entry.role === role);
+    if (!task) throw new Error(`Missing orchestration task for role ${role}.`);
+
+    const runtime = runtimeMap.get(task.runtimeId);
+    const runtimeTitle = runtime?.title ?? task.runtimeTitle ?? task.executorChoice;
+    updateAgentTask(orchestrationId, task.id, {
+      runtimeTitle,
+      status: "running",
+      startedAt: nowIso(),
+      resultSummary: `Dispatching ${role} run.`,
+    });
+    appStore.updateAgentOrchestration(orchestrationId, {
+      status: "running",
+      summary: `${titleCase(role)} is running.`,
+    });
+
+    const childGoal = buildAgentTaskGoal({
+      role,
+      orchestrationGoal: orchestration.goal,
+      previousResultSummary,
+      deterministicFailureTaskRole: input.deterministicFailureTaskRole,
+      testMode: input.testMode,
+    });
+    try {
+      const childSession = await createRunSession({
+        goal: childGoal,
+        executorChoice: task.executorChoice,
+        workspaceId: orchestration.workspaceId,
+        threadId: input.threadId,
+        ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
+      });
+
+      updateAgentTask(orchestrationId, task.id, {
+        status: childSession.status,
+        childRunId: childSession.runId,
+        resultSummary: `Child run ${truncateText(childSession.runId, 18)} started.`,
+      });
+
+      const completedRun = await waitForAgentTaskRun(childSession, {
+        approvalDecision: role === input.deterministicFailureTaskRole || (role === "worker" && input.testMode === "worker-reject-runtime-approval")
+          ? "reject"
+          : "grant",
+        onApprovalPending: () => {
+          updateAgentTask(orchestrationId, task.id, {
+            status: "awaiting-approval",
+            childRunId: childSession.runId,
+            resultSummary: "Waiting for approval.",
+          });
+          appStore.updateAgentOrchestration(orchestrationId, {
+            status: "running",
+            summary: `${titleCase(role)} is waiting for approval.`,
+          });
+        },
+      });
+
+      const resultSummary = summarizeRunForOrchestration(completedRun.id);
+      updateAgentTask(orchestrationId, task.id, {
+        status: completedRun.status,
+        childRunId: completedRun.id,
+        resultSummary,
+        completedAt: completedRun.completedAt ?? nowIso(),
+      });
+
+      if (completedRun.status !== "completed") {
+        appStore.updateAgentOrchestration(orchestrationId, {
+          status: "failed",
+          summary: `${titleCase(role)} failed. ${resultSummary}`,
+          completedAt: nowIso(),
+        });
+        return;
+      }
+
+      previousResultSummary = resultSummary;
+    } catch (error) {
+      const detail = sanitizeErrorMessage(error);
+      updateAgentTask(orchestrationId, task.id, {
+        status: "failed",
+        resultSummary: detail,
+        completedAt: nowIso(),
+      });
+      appStore.updateAgentOrchestration(orchestrationId, {
+        status: "failed",
+        summary: `${titleCase(role)} failed. ${detail}`,
+        completedAt: nowIso(),
+      });
+      return;
+    }
+  }
+
+  appStore.updateAgentOrchestration(orchestrationId, {
+    status: "completed",
+    summary: previousResultSummary || "Agent orchestration completed.",
+    completedAt: nowIso(),
+  });
+}
+
+async function waitForAgentTaskRun(session, options = {}) {
+  let approvalHandled = false;
+
+  while (!isTerminalRunStatus(session.status)) {
+    if (session.pendingApproval) {
+      if (!approvalHandled && options.onApprovalPending) {
+        options.onApprovalPending();
+      }
+      approvalHandled = true;
+      await resolveRunApproval(session, options.approvalDecision ?? "grant");
+      continue;
+    }
+
+    if (session.promise) {
+      await Promise.race([
+        session.promise.catch(() => undefined),
+        delay(60),
+      ]);
+      continue;
+    }
+
+    await delay(60);
+  }
+
+  return appStore.getRun(session.runId) ?? {
+    id: session.runId,
+    status: session.status,
+    ...(session.completedAt ? { completedAt: session.completedAt } : {}),
+  };
+}
+
+function buildAgentTaskGoal(input) {
+  const prior = input.previousResultSummary ? `\n\nPrevious agent summary:\n${input.previousResultSummary}` : "";
+
+  switch (input.role) {
+    case "planner":
+      return `Create a concise execution plan for this goal:\n${input.orchestrationGoal}`;
+    case "worker":
+      return [
+        `Execute this goal and produce the most useful result you can:\n${input.orchestrationGoal}${prior}`,
+        input.role === input.deterministicFailureTaskRole || input.testMode === "worker-reject-runtime-approval" ? "runtime approval" : "",
+      ].filter(Boolean).join("\n\n");
+    case "reviewer":
+      return `Review the outcome of this goal and summarize the result, risks, and next actions:\n${input.orchestrationGoal}${prior}`;
+    default:
+      return input.orchestrationGoal;
+  }
+}
+
+function summarizeRunForOrchestration(runId) {
+  const run = appStore.getRun(runId);
+  if (!run) return "Child run summary is unavailable.";
+  const runtimeState = appStore.getRunRuntimeState(runId)?.runtimeState;
+  const latestEvent = appStore.listRunEvents(runId).at(-1);
+  const latestArtifact = appStore.listArtifacts(run.workspaceId).artifacts.find((artifact) => artifact.runId === runId);
+  const parts = [
+    runtimeState?.latestMessage,
+    latestEvent?.message,
+    latestArtifact ? `Artifact: ${latestArtifact.title}` : undefined,
+    `Run ${run.status}.`,
+  ].filter(Boolean);
+  return truncateText(parts.join(" "), 220);
+}
+
+function updateAgentTask(orchestrationId, taskId, patch) {
+  const orchestration = requireAgentOrchestration(orchestrationId);
+  const tasks = orchestration.tasks.map((task) => {
+    if (task.id !== taskId) return task;
+    const runtime = {
+      ...(task.runtime ?? {
+        id: task.runtimeId,
+        title: task.runtimeTitle,
+      }),
+      ...(patch.runtime ?? {}),
+      ...(patch.runtimeId ? { id: patch.runtimeId } : {}),
+      ...(patch.runtimeTitle ? { title: patch.runtimeTitle } : {}),
+      ...(patch.childRunId ? { runId: patch.childRunId } : {}),
+      ...(patch.status ? { status: patch.status } : {}),
+    };
+    return {
+      ...task,
+      ...patch,
+      runtime,
+      ...(patch.completedAt ? {} : task.completedAt ? { completedAt: task.completedAt } : {}),
+    };
+  });
+  appStore.updateAgentOrchestration(orchestrationId, { tasks });
+}
+
+function requireAgentOrchestration(id) {
+  const orchestration = appStore.getAgentOrchestration(id);
+  if (!orchestration) throw new Error("Agent orchestration not found.");
+  return orchestration;
+}
+
+function titleCase(value) {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function truncateText(value, limit = 180) {
+  const normalized = String(value ?? "").trim();
+  if (normalized.length <= limit) return normalized;
+  return `${normalized.slice(0, limit - 3)}...`;
+}
+
 function createExecutorRuntime() {
   return {
     runner: processRunner,
@@ -1823,7 +2168,7 @@ function setCurrentTurnStatus(session, status) {
 }
 
 async function createRunSession(input) {
-  const workspace = await requireRunnableWorkspace();
+  const workspace = await requireRunnableWorkspace(input.workspaceId);
   const ids = createWorkflowIds();
   const clock = createWorkflowClock();
   const runId = ids.runId();
@@ -1843,7 +2188,7 @@ async function createRunSession(input) {
     workspaceId: workspace.id,
     workspacePath: workspace.path,
     trustLevel: normalizeWorkspaceTrustLevel(workspace.trustLevel),
-    threadId: appStore.getSetting("activeThreadId"),
+    threadId: input.threadId ?? appStore.getSetting("activeThreadId"),
     timeoutMs: input.timeoutMs,
     memoryUsage: memoryRetrieval.memories,
     memoryTrace: memoryRetrieval.trace,
@@ -2719,8 +3064,7 @@ function rehydratePersistedRunSession(runId) {
   return session;
 }
 
-async function requireRunnableWorkspace() {
-  const workspaceId = appStore.getSetting("activeWorkspaceId");
+async function requireRunnableWorkspace(workspaceId = appStore.getSetting("activeWorkspaceId")) {
   if (!workspaceId) throw new Error("Select a workspace before running an executor task.");
 
   const workspace = appStore.getWorkspace(workspaceId);
@@ -2899,6 +3243,14 @@ function isCapabilityRunPath(pathname) {
 }
 
 function capabilityIdFromPath(pathname) {
+  return decodeURIComponent(pathname.split("/")[3] ?? "");
+}
+
+function isAgentOrchestrationPath(pathname) {
+  return /^\/api\/agent-orchestrations\/[^/]+$/.test(pathname);
+}
+
+function agentOrchestrationIdFromPath(pathname) {
   return decodeURIComponent(pathname.split("/")[3] ?? "");
 }
 
@@ -3200,6 +3552,17 @@ class SqliteAppStore {
         started_at TEXT NOT NULL,
         completed_at TEXT
       );
+      CREATE TABLE IF NOT EXISTS agent_orchestrations (
+        id TEXT PRIMARY KEY,
+        goal TEXT NOT NULL,
+        status TEXT NOT NULL,
+        workspace_id TEXT,
+        summary TEXT,
+        tasks_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT
+      );
     `);
     this.addColumnIfMissing("threads", "workspace_id", "TEXT");
     this.addColumnIfMissing("workspaces", "trust_level", "TEXT NOT NULL DEFAULT 'strict'");
@@ -3343,6 +3706,7 @@ class SqliteAppStore {
     this.db.prepare("UPDATE threads SET workspace_id = NULL WHERE workspace_id = ?").run(id);
     this.db.prepare("UPDATE artifacts SET workspace_id = NULL WHERE workspace_id = ?").run(id);
     this.db.prepare("UPDATE runs SET workspace_id = NULL WHERE workspace_id = ?").run(id);
+    this.db.prepare("DELETE FROM agent_orchestrations WHERE workspace_id = ?").run(id);
     this.db.prepare("DELETE FROM memories WHERE workspace_id = ?").run(id);
     if (this.getSetting("activeWorkspaceId") === id) {
       this.db.prepare("DELETE FROM app_settings WHERE key = 'activeWorkspaceId'").run();
@@ -4189,6 +4553,61 @@ class SqliteAppStore {
     return { runs: rows.map(automationRunRowToSummary) };
   }
 
+  createAgentOrchestration(input) {
+    this.db.prepare(`
+      INSERT INTO agent_orchestrations (
+        id, goal, status, workspace_id, summary, tasks_json, created_at, updated_at, completed_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.id,
+      input.goal,
+      input.status,
+      input.workspaceId ?? null,
+      input.summary ?? null,
+      JSON.stringify(input.tasks ?? []),
+      input.createdAt ?? nowIso(),
+      input.updatedAt ?? input.createdAt ?? nowIso(),
+      input.completedAt ?? null,
+    );
+    return this.getAgentOrchestration(input.id);
+  }
+
+  updateAgentOrchestration(id, input) {
+    const current = this.getAgentOrchestration(id);
+    if (!current) throw new Error("Agent orchestration not found.");
+    this.db.prepare(`
+      UPDATE agent_orchestrations
+      SET
+        status = ?,
+        summary = ?,
+        tasks_json = ?,
+        updated_at = ?,
+        completed_at = ?
+      WHERE id = ?
+    `).run(
+      input.status ?? current.status,
+      input.summary ?? current.summary ?? null,
+      JSON.stringify(input.tasks ?? current.tasks ?? []),
+      input.updatedAt ?? nowIso(),
+      input.completedAt ?? current.completedAt ?? null,
+      id,
+    );
+    return this.getAgentOrchestration(id);
+  }
+
+  getAgentOrchestration(id) {
+    const row = this.db.prepare("SELECT * FROM agent_orchestrations WHERE id = ?").get(id);
+    return row ? agentOrchestrationRowToSummary(row) : undefined;
+  }
+
+  listAgentOrchestrations(workspaceId) {
+    const rows = workspaceId
+      ? this.db.prepare("SELECT * FROM agent_orchestrations WHERE workspace_id = ? ORDER BY created_at DESC").all(workspaceId)
+      : this.db.prepare("SELECT * FROM agent_orchestrations ORDER BY created_at DESC").all();
+    return { orchestrations: rows.map(agentOrchestrationRowToSummary) };
+  }
+
   recordRunFromDemo(request, state) {
     const runId = state.summary?.runId ?? randomUUID();
     const timestamp = nowIso();
@@ -4413,6 +4832,20 @@ function runEventRowToSummary(row) {
     type: row.type,
     message: row.message,
     createdAt: row.created_at,
+  };
+}
+
+function agentOrchestrationRowToSummary(row) {
+  return {
+    id: row.id,
+    goal: row.goal,
+    status: row.status,
+    ...(row.workspace_id ? { workspaceId: row.workspace_id } : {}),
+    ...(row.summary ? { summary: row.summary } : {}),
+    tasks: parseStoredJson(row.tasks_json, []),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    ...(row.completed_at ? { completedAt: row.completed_at } : {}),
   };
 }
 

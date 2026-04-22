@@ -34,6 +34,7 @@
         <button class="nav-button" type="button" data-page-target="space">Space</button>
         <button class="nav-button" type="button" data-page-target="chat">Chat</button>
         <button class="nav-button" type="button" data-page-target="runs">Runs</button>
+        <button class="nav-button" type="button" data-page-target="agents">Agents</button>
         <button class="nav-button" type="button" data-page-target="automations">Automations</button>
         <button class="nav-button" type="button" data-page-target="artifacts">Artifacts</button>
         <button class="nav-button" type="button" data-page-target="approvals">Approvals</button>
@@ -108,6 +109,22 @@
             </div>
             <p id="thread-help" class="inline-help">Threads are scoped to the selected workspace.</p>
           </div>
+        </section>
+
+        <section class="agent-orchestration-form-panel panel page-section" data-pages="agents" aria-labelledby="agent-orchestration-form-title">
+          <div class="panel-heading">
+            <p class="eyebrow">Agents</p>
+            <span class="mini-label">local orchestration</span>
+          </div>
+          <h2 id="agent-orchestration-form-title">Start Orchestration</h2>
+          <form id="agent-orchestration-form" class="stack-form">
+            <label>
+              Orchestration goal
+              <textarea id="agent-orchestration-goal-input" rows="6">Review the current workspace, propose an implementation plan, and prepare a QA checklist.</textarea>
+            </label>
+            <button id="agent-orchestration-start-button" type="submit">Start Orchestration</button>
+          </form>
+          <p id="agent-orchestration-form-help" class="inline-help">Create a small local multi-agent plan with planner, worker, and reviewer steps.</p>
         </section>
 
         <section class="automation-panel panel page-section" data-pages="automations" aria-labelledby="automation-title">
@@ -322,6 +339,20 @@
           <pre id="run-artifact-preview" class="artifact-preview">Run artifacts will render here after a task completes.</pre>
         </section>
 
+        <section class="agent-orchestration-detail-panel panel tall-panel page-section" data-pages="agents" aria-labelledby="agent-orchestration-detail-title">
+          <div class="panel-heading">
+            <p class="eyebrow">Agents</p>
+            <span id="agent-orchestration-status" class="status-pill" data-phase="idle">idle</span>
+          </div>
+          <h2 id="agent-orchestration-detail-title">Current Orchestration</h2>
+          <p id="agent-orchestration-current-goal" class="run-summary">Select an orchestration to inspect it.</p>
+          <p id="agent-orchestration-current-summary" class="mission-meta">Task status, child runs, and aggregate summary will appear here.</p>
+          <ul id="agent-orchestration-meta-list" class="action-list compact-list"></ul>
+          <h3 id="agent-task-title">Agent Tasks</h3>
+          <ul id="agent-task-list" class="action-list"></ul>
+          <p id="agent-task-help" class="inline-help">Task status, assigned runtime, and child run links appear here.</p>
+        </section>
+
         <section class="settings-panel panel page-section" data-pages="settings" aria-labelledby="settings-title">
           <div class="panel-heading">
             <p class="eyebrow">Settings</p>
@@ -382,6 +413,7 @@
             <li><strong>Start</strong><span>Use the V1.0 readiness dashboard to see what is configured and what to do next.</span></li>
             <li><strong>Providers</strong><span>Configure custom provider base URLs, API keys, and models in the Providers page.</span></li>
             <li><strong>Executors</strong><span>Check mock, Codex, and Claude Code availability from Runs, Providers, or Settings.</span></li>
+            <li><strong>Agents</strong><span>Start a local planner-worker-reviewer orchestration and inspect task-level child runs.</span></li>
             <li><strong>Workspace Trust</strong><span>Create local workspaces and choose strict approval or trusted local writes.</span></li>
             <li><strong>Automation</strong><span>Create and pause one-off, scheduled, or heartbeat automations from the Automations page.</span></li>
             <li><strong>Memory</strong><span>Save personal or workspace context from the Memory page and review usage in chat or runs.</span></li>
@@ -462,6 +494,16 @@
           <h2 id="install-title">Desktop App Path</h2>
           <ul id="install-status-list" class="action-list"></ul>
           <p id="install-help" class="inline-help">The product desktop build uses Electron for macOS and Windows.</p>
+        </section>
+
+        <section class="agent-orchestration-list-panel panel page-section" data-pages="agents" aria-labelledby="agent-orchestration-list-title">
+          <div class="panel-heading">
+            <p class="eyebrow">Orchestrations</p>
+            <span class="mini-label">history</span>
+          </div>
+          <h2 id="agent-orchestration-list-title">Recent Orchestrations</h2>
+          <ul id="agent-orchestration-list" class="action-list"></ul>
+          <p id="agent-orchestration-list-help" class="inline-help">Recent orchestration sessions appear here.</p>
         </section>
 
         <section class="workspace-surface-panel panel page-section" data-pages="space artifacts runs" aria-labelledby="workspace-surface-title">
