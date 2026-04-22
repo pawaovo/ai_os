@@ -804,3 +804,36 @@ Implemented an authenticated single-channel remote bridge pilot, added a bilingu
 ### Next Steps
 
 - None - task complete
+
+
+## Session 23: P4 Mailbox Runtime MVP
+
+**Date**: 2026-04-22
+**Task**: P4 Mailbox Runtime MVP
+**Branch**: `codex/p4-mailbox-runtime`
+
+### Summary
+
+Implemented mailbox persistence, automatic orchestration and remote bridge handoff messages, added an Agents mailbox timeline, and verified source plus packaged mailbox flows.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ff20121` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
