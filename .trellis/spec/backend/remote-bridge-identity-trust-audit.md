@@ -15,3 +15,7 @@
 - Remote bridge must not bypass workspace trust or approval rules.
 - Remote actions must always bind to an auditable principal and workspace context.
 - Remote bridge must reuse existing approval semantics instead of defining a parallel approval model.
+
+## Current MVP Reference
+
+- Concrete single-channel pilot behavior is implemented in `remote-bridge-pilot-mvp.md`.

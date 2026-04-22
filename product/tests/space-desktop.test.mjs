@@ -215,6 +215,22 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(html, /id="mcp-hosted-server-tools"/);
   assert.match(html, /id="mcp-hosted-server-resources"/);
   assert.match(html, /id="mcp-hosted-server-help"/);
+  assert.match(html, /id="remote-bridge-pilot-title"/);
+  assert.match(html, /id="remote-bridge-pilot-form"/);
+  assert.match(html, /id="remote-bridge-principal-input"/);
+  assert.match(html, /id="remote-bridge-create-button"/);
+  assert.match(html, /id="remote-bridge-status"/);
+  assert.match(html, /id="remote-bridge-transport"/);
+  assert.match(html, /id="remote-bridge-base-url"/);
+  assert.match(html, /id="remote-bridge-session-list-title"/);
+  assert.match(html, /id="remote-bridge-session-list"/);
+  assert.match(html, /id="remote-bridge-session-list-help"/);
+  assert.match(html, /id="remote-bridge-connect-title"/);
+  assert.match(html, /id="remote-bridge-connect"/);
+  assert.match(html, /id="remote-bridge-audit-title"/);
+  assert.match(html, /id="remote-bridge-audit-list"/);
+  assert.match(html, /id="remote-bridge-help"/);
+  assert.match(html, /Remote Bridge/);
   assert.match(html, /id="agent-runtime-title"/);
   assert.match(html, /id="agent-runtime-list"/);
   assert.match(html, /id="agent-runtime-help"/);
@@ -358,6 +374,10 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(devServer, /createAppReadinessSummary\(language\)/);
   assert.match(devServer, /\/api\/mcp\/hosted-server/);
   assert.match(devServer, /createHostedMcpServerSummary/);
+  assert.match(devServer, /\/api\/remote-bridge\/pilot/);
+  assert.match(devServer, /single-http-bearer/);
+  assert.match(devServer, /Missing remote bridge bearer token/);
+  assert.match(devServer, /Remote bridge bearer token is invalid/);
   assert.match(devServer, /resolveMacElectronAppPath/);
   assert.match(devServer, /win-unpacked/);
   assert.match(devServer, /safeStorage/);
@@ -376,6 +396,7 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(browserSource, /loadMcpConfig/);
   assert.match(browserSource, /saveMcpConfigFromForm/);
   assert.match(browserSource, /\/api\/mcp\/hosted-server/);
+  assert.match(browserSource, /\/api\/remote-bridge\/pilot/);
   assert.match(browserSource, /loadAgentRuntimes/);
   assert.match(browserSource, /renderAgentRuntimes/);
   assert.match(browserSource, /localizeExecutorChoice/);
@@ -1221,6 +1242,238 @@ test("agent orchestration fails when a deterministic child run failure is trigge
       orchestrationList.orchestrations.some((item) => item.id === failed.id && item.status === "failed"),
       true,
     );
+  } finally {
+    await appServer.stop();
+    await rm(storageDir, { recursive: true, force: true });
+  }
+});
+
+test("remote bridge pilot can create an authenticated session and monitor a completed remote run", async () => {
+  const storageDir = await mkdtemp(`${tmpdir()}/ai-os-remote-bridge-`);
+  const appPort = await getAvailablePort();
+  const appServer = startSpaceDesktopServer({
+    port: appPort,
+    storageDir,
+  });
+
+  try {
+    const baseUrl = `http://127.0.0.1:${appPort}`;
+    await waitForHttp(`${baseUrl}/`);
+
+    const workspace = await postJson(`${baseUrl}/api/workspaces`, {
+      name: "Remote Bridge Workspace",
+      path: storageDir,
+    });
+
+    const initialPilot = await getJson(`${baseUrl}/api/remote-bridge/pilot`);
+    assert.equal(initialPilot.pilot.status, "ready");
+    assert.equal(initialPilot.pilot.transport, "http-bearer");
+    assert.equal(initialPilot.pilot.baseUrl, baseUrl);
+    assert.deepEqual(initialPilot.pilot.sessions, []);
+
+    const created = await postJson(`${baseUrl}/api/remote-bridge/pilot/sessions`, {
+      principalLabel: "Remote QA Pilot",
+      workspaceId: workspace.workspace.id,
+    });
+    assert.equal(created.session.workspaceId, workspace.workspace.id);
+    assert.equal(created.session.workspaceName, "Remote Bridge Workspace");
+    assert.equal(created.session.status, "active");
+    assert.equal(created.session.channelKind, "single-http-bearer");
+    assert.equal(created.session.principalLabel, "Remote QA Pilot");
+    assert.equal(created.session.eventCount, 1);
+    assert.equal(created.session.latestEvent.type, "session.created");
+    assert.equal(created.connect.sessionId, created.session.id);
+    assert.equal(created.connect.principalLabel, created.session.principalLabel);
+    assert.equal(created.connect.baseUrl, baseUrl);
+    assert.equal(created.connect.bearerToken.slice(0, 12), created.session.tokenPreview);
+    assert.match(
+      created.connect.runStartUrl,
+      new RegExp(`/api/remote-bridge/pilot/sessions/${escapeRegExp(created.session.id)}/runs/start$`),
+    );
+    assert.match(created.connect.runLiveUrlTemplate, /\/runs\/\{runId\}\/live$/);
+    assert.match(created.connect.runApprovalUrlTemplate, /\/runs\/\{runId\}\/approval$/);
+
+    const pilotAfterCreate = await getJson(`${baseUrl}/api/remote-bridge/pilot`);
+    assert.equal(pilotAfterCreate.pilot.sessions.length, 1);
+    assert.equal(pilotAfterCreate.pilot.sessions[0].id, created.session.id);
+    assert.equal(pilotAfterCreate.pilot.sessions[0].workspaceName, "Remote Bridge Workspace");
+    assert.equal(pilotAfterCreate.pilot.sessions[0].eventCount, 1);
+    assert.equal(pilotAfterCreate.pilot.sessions[0].latestEvent.type, "session.created");
+
+    const started = await postJson(
+      created.connect.runStartUrl,
+      {
+        goal: "summarize workspace status for remote bridge pilot",
+        executorChoice: "mock",
+        timeoutMs: 5000,
+      },
+      remoteBridgeAuthHeaders(created.connect.bearerToken),
+    );
+    assert.equal(started.session.id, created.session.id);
+    assert.equal(started.session.lastRunId, started.run.id);
+    assert.equal(started.run.workspaceId, workspace.workspace.id);
+    assert.equal(started.live.runId, started.run.id);
+    assert.equal(started.live.executorChoice, "mock");
+
+    const completed = await waitForRemoteBridgeLive(
+      created.connect,
+      started.run.id,
+      (live) => live.status === "completed",
+    );
+    assert.equal(completed.runId, started.run.id);
+    assert.equal(completed.status, "completed");
+    assert.equal(completed.currentTurn.status, "completed");
+    assert.equal(completed.queryLoop.phase, "completed");
+    assert.equal(completed.artifacts.length > 0, true);
+
+    const sessionDetail = await getJson(
+      `${baseUrl}/api/remote-bridge/pilot/sessions/${encodeURIComponent(created.session.id)}`,
+    );
+    assert.equal(sessionDetail.session.lastRunId, started.run.id);
+    assert.equal(sessionDetail.session.eventCount, 2);
+    assert.equal(sessionDetail.session.latestEvent.type, "run.started");
+    assert.deepEqual(sessionDetail.events.map((event) => event.type), ["run.started", "session.created"]);
+    assert.equal(sessionDetail.events[0].runId, started.run.id);
+  } finally {
+    await appServer.stop();
+    await rm(storageDir, { recursive: true, force: true });
+  }
+});
+
+test("remote bridge pilot can grant runtime approvals through the remote session endpoint", async () => {
+  const storageDir = await mkdtemp(`${tmpdir()}/ai-os-remote-bridge-approval-`);
+  const appPort = await getAvailablePort();
+  const appServer = startSpaceDesktopServer({
+    port: appPort,
+    storageDir,
+  });
+
+  try {
+    const baseUrl = `http://127.0.0.1:${appPort}`;
+    await waitForHttp(`${baseUrl}/`);
+
+    const workspace = await postJson(`${baseUrl}/api/workspaces`, {
+      name: "Remote Bridge Approval Workspace",
+      path: storageDir,
+    });
+    await patchJson(`${baseUrl}/api/workspaces/${workspace.workspace.id}`, {
+      name: "Remote Bridge Approval Workspace",
+      path: storageDir,
+      trustLevel: "trusted-local-writes",
+    });
+
+    const created = await postJson(`${baseUrl}/api/remote-bridge/pilot/sessions`, {
+      principalLabel: "Remote Approval Pilot",
+      workspaceId: workspace.workspace.id,
+    });
+    const started = await postJson(
+      created.connect.runStartUrl,
+      {
+        goal: "review the workspace and pause for approval before the final summary",
+        executorChoice: "mock",
+        timeoutMs: 5000,
+      },
+      remoteBridgeAuthHeaders(created.connect.bearerToken),
+    );
+    assert.equal(started.run.workspaceId, workspace.workspace.id);
+    assert.equal(started.live.pendingApproval, undefined);
+
+    const runtimePending = await waitForRemoteBridgeLive(
+      created.connect,
+      started.run.id,
+      (live) => Boolean(live.pendingApproval),
+    );
+    assert.equal(runtimePending.status, "awaiting-approval");
+    assert.equal(runtimePending.pendingApproval.stage, "runtime");
+    assert.equal(runtimePending.pendingApproval.category, "shell-command");
+    assert.equal(runtimePending.queryLoop.phase, "awaiting-approval");
+    const approvalId = runtimePending.pendingApproval.approvalId;
+
+    const approved = await postJson(
+      remoteBridgeRunApprovalUrl(created.connect, started.run.id),
+      { decision: "grant" },
+      remoteBridgeAuthHeaders(created.connect.bearerToken),
+    );
+    assert.equal(approved.session.id, created.session.id);
+    assert.equal(approved.session.lastRunId, started.run.id);
+    assert.equal(approved.session.latestEvent.type, "approval.resolved");
+    assert.equal(approved.session.latestEvent.approvalId, approvalId);
+    assert.equal(approved.live.runId, started.run.id);
+
+    const completed = await waitForRemoteBridgeLive(
+      created.connect,
+      started.run.id,
+      (live) => live.status === "completed" && !live.pendingApproval,
+    );
+    assert.equal(completed.status, "completed");
+    assert.equal(completed.queryLoop.phase, "completed");
+    assert.equal(
+      completed.queryLoop.interceptions.some((entry) => entry.approvalId === approvalId && entry.status === "granted"),
+      true,
+    );
+
+    const sessionDetail = await getJson(
+      `${baseUrl}/api/remote-bridge/pilot/sessions/${encodeURIComponent(created.session.id)}`,
+    );
+    assert.equal(sessionDetail.session.eventCount, 3);
+    assert.equal(sessionDetail.session.latestEvent.type, "approval.resolved");
+    assert.equal(
+      sessionDetail.events.some((event) => event.type === "approval.resolved" && event.approvalId === approvalId),
+      true,
+    );
+    assert.equal(
+      sessionDetail.events.some((event) => event.type === "run.started" && event.runId === started.run.id),
+      true,
+    );
+  } finally {
+    await appServer.stop();
+    await rm(storageDir, { recursive: true, force: true });
+  }
+});
+
+test("remote bridge pilot rejects missing or invalid bearer tokens", async () => {
+  const storageDir = await mkdtemp(`${tmpdir()}/ai-os-remote-bridge-auth-`);
+  const appPort = await getAvailablePort();
+  const appServer = startSpaceDesktopServer({
+    port: appPort,
+    storageDir,
+  });
+
+  try {
+    const baseUrl = `http://127.0.0.1:${appPort}`;
+    await waitForHttp(`${baseUrl}/`);
+
+    const workspace = await postJson(`${baseUrl}/api/workspaces`, {
+      name: "Remote Bridge Auth Workspace",
+      path: storageDir,
+    });
+    const created = await postJson(`${baseUrl}/api/remote-bridge/pilot/sessions`, {
+      principalLabel: "Remote Auth Pilot",
+      workspaceId: workspace.workspace.id,
+    });
+
+    const missingToken = await postJsonAllowFailure(
+      created.connect.runStartUrl,
+      {
+        goal: "summarize workspace status for auth failure coverage",
+        executorChoice: "mock",
+      },
+    );
+    assert.equal(missingToken.ok, false);
+    assert.equal(missingToken.status, 401);
+    assert.match(missingToken.payload.error, /Missing remote bridge bearer token/);
+
+    const invalidToken = await postJsonAllowFailure(
+      created.connect.runStartUrl,
+      {
+        goal: "summarize workspace status for auth failure coverage",
+        executorChoice: "mock",
+      },
+      remoteBridgeAuthHeaders("rb-invalid-token"),
+    );
+    assert.equal(invalidToken.ok, false);
+    assert.equal(invalidToken.status, 403);
+    assert.match(invalidToken.payload.error, /invalid/);
   } finally {
     await appServer.stop();
     await rm(storageDir, { recursive: true, force: true });
@@ -2512,17 +2765,44 @@ async function waitForOrchestration(port, orchestrationId, predicate) {
   throw new Error(`Timed out waiting for orchestration ${orchestrationId}: ${JSON.stringify(lastOrchestration)}`);
 }
 
+async function waitForRemoteBridgeLive(portOrConnect, sessionIdOrRunId, runIdOrPredicate, bearerTokenOrPredicate, maybePredicate) {
+  const connect = typeof portOrConnect === "object" && portOrConnect !== null
+    ? portOrConnect
+    : undefined;
+  const sessionId = connect ? connect.sessionId : sessionIdOrRunId;
+  const runId = connect ? sessionIdOrRunId : runIdOrPredicate;
+  const bearerToken = connect ? connect.bearerToken : bearerTokenOrPredicate;
+  const predicate = connect ? runIdOrPredicate : maybePredicate;
+  const startedAt = Date.now();
+  let lastLive;
+
+  while (Date.now() - startedAt < 5000) {
+    const payload = await getJson(
+      connect
+        ? connect.runLiveUrlTemplate.replace("{runId}", encodeURIComponent(runId))
+        : `http://127.0.0.1:${portOrConnect}/api/remote-bridge/pilot/sessions/${sessionId}/runs/${runId}/live`,
+      remoteBridgeAuthHeaders(bearerToken),
+    );
+    lastLive = payload.live;
+    if (predicate(lastLive)) return lastLive;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  throw new Error(`Timed out waiting for remote bridge live run ${runId}: ${JSON.stringify(lastLive)}`);
+}
+
 async function getJson(url, headers = undefined) {
   const response = await fetch(url, headers ? { headers } : undefined);
   assert.equal(response.ok, true);
   return response.json();
 }
 
-async function postJson(url, body) {
+async function postJson(url, body, headers = undefined) {
   const response = await fetch(url, {
     method: "POST",
     headers: {
       "content-type": "application/json",
+      ...(headers ?? {}),
     },
     body: JSON.stringify(body),
   });
@@ -2531,11 +2811,12 @@ async function postJson(url, body) {
   return response.json();
 }
 
-async function postJsonAllowFailure(url, body) {
+async function postJsonAllowFailure(url, body, headers = undefined) {
   const response = await fetch(url, {
     method: "POST",
     headers: {
       "content-type": "application/json",
+      ...(headers ?? {}),
     },
     body: JSON.stringify(body),
   });
@@ -2545,6 +2826,16 @@ async function postJsonAllowFailure(url, body) {
     status: response.status,
     payload: await response.json(),
   };
+}
+
+function remoteBridgeAuthHeaders(token) {
+  return {
+    authorization: `Bearer ${token}`,
+  };
+}
+
+function remoteBridgeRunApprovalUrl(connect, runId) {
+  return connect.runApprovalUrlTemplate.replace("{runId}", encodeURIComponent(runId));
 }
 
 async function patchJson(url, body) {

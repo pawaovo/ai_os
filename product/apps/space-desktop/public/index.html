@@ -425,11 +425,59 @@
           <h4 id="mcp-hosted-server-resources-title">Resources</h4>
           <ul id="mcp-hosted-server-resources" class="action-list compact-list"></ul>
           <p id="mcp-hosted-server-help" class="inline-help">Hosted MCP Server status and connection guidance appear here.</p>
+          <h3 id="remote-bridge-pilot-title">Remote Bridge Pilot</h3>
+          <form id="remote-bridge-pilot-form" class="stack-form compact-stack-form">
+            <label>
+              Principal Label
+              <input id="remote-bridge-principal-input" value="Remote Pilot" autocomplete="off" />
+            </label>
+            <div class="button-grid">
+              <button id="remote-bridge-create-button" type="submit">Create Remote Session</button>
+            </div>
+          </form>
+          <div class="approval-detail-grid remote-bridge-pilot-grid">
+            <span id="remote-bridge-status-label">Status</span>
+            <strong id="remote-bridge-status">idle</strong>
+            <span id="remote-bridge-transport-label">Transport</span>
+            <strong id="remote-bridge-transport">none</strong>
+            <span id="remote-bridge-base-url-label">Base URL</span>
+            <strong id="remote-bridge-base-url">none</strong>
+            <span id="remote-bridge-sessions-count-label">Sessions</span>
+            <strong id="remote-bridge-sessions-count">0 sessions</strong>
+          </div>
+          <h4 id="remote-bridge-session-list-title">Sessions</h4>
+          <ul id="remote-bridge-session-list" class="action-list compact-list"></ul>
+          <p id="remote-bridge-session-list-help" class="inline-help">Recent remote bridge sessions appear here.</p>
+          <h4 id="remote-bridge-session-detail-title">Current Session Detail</h4>
+          <div class="approval-detail-grid remote-bridge-pilot-grid">
+            <span id="remote-bridge-session-id-label">Session ID</span>
+            <strong id="remote-bridge-session-id">none</strong>
+            <span id="remote-bridge-session-principal-label">Principal</span>
+            <strong id="remote-bridge-session-principal">none</strong>
+            <span id="remote-bridge-session-workspace-label">Workspace</span>
+            <strong id="remote-bridge-session-workspace">none</strong>
+            <span id="remote-bridge-session-channel-label">Channel</span>
+            <strong id="remote-bridge-session-channel">none</strong>
+            <span id="remote-bridge-session-token-preview-label">Token Preview</span>
+            <strong id="remote-bridge-session-token-preview">none</strong>
+            <span id="remote-bridge-session-last-run-label">Last Run</span>
+            <strong id="remote-bridge-session-last-run">none</strong>
+            <span id="remote-bridge-session-created-at-label">Created</span>
+            <strong id="remote-bridge-session-created-at">none</strong>
+            <span id="remote-bridge-session-last-seen-at-label">Last Seen</span>
+            <strong id="remote-bridge-session-last-seen-at">none</strong>
+          </div>
+          <h4 id="remote-bridge-connect-title">Latest Connect Info</h4>
+          <ul id="remote-bridge-connect" class="action-list compact-list"></ul>
+          <h4 id="remote-bridge-audit-title">Audit Events</h4>
+          <ul id="remote-bridge-audit-list" class="action-list compact-list"></ul>
+          <p id="remote-bridge-help" class="inline-help">Remote Bridge Pilot status, session detail, and latest connect info appear here.</p>
           <ul class="settings-list">
             <li><strong>Start</strong><span>Use the V1.0 readiness dashboard to see what is configured and what to do next.</span></li>
             <li><strong>Providers</strong><span>Configure custom provider base URLs, API keys, and models in the Providers page.</span></li>
             <li><strong>Executors</strong><span>Check mock, Codex, and Claude Code availability from Runs, Providers, or Settings.</span></li>
             <li><strong>Agents</strong><span>Start a local planner-worker-reviewer orchestration and inspect task-level child runs.</span></li>
+            <li><strong>Remote Bridge</strong><span>Review the single-channel remote bridge pilot, recent sessions, current session detail, and the latest connect token.</span></li>
             <li><strong>Workspace Trust</strong><span>Create local workspaces and choose strict approval or trusted local writes.</span></li>
             <li><strong>Automation</strong><span>Create and pause one-off, scheduled, or heartbeat automations from the Automations page.</span></li>
             <li><strong>Memory</strong><span>Save personal or workspace context from the Memory page and review usage in chat or runs.</span></li>

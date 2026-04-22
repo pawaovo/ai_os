@@ -1,0 +1,8 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend development guide"}
+{"file": ".trellis/spec/backend/channel-pilot-remote-session-continuation.md", "reason": "Single channel remote continuation boundary"}
+{"file": ".trellis/spec/backend/remote-bridge-identity-trust-audit.md", "reason": "Remote principal identity and approval audit boundary"}
+{"file": ".trellis/spec/backend/external-runtime-compatibility-contract.md", "reason": "Remote-bridge transport compatibility must stay additive"}
+{"file": ".trellis/spec/backend/multi-agent-coordination-mailbox.md", "reason": "Do not turn the pilot into mailbox runtime"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Feature spans session API, auth, run lifecycle, settings UI, and tests"}

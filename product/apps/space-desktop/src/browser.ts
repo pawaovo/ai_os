@@ -396,6 +396,50 @@ interface HostedMcpServerSummary {
   resources: HostedMcpResourceSummary[];
 }
 
+interface RemoteBridgeEventSummary {
+  id: string;
+  type: string;
+  message: string;
+  createdAt: string;
+  runId?: string;
+  approvalId?: string;
+}
+
+interface RemoteBridgeSessionSummary {
+  id: string;
+  principalId: string;
+  principalLabel: string;
+  channelKind: string;
+  workspaceId: string;
+  workspaceName?: string;
+  status: string;
+  tokenPreview: string;
+  lastRunId?: string;
+  createdAt: string;
+  updatedAt: string;
+  lastSeenAt?: string;
+  eventCount?: number;
+  latestEvent?: RemoteBridgeEventSummary;
+}
+
+interface RemoteBridgePilotSummary {
+  status: string;
+  transport: string;
+  detail: string;
+  baseUrl: string;
+  sessions: RemoteBridgeSessionSummary[];
+}
+
+interface RemoteBridgeConnectSummary {
+  baseUrl: string;
+  sessionId: string;
+  principalLabel: string;
+  bearerToken: string;
+  runStartUrl: string;
+  runLiveUrlTemplate: string;
+  runApprovalUrlTemplate: string;
+}
+
 interface AgentRuntimeSummary {
   id: string;
   kind: string;
@@ -486,6 +530,12 @@ const state = {
   orchestrations: [] as AgentOrchestrationSummary[],
   hostedMcpServer: undefined as HostedMcpServerSummary | undefined,
   hostedMcpServerError: undefined as string | undefined,
+  remoteBridgePilot: undefined as RemoteBridgePilotSummary | undefined,
+  remoteBridgePilotError: undefined as string | undefined,
+  remoteBridgeSession: undefined as RemoteBridgeSessionSummary | undefined,
+  remoteBridgeEvents: [] as RemoteBridgeEventSummary[],
+  remoteBridgeConnect: undefined as RemoteBridgeConnectSummary | undefined,
+  remoteBridgeSessionError: undefined as string | undefined,
   mcpConfig: undefined as {
     globalConfig?: McpClientConfigRecord;
     workspaceOverride?: McpClientConfigRecord;
@@ -505,6 +555,7 @@ const state = {
   activeArtifact: undefined as ArtifactSummary | undefined,
   activeRunId: undefined as string | undefined,
   activeOrchestrationId: undefined as string | undefined,
+  activeRemoteBridgeSessionId: undefined as string | undefined,
   activeCapabilityId: undefined as string | undefined,
   activeRecipeId: undefined as string | undefined,
   activePage: "start",
@@ -695,6 +746,26 @@ const elements = {
   hostedMcpToolList: getElement("mcp-hosted-server-tools", HTMLElement),
   hostedMcpResourceList: getElement("mcp-hosted-server-resources", HTMLElement),
   hostedMcpHelp: getElement("mcp-hosted-server-help", HTMLElement),
+  remoteBridgePilotForm: getElement("remote-bridge-pilot-form", HTMLFormElement),
+  remoteBridgePrincipalInput: getElement("remote-bridge-principal-input", HTMLInputElement),
+  remoteBridgeCreateButton: getElement("remote-bridge-create-button", HTMLButtonElement),
+  remoteBridgeStatus: getElement("remote-bridge-status", HTMLElement),
+  remoteBridgeTransport: getElement("remote-bridge-transport", HTMLElement),
+  remoteBridgeBaseUrl: getElement("remote-bridge-base-url", HTMLElement),
+  remoteBridgeSessionsCount: getElement("remote-bridge-sessions-count", HTMLElement),
+  remoteBridgeSessionList: getElement("remote-bridge-session-list", HTMLElement),
+  remoteBridgeSessionListHelp: getElement("remote-bridge-session-list-help", HTMLElement),
+  remoteBridgeSessionId: getElement("remote-bridge-session-id", HTMLElement),
+  remoteBridgeSessionPrincipal: getElement("remote-bridge-session-principal", HTMLElement),
+  remoteBridgeSessionWorkspace: getElement("remote-bridge-session-workspace", HTMLElement),
+  remoteBridgeSessionChannel: getElement("remote-bridge-session-channel", HTMLElement),
+  remoteBridgeSessionTokenPreview: getElement("remote-bridge-session-token-preview", HTMLElement),
+  remoteBridgeSessionLastRun: getElement("remote-bridge-session-last-run", HTMLElement),
+  remoteBridgeSessionCreatedAt: getElement("remote-bridge-session-created-at", HTMLElement),
+  remoteBridgeSessionLastSeenAt: getElement("remote-bridge-session-last-seen-at", HTMLElement),
+  remoteBridgeConnect: getElement("remote-bridge-connect", HTMLElement),
+  remoteBridgeAuditList: getElement("remote-bridge-audit-list", HTMLElement),
+  remoteBridgeHelp: getElement("remote-bridge-help", HTMLElement),
 };
 
 elements.navButtons.forEach((button) => {
@@ -715,6 +786,18 @@ elements.mcpConfigScope.addEventListener("change", () => {
 elements.mcpConfigForm.addEventListener("submit", (event) => {
   event.preventDefault();
   void saveMcpConfigFromForm();
+});
+
+elements.remoteBridgePilotForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void createRemoteBridgeSessionFromForm();
+});
+
+elements.remoteBridgeSessionList.addEventListener("click", (event) => {
+  const target = event.target instanceof HTMLElement
+    ? event.target.closest<HTMLButtonElement>("button[data-remote-bridge-session-id]")
+    : null;
+  if (target?.dataset.remoteBridgeSessionId) void openRemoteBridgeSession(target.dataset.remoteBridgeSessionId);
 });
 
 elements.appReadinessList.addEventListener("click", (event) => {
@@ -958,6 +1041,7 @@ async function initializeAppState(): Promise<void> {
   await loadAgentOrchestrations();
   await loadMcpConfig();
   await loadHostedMcpServer();
+  await loadRemoteBridgePilot();
   await loadAppReadiness();
 }
 
@@ -1278,6 +1362,27 @@ function applyStaticTranslations(): void {
   setText("#mcp-hosted-server-tools-title", t("hostedMcp.tools"));
   setText("#mcp-hosted-server-resources-title", t("hostedMcp.resources"));
   renderHostedMcpServer();
+  setText("#remote-bridge-pilot-title", t("remoteBridge.title"));
+  setText("#remote-bridge-status-label", t("remoteBridge.status"));
+  setText("#remote-bridge-transport-label", t("remoteBridge.transport"));
+  setText("#remote-bridge-base-url-label", t("remoteBridge.baseUrl"));
+  setText("#remote-bridge-sessions-count-label", t("remoteBridge.sessions.countLabel"));
+  setText("#remote-bridge-session-list-title", t("remoteBridge.sessions"));
+  setText("#remote-bridge-session-detail-title", t("remoteBridge.sessionDetail.title"));
+  setText("#remote-bridge-session-id-label", t("remoteBridge.sessionDetail.id"));
+  setText("#remote-bridge-session-principal-label", t("remoteBridge.sessionDetail.principal"));
+  setText("#remote-bridge-session-workspace-label", t("remoteBridge.sessionDetail.workspace"));
+  setText("#remote-bridge-session-channel-label", t("remoteBridge.sessionDetail.channel"));
+  setText("#remote-bridge-session-token-preview-label", t("remoteBridge.sessionDetail.tokenPreview"));
+  setText("#remote-bridge-session-last-run-label", t("remoteBridge.sessionDetail.lastRun"));
+  setText("#remote-bridge-session-created-at-label", t("remoteBridge.sessionDetail.createdAt"));
+  setText("#remote-bridge-session-last-seen-at-label", t("remoteBridge.sessionDetail.lastSeenAt"));
+  setText("#remote-bridge-connect-title", t("remoteBridge.connect.title"));
+  setText("#remote-bridge-audit-title", t("remoteBridge.audit.title"));
+  setControlLabel(elements.remoteBridgePrincipalInput, t("remoteBridge.principalLabel"));
+  syncLocalizedInputValue(elements.remoteBridgePrincipalInput, "remoteBridge.principalLabel.default");
+  elements.remoteBridgeCreateButton.textContent = t("remoteBridge.button.create");
+  renderRemoteBridgePilot();
   renderSettingsList();
 
   setText(".capability-detail-panel .eyebrow", t("capability-detail.eyebrow"));
@@ -1476,6 +1581,7 @@ function renderSettingsList(): void {
     ["settings.item.providers.title", "settings.item.providers.detail"],
     ["settings.item.executors.title", "settings.item.executors.detail"],
     ["settings.item.agents.title", "settings.item.agents.detail"],
+    ["settings.item.remoteBridge.title", "settings.item.remoteBridge.detail"],
     ["settings.item.workspaceTrust.title", "settings.item.workspaceTrust.detail"],
     ["settings.item.automation.title", "settings.item.automation.detail"],
     ["settings.item.memory.title", "settings.item.memory.detail"],
@@ -1539,6 +1645,7 @@ async function saveLanguageSetting(): Promise<void> {
   await loadAgentRuntimes();
   await loadAgentOrchestrations();
   await loadHostedMcpServer();
+  await loadRemoteBridgePilot();
   await loadArtifacts();
   await loadAppReadiness();
   renderChatMessages();
@@ -1830,7 +1937,253 @@ async function refreshWorkspaceScopedData(): Promise<void> {
   await loadAgentOrchestrations();
   await loadMcpConfig();
   await loadHostedMcpServer();
+  await loadRemoteBridgePilot();
   await loadAppReadiness();
+}
+
+async function loadRemoteBridgePilot(): Promise<void> {
+  try {
+    const payload = await apiJson<{ pilot: RemoteBridgePilotSummary }>("/api/remote-bridge/pilot");
+    state.remoteBridgePilot = payload.pilot;
+    state.remoteBridgePilotError = undefined;
+    state.remoteBridgeSessionError = undefined;
+    if (state.remoteBridgeConnect && !payload.pilot.sessions.some((session) => session.id === state.remoteBridgeConnect?.sessionId)) {
+      state.remoteBridgeConnect = undefined;
+    }
+    const activeSession = payload.pilot.sessions.find((session) => session.id === state.activeRemoteBridgeSessionId)
+      ?? payload.pilot.sessions[0];
+    state.activeRemoteBridgeSessionId = activeSession?.id;
+    if (activeSession) {
+      state.remoteBridgeSession = activeSession;
+      await openRemoteBridgeSession(activeSession.id, false);
+    } else {
+      state.remoteBridgeSession = undefined;
+      state.remoteBridgeEvents = [];
+      state.remoteBridgeSessionError = undefined;
+    }
+  } catch (error) {
+    state.remoteBridgePilot = undefined;
+    state.remoteBridgePilotError = errorToMessage(error, t("remoteBridge.loadFailed"));
+    state.remoteBridgeSession = undefined;
+    state.remoteBridgeEvents = [];
+    state.remoteBridgeSessionError = undefined;
+  }
+
+  renderRemoteBridgePilot();
+}
+
+async function createRemoteBridgeSessionFromForm(): Promise<void> {
+  const principalLabel = optionalFormValue(elements.remoteBridgePrincipalInput.value);
+  elements.remoteBridgeCreateButton.disabled = true;
+  try {
+    const payload = await apiJson<{
+      session: RemoteBridgeSessionSummary;
+      connect: RemoteBridgeConnectSummary;
+    }>("/api/remote-bridge/pilot/sessions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        ...(principalLabel ? { principalLabel } : {}),
+      }),
+    });
+    state.remoteBridgeConnect = payload.connect;
+    state.remoteBridgeSessionError = undefined;
+    await loadRemoteBridgePilot();
+    state.activeRemoteBridgeSessionId = payload.session.id;
+    await openRemoteBridgeSession(payload.session.id, false);
+  } catch (error) {
+    state.remoteBridgeSessionError = errorToMessage(error, t("remoteBridge.createFailed"));
+  } finally {
+    elements.remoteBridgeCreateButton.disabled = false;
+  }
+
+  renderRemoteBridgePilot();
+}
+
+async function openRemoteBridgeSession(sessionId: string, render = true): Promise<void> {
+  if (!sessionId) return;
+  state.activeRemoteBridgeSessionId = sessionId;
+  const sessionSummary = state.remoteBridgePilot?.sessions.find((item) => item.id === sessionId);
+  if (sessionSummary) {
+    state.remoteBridgeSession = sessionSummary;
+  }
+  state.remoteBridgeEvents = [];
+  state.remoteBridgeSessionError = undefined;
+  if (render) renderRemoteBridgePilot();
+  try {
+    const payload = await apiJson<{
+      session: RemoteBridgeSessionSummary;
+      events: RemoteBridgeEventSummary[];
+    }>(`/api/remote-bridge/pilot/sessions/${encodeURIComponent(sessionId)}`);
+    state.remoteBridgeSession = payload.session;
+    state.remoteBridgeEvents = payload.events;
+  } catch (error) {
+    state.remoteBridgeSession = sessionSummary;
+    state.remoteBridgeEvents = [];
+    state.remoteBridgeSessionError = errorToMessage(error, t("remoteBridge.openFailed"));
+  }
+
+  if (render) renderRemoteBridgePilot();
+}
+
+function renderRemoteBridgePilot(): void {
+  const pilot = state.remoteBridgePilot;
+  const activeSession = getActiveRemoteBridgeSession();
+  elements.remoteBridgeStatus.textContent = pilot
+    ? translatedToken(pilot.status)
+    : translatedToken(state.remoteBridgePilotError ? "failed" : "idle");
+  elements.remoteBridgeTransport.textContent = pilot ? localizeRemoteBridgeTransport(pilot.transport) : t("dynamic.none");
+  elements.remoteBridgeBaseUrl.textContent = pilot?.baseUrl ?? t("dynamic.none");
+  elements.remoteBridgeSessionsCount.textContent = t("remoteBridge.sessions.countValue", { count: pilot?.sessions.length ?? 0 });
+
+  renderRemoteBridgeSessionDetail(activeSession);
+  renderRemoteBridgeConnectInfo();
+  renderRemoteBridgeAuditEvents();
+
+  if (!pilot) {
+    elements.remoteBridgeSessionList.replaceChildren(createListItem(t("remoteBridge.sessions.none")));
+    elements.remoteBridgeSessionListHelp.textContent = state.remoteBridgePilotError ?? t("remoteBridge.sessions.help.default");
+    elements.remoteBridgeHelp.textContent = state.remoteBridgeSessionError
+      ?? state.remoteBridgePilotError
+      ?? t("remoteBridge.help.default");
+    return;
+  }
+
+  elements.remoteBridgeSessionList.replaceChildren(
+    ...(pilot.sessions.length > 0
+      ? pilot.sessions.map((session) => createActionListItem({
+          id: session.id,
+          idName: "remoteBridgeSessionId",
+          title: session.principalLabel,
+          meta: [
+            formatRemoteBridgeWorkspace(session),
+            localizeRemoteBridgeChannelKind(session.channelKind),
+            formatDate(session.createdAt),
+          ].join(" / "),
+          pressed: session.id === state.activeRemoteBridgeSessionId,
+          source: session.status,
+        }))
+      : [createListItem(t("remoteBridge.sessions.none"))]),
+  );
+  elements.remoteBridgeSessionListHelp.textContent = pilot.sessions.length > 0
+    ? t("remoteBridge.sessions.help.count", { count: pilot.sessions.length })
+    : t("remoteBridge.sessions.help.default");
+  elements.remoteBridgeHelp.textContent = state.remoteBridgeSessionError
+    ?? state.remoteBridgePilotError
+    ?? describeRemoteBridgeHelp(activeSession);
+}
+
+function localizeRemoteBridgeTransport(value: string): string {
+  return translateKeyOrFallback(`remoteBridge.transport.${value}`, value);
+}
+
+function localizeRemoteBridgeChannelKind(value: string): string {
+  return translateKeyOrFallback(`remoteBridge.channel.${value}`, value);
+}
+
+function getActiveRemoteBridgeSession(): RemoteBridgeSessionSummary | undefined {
+  if (state.remoteBridgeSession?.id === state.activeRemoteBridgeSessionId) {
+    return state.remoteBridgeSession;
+  }
+
+  return state.remoteBridgePilot?.sessions.find((session) => session.id === state.activeRemoteBridgeSessionId);
+}
+
+function formatRemoteBridgeWorkspace(session: RemoteBridgeSessionSummary): string {
+  const workspaceName = session.workspaceName?.trim();
+  return workspaceName ? `${workspaceName} / ${session.workspaceId}` : session.workspaceId;
+}
+
+function renderRemoteBridgeSessionDetail(session?: RemoteBridgeSessionSummary): void {
+  elements.remoteBridgeSessionId.textContent = session?.id ?? t("dynamic.none");
+  elements.remoteBridgeSessionPrincipal.textContent = session?.principalLabel ?? t("dynamic.none");
+  elements.remoteBridgeSessionWorkspace.textContent = session ? formatRemoteBridgeWorkspace(session) : t("dynamic.none");
+  elements.remoteBridgeSessionChannel.textContent = session
+    ? localizeRemoteBridgeChannelKind(session.channelKind)
+    : t("dynamic.none");
+  elements.remoteBridgeSessionTokenPreview.textContent = session?.tokenPreview ?? t("dynamic.none");
+  elements.remoteBridgeSessionLastRun.textContent = session?.lastRunId ?? t("dynamic.none");
+  elements.remoteBridgeSessionCreatedAt.textContent = session?.createdAt ? formatDate(session.createdAt) : t("dynamic.none");
+  elements.remoteBridgeSessionLastSeenAt.textContent = session?.lastSeenAt ? formatDate(session.lastSeenAt) : t("dynamic.none");
+}
+
+function renderRemoteBridgeConnectInfo(): void {
+  if (!state.remoteBridgeConnect) {
+    elements.remoteBridgeConnect.replaceChildren(createListItem(t("remoteBridge.connect.none")));
+    return;
+  }
+
+  elements.remoteBridgeConnect.replaceChildren(
+    createEventListItem(t("remoteBridge.connect.sessionId"), state.remoteBridgeConnect.sessionId),
+    createEventListItem(t("remoteBridge.connect.principal"), state.remoteBridgeConnect.principalLabel),
+    createEventListItem(t("remoteBridge.connect.token"), state.remoteBridgeConnect.bearerToken),
+    createEventListItem(t("remoteBridge.connect.runStartUrl"), state.remoteBridgeConnect.runStartUrl),
+    createEventListItem(t("remoteBridge.connect.runLiveUrl"), state.remoteBridgeConnect.runLiveUrlTemplate),
+    createEventListItem(t("remoteBridge.connect.approvalUrl"), state.remoteBridgeConnect.runApprovalUrlTemplate),
+  );
+}
+
+function renderRemoteBridgeAuditEvents(): void {
+  if (!state.activeRemoteBridgeSessionId) {
+    elements.remoteBridgeAuditList.replaceChildren(createListItem(t("remoteBridge.audit.noSession")));
+    return;
+  }
+
+  if (state.remoteBridgeEvents.length === 0) {
+    elements.remoteBridgeAuditList.replaceChildren(createListItem(t("remoteBridge.audit.none")));
+    return;
+  }
+
+  elements.remoteBridgeAuditList.replaceChildren(
+    ...state.remoteBridgeEvents.map((event) => createEventListItem(
+      translateKeyOrFallback(`remoteBridge.event.${event.type}`, event.type),
+      describeRemoteBridgeEvent(event),
+    )),
+  );
+}
+
+function describeRemoteBridgeEvent(event: RemoteBridgeEventSummary): string {
+  const parts = [formatDate(event.createdAt)];
+  if (event.runId) parts.push(`${t("remoteBridge.audit.run")} ${truncate(event.runId, 24)}`);
+  if (event.approvalId) parts.push(`${t("remoteBridge.audit.approval")} ${truncate(event.approvalId, 24)}`);
+  const summary = summarizeRemoteBridgeEvent(event);
+  if (summary) parts.push(summary);
+  return parts.join(" / ");
+}
+
+function summarizeRemoteBridgeEvent(event: RemoteBridgeEventSummary): string {
+  const activeSession = getActiveRemoteBridgeSession();
+  switch (event.type) {
+    case "session.created":
+      return t("remoteBridge.audit.message.sessionCreated", {
+        principal: activeSession?.principalLabel ?? t("dynamic.none"),
+      });
+    case "run.started":
+      return event.runId
+        ? t("remoteBridge.audit.message.runStarted", { id: truncate(event.runId, 24) })
+        : t("remoteBridge.audit.message.runStartedShort");
+    case "approval.resolved":
+      return event.approvalId
+        ? t("remoteBridge.audit.message.approvalResolved", { id: truncate(event.approvalId, 24) })
+        : t("remoteBridge.audit.message.approvalResolvedShort");
+    default:
+      return localizeKnownText(event.message);
+  }
+}
+
+function describeRemoteBridgeHelp(activeSession?: RemoteBridgeSessionSummary): string {
+  const detail = state.remoteBridgePilot?.detail?.trim();
+  const parts = [detail ? localizeKnownText(detail) : t("remoteBridge.help.default")];
+  if (activeSession) {
+    parts.push(t("remoteBridge.help.detail", {
+      principal: activeSession.principalLabel,
+      workspace: formatRemoteBridgeWorkspace(activeSession),
+    }));
+  }
+  if (state.remoteBridgeConnect?.sessionId) {
+    parts.push(t("remoteBridge.help.connect", { id: truncate(state.remoteBridgeConnect.sessionId, 24) }));
+  }
+  return parts.filter(Boolean).join(" ");
 }
 
 function renderWorkspaces(): void {
@@ -4061,7 +4414,7 @@ function createReadinessListItem(input: AppReadinessCheck): HTMLLIElement {
 
 function createActionListItem(input: {
   id: string;
-  idName: "artifactId" | "runId" | "approvalId" | "memoryId" | "capabilityId" | "recipeId" | "recipeTestId" | "orchestrationId";
+  idName: "artifactId" | "runId" | "approvalId" | "memoryId" | "capabilityId" | "recipeId" | "recipeTestId" | "orchestrationId" | "remoteBridgeSessionId";
   title: string;
   meta: string;
   pressed: boolean;

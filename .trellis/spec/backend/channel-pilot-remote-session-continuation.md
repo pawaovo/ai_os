@@ -12,3 +12,7 @@
 
 - Remote continuation may only reuse continuation paths already declared safe in the local product.
 - Remote bridge must not claim executor-native resume where only product-level rerun is supported.
+
+## Current MVP Reference
+
+- Concrete single-channel pilot behavior is implemented in `remote-bridge-pilot-mvp.md`.

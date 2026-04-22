@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { accessSync, constants as fsConstants } from "node:fs";
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { execFileSync, spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { once } from "node:events";
 import { homedir } from "node:os";
 import { dirname, join, normalize, resolve } from "node:path";
@@ -165,6 +165,36 @@ async function handleRequest(request, response) {
 
   if (request.method === "GET" && pathname === "/api/mcp/hosted-server") {
     await handleGetHostedMcpServer(response);
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/remote-bridge/pilot") {
+    await handleGetRemoteBridgePilot(request, response);
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/remote-bridge/pilot/sessions") {
+    await handleCreateRemoteBridgeSession(request, response);
+    return;
+  }
+
+  if (request.method === "GET" && isRemoteBridgeSessionPath(pathname)) {
+    await handleGetRemoteBridgeSession(response, remoteBridgeSessionIdFromPath(pathname));
+    return;
+  }
+
+  if (request.method === "POST" && isRemoteBridgeRunStartPath(pathname)) {
+    await handleRemoteBridgeRunStart(request, response, remoteBridgeSessionIdFromPath(pathname));
+    return;
+  }
+
+  if (request.method === "GET" && isRemoteBridgeRunLivePath(pathname)) {
+    await handleRemoteBridgeRunLive(request, response, remoteBridgeSessionIdFromPath(pathname), remoteBridgeRunIdFromPath(pathname));
+    return;
+  }
+
+  if (request.method === "POST" && isRemoteBridgeRunApprovalPath(pathname)) {
+    await handleRemoteBridgeRunApproval(request, response, remoteBridgeSessionIdFromPath(pathname), remoteBridgeRunIdFromPath(pathname));
     return;
   }
 
@@ -800,6 +830,73 @@ async function handleGetHostedMcpServer(response) {
   writeJson(response, 200, {
     hostedServer: getHostedMcpServerSummary(),
   });
+}
+
+async function handleGetRemoteBridgePilot(request, response) {
+  writeJson(response, 200, {
+    pilot: getRemoteBridgePilotSummary(request),
+  });
+}
+
+async function handleCreateRemoteBridgeSession(request, response) {
+  try {
+    const body = await readJsonBody(request);
+    const input = parseRemoteBridgeSessionCreateInput(body);
+    const created = await createRemoteBridgeSession(request, input);
+    writeJson(response, 201, created);
+  } catch (error) {
+    writeJson(response, resolveRemoteBridgeHttpStatus(error), { error: sanitizeErrorMessage(error) });
+  }
+}
+
+async function handleGetRemoteBridgeSession(response, sessionId) {
+  const session = appStore.getRemoteBridgeSession(sessionId);
+  const activeWorkspaceId = appStore.getSetting("activeWorkspaceId");
+  if (!session || (activeWorkspaceId && session.workspaceId !== activeWorkspaceId)) {
+    writeJson(response, 404, { error: "Remote bridge session not found in active workspace." });
+    return;
+  }
+
+  writeJson(response, 200, {
+    session,
+    events: appStore.listRemoteBridgeEvents(sessionId),
+  });
+}
+
+async function handleRemoteBridgeRunStart(request, response, sessionId) {
+  try {
+    const session = requireRemoteBridgeSessionAuth(sessionId, request);
+    const body = await readJsonBody(request);
+    const input = parseRemoteBridgeRunStartInput(body);
+    const created = await startRemoteBridgeRun(session, input);
+    writeJson(response, 202, created);
+  } catch (error) {
+    writeJson(response, resolveRemoteBridgeHttpStatus(error), { error: sanitizeErrorMessage(error) });
+  }
+}
+
+async function handleRemoteBridgeRunLive(request, response, sessionId, runId) {
+  try {
+    const session = requireRemoteBridgeSessionAuth(sessionId, request);
+    touchRemoteBridgeSession(session.id);
+    writeJson(response, 200, {
+      live: readRemoteBridgeRunLive(session, runId),
+    });
+  } catch (error) {
+    writeJson(response, resolveRemoteBridgeHttpStatus(error), { error: sanitizeErrorMessage(error) });
+  }
+}
+
+async function handleRemoteBridgeRunApproval(request, response, sessionId, runId) {
+  try {
+    const session = requireRemoteBridgeSessionAuth(sessionId, request);
+    const body = await readJsonBody(request);
+    const decision = readRequiredString(body.decision, "decision");
+    const payload = await resolveRemoteBridgeRunApproval(session, runId, decision);
+    writeJson(response, 200, payload);
+  } catch (error) {
+    writeJson(response, resolveRemoteBridgeHttpStatus(error), { error: sanitizeErrorMessage(error) });
+  }
 }
 
 async function handleListArtifacts(response) {
@@ -1989,6 +2086,214 @@ function getHostedMcpServerSummary() {
     storageRoot,
     electronHostedMode: desktopShell === "electron",
   });
+}
+
+function getRemoteBridgePilotSummary(request) {
+  return {
+    status: "ready",
+    transport: "http-bearer",
+    detail: "Single-channel remote bridge pilot is available for local authenticated sessions.",
+    baseUrl: resolveRequestBaseUrl(request),
+    sessions: appStore.listRemoteBridgeSessions(appStore.getSetting("activeWorkspaceId")).sessions,
+  };
+}
+
+function parseRemoteBridgeSessionCreateInput(body) {
+  const principalLabel = readOptionalString(body.principalLabel) ?? "Remote Pilot";
+  const workspaceId = readOptionalString(body.workspaceId) ?? appStore.getSetting("activeWorkspaceId");
+  if (!workspaceId) throw new Error("Select a workspace before creating a remote bridge session.");
+  return {
+    principalLabel,
+    workspaceId,
+  };
+}
+
+function parseRemoteBridgeRunStartInput(body) {
+  return {
+    goal: readRequiredString(body.goal, "goal"),
+    executorChoice: body.executorChoice !== undefined
+      ? normalizeAgentExecutorChoice(body.executorChoice)
+      : "mock",
+    ...(body.timeoutMs !== undefined ? { timeoutMs: readOptionalPositiveNumber(body.timeoutMs) } : {}),
+  };
+}
+
+async function createRemoteBridgeSession(request, input) {
+  const workspace = await requireRunnableWorkspace(input.workspaceId);
+  const activeThreadId = appStore.getSetting("activeThreadId");
+  const activeThread = activeThreadId ? appStore.getThread(activeThreadId) : undefined;
+  const threadId = activeThread?.workspaceId === workspace.id ? activeThread.id : undefined;
+  const token = `rb-${randomUUID()}`;
+  const session = appStore.createRemoteBridgeSession({
+    id: `remote-bridge-${randomUUID()}`,
+    principalId: `remote-principal-${randomUUID()}`,
+    principalLabel: input.principalLabel,
+    channelKind: "single-http-bearer",
+    workspaceId: workspace.id,
+    threadId,
+    status: "active",
+    tokenHash: hashRemoteBridgeToken(token),
+    tokenPreview: token.slice(0, 12),
+    createdAt: nowIso(),
+  });
+
+  appStore.addRemoteBridgeEvent({
+    sessionId: session.id,
+    principalId: session.principalId,
+    workspaceId: session.workspaceId,
+    type: "session.created",
+    message: `Remote bridge session created for ${session.principalLabel}.`,
+  });
+
+  return {
+    session: appStore.getRemoteBridgeSession(session.id),
+    connect: createRemoteBridgeConnectPayload(request, session, token),
+  };
+}
+
+function createRemoteBridgeConnectPayload(request, session, token) {
+  const baseUrl = resolveRequestBaseUrl(request);
+  const sessionPath = `/api/remote-bridge/pilot/sessions/${encodeURIComponent(session.id)}`;
+  return {
+    baseUrl,
+    sessionId: session.id,
+    principalLabel: session.principalLabel,
+    bearerToken: token,
+    runStartUrl: `${baseUrl}${sessionPath}/runs/start`,
+    runLiveUrlTemplate: `${baseUrl}${sessionPath}/runs/{runId}/live`,
+    runApprovalUrlTemplate: `${baseUrl}${sessionPath}/runs/{runId}/approval`,
+  };
+}
+
+function requireRemoteBridgeSessionAuth(sessionId, request) {
+  const authRecord = appStore.getRemoteBridgeSessionAuthRecord(sessionId);
+  if (!authRecord) {
+    throw createRemoteBridgeHttpError(404, "Remote bridge session was not found.");
+  }
+
+  if (authRecord.status !== "active") {
+    throw createRemoteBridgeHttpError(403, "Remote bridge session is not active.");
+  }
+
+  const token = readRemoteBridgeToken(request);
+  if (!token) {
+    throw createRemoteBridgeHttpError(401, "Missing remote bridge bearer token.");
+  }
+
+  if (!verifyRemoteBridgeToken(token, authRecord.token_hash)) {
+    throw createRemoteBridgeHttpError(403, "Remote bridge bearer token is invalid.");
+  }
+
+  return appStore.getRemoteBridgeSession(sessionId);
+}
+
+function readRemoteBridgeToken(request) {
+  const authorization = request.headers.authorization;
+  if (typeof authorization === "string" && authorization.startsWith("Bearer ")) {
+    return authorization.slice("Bearer ".length).trim();
+  }
+  const header = request.headers["x-ai-os-bridge-token"];
+  return typeof header === "string" ? header.trim() : undefined;
+}
+
+function hashRemoteBridgeToken(token) {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+function verifyRemoteBridgeToken(token, expectedHash) {
+  const actual = Buffer.from(hashRemoteBridgeToken(token));
+  const expected = Buffer.from(expectedHash);
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
+}
+
+function createRemoteBridgeHttpError(statusCode, message) {
+  const error = new Error(message);
+  error.name = "RemoteBridgeHttpError";
+  error.statusCode = statusCode;
+  return error;
+}
+
+function resolveRemoteBridgeHttpStatus(error) {
+  return error?.name === "RemoteBridgeHttpError" && Number.isInteger(error?.statusCode)
+    ? error.statusCode
+    : 400;
+}
+
+function touchRemoteBridgeSession(sessionId, lastRunId = undefined) {
+  return appStore.updateRemoteBridgeSession(sessionId, {
+    ...(lastRunId ? { lastRunId } : {}),
+    lastSeenAt: nowIso(),
+    updatedAt: nowIso(),
+  });
+}
+
+async function startRemoteBridgeRun(session, input) {
+  const childSession = await createRunSession({
+    goal: input.goal,
+    executorChoice: input.executorChoice,
+    workspaceId: session.workspaceId,
+    threadId: session.threadId,
+    ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
+  });
+  touchRemoteBridgeSession(session.id, childSession.runId);
+  appStore.addRemoteBridgeEvent({
+    sessionId: session.id,
+    principalId: session.principalId,
+    workspaceId: session.workspaceId,
+    runId: childSession.runId,
+    type: "run.started",
+    message: `${session.principalLabel} started remote bridge run ${childSession.runId}.`,
+  });
+  return {
+    session: appStore.getRemoteBridgeSession(session.id),
+    run: appStore.getRun(childSession.runId),
+    live: serializeRunSession(childSession),
+  };
+}
+
+function readRemoteBridgeRunLive(session, runId) {
+  const run = requireRemoteBridgeRun(session, runId);
+  const live = runSessions.get(run.id);
+  if (live) return serializeRunSession(live);
+  const persisted = restorePersistedLiveRun(run.id);
+  if (persisted) return persisted;
+  throw createRemoteBridgeHttpError(404, "Remote bridge run live state is not available.");
+}
+
+async function resolveRemoteBridgeRunApproval(session, runId, decision) {
+  const run = requireRemoteBridgeRun(session, runId);
+  const liveSession = requireRunSession(run.id);
+  const approvalId = liveSession.pendingApproval?.approvalId;
+  await resolveRunApproval(liveSession, decision);
+  touchRemoteBridgeSession(session.id, run.id);
+  appStore.addRemoteBridgeEvent({
+    sessionId: session.id,
+    principalId: session.principalId,
+    workspaceId: session.workspaceId,
+    runId: run.id,
+    ...(approvalId ? { approvalId } : {}),
+    type: "approval.resolved",
+    message: `${session.principalLabel} resolved remote approval with decision ${decision}.`,
+  });
+  return {
+    session: appStore.getRemoteBridgeSession(session.id),
+    live: serializeRunSession(liveSession),
+  };
+}
+
+function requireRemoteBridgeRun(session, runId) {
+  if (!appStore.remoteBridgeSessionOwnsRun(session.id, runId)) {
+    throw createRemoteBridgeHttpError(404, "Run was not started by this remote bridge session.");
+  }
+  const run = appStore.getRun(runId);
+  if (!run || run.workspaceId !== session.workspaceId) {
+    throw createRemoteBridgeHttpError(404, "Remote bridge run is not available in the bound workspace.");
+  }
+  return run;
+}
+
+function resolveRequestBaseUrl(request) {
+  return new URL(request.url ?? "/", `http://${request.headers.host ?? `127.0.0.1:${port}`}`).origin;
 }
 
 function createRunTurn(ids, clock) {
@@ -3218,6 +3523,30 @@ function artifactIdFromPath(pathname) {
   return decodeURIComponent(pathname.split("/")[3] ?? "");
 }
 
+function isRemoteBridgeSessionPath(pathname) {
+  return /^\/api\/remote-bridge\/pilot\/sessions\/[^/]+$/.test(pathname);
+}
+
+function isRemoteBridgeRunStartPath(pathname) {
+  return /^\/api\/remote-bridge\/pilot\/sessions\/[^/]+\/runs\/start$/.test(pathname);
+}
+
+function isRemoteBridgeRunLivePath(pathname) {
+  return /^\/api\/remote-bridge\/pilot\/sessions\/[^/]+\/runs\/[^/]+\/live$/.test(pathname);
+}
+
+function isRemoteBridgeRunApprovalPath(pathname) {
+  return /^\/api\/remote-bridge\/pilot\/sessions\/[^/]+\/runs\/[^/]+\/approval$/.test(pathname);
+}
+
+function remoteBridgeSessionIdFromPath(pathname) {
+  return decodeURIComponent(pathname.split("/")[5] ?? "");
+}
+
+function remoteBridgeRunIdFromPath(pathname) {
+  return decodeURIComponent(pathname.split("/")[7] ?? "");
+}
+
 function isRunEventsPath(pathname) {
   return /^\/api\/runs\/[^/]+\/events$/.test(pathname);
 }
@@ -3583,6 +3912,32 @@ class SqliteAppStore {
         updated_at TEXT NOT NULL,
         completed_at TEXT
       );
+      CREATE TABLE IF NOT EXISTS remote_bridge_sessions (
+        id TEXT PRIMARY KEY,
+        principal_id TEXT NOT NULL,
+        principal_label TEXT NOT NULL,
+        channel_kind TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        thread_id TEXT,
+        status TEXT NOT NULL,
+        token_hash TEXT NOT NULL,
+        token_preview TEXT NOT NULL,
+        last_run_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        last_seen_at TEXT
+      );
+      CREATE TABLE IF NOT EXISTS remote_bridge_events (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        principal_id TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        run_id TEXT,
+        approval_id TEXT,
+        type TEXT NOT NULL,
+        message TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
     `);
     this.addColumnIfMissing("threads", "workspace_id", "TEXT");
     this.addColumnIfMissing("workspaces", "trust_level", "TEXT NOT NULL DEFAULT 'strict'");
@@ -3727,6 +4082,8 @@ class SqliteAppStore {
     this.db.prepare("UPDATE artifacts SET workspace_id = NULL WHERE workspace_id = ?").run(id);
     this.db.prepare("UPDATE runs SET workspace_id = NULL WHERE workspace_id = ?").run(id);
     this.db.prepare("DELETE FROM agent_orchestrations WHERE workspace_id = ?").run(id);
+    this.db.prepare("DELETE FROM remote_bridge_sessions WHERE workspace_id = ?").run(id);
+    this.db.prepare("DELETE FROM remote_bridge_events WHERE workspace_id = ?").run(id);
     this.db.prepare("DELETE FROM memories WHERE workspace_id = ?").run(id);
     if (this.getSetting("activeWorkspaceId") === id) {
       this.db.prepare("DELETE FROM app_settings WHERE key = 'activeWorkspaceId'").run();
@@ -4628,6 +4985,125 @@ class SqliteAppStore {
     return { orchestrations: rows.map(agentOrchestrationRowToSummary) };
   }
 
+  createRemoteBridgeSession(input) {
+    this.db.prepare(`
+      INSERT INTO remote_bridge_sessions (
+        id, principal_id, principal_label, channel_kind, workspace_id, thread_id,
+        status, token_hash, token_preview, last_run_id, created_at, updated_at, last_seen_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.id,
+      input.principalId,
+      input.principalLabel,
+      input.channelKind,
+      input.workspaceId,
+      input.threadId ?? null,
+      input.status,
+      input.tokenHash,
+      input.tokenPreview,
+      input.lastRunId ?? null,
+      input.createdAt ?? nowIso(),
+      input.updatedAt ?? input.createdAt ?? nowIso(),
+      input.lastSeenAt ?? null,
+    );
+    return this.getRemoteBridgeSession(input.id);
+  }
+
+  updateRemoteBridgeSession(id, input) {
+    const current = this.getRemoteBridgeSession(id);
+    if (!current) throw new Error("Remote bridge session not found.");
+    this.db.prepare(`
+      UPDATE remote_bridge_sessions
+      SET
+        principal_label = ?,
+        status = ?,
+        last_run_id = ?,
+        updated_at = ?,
+        last_seen_at = ?
+      WHERE id = ?
+    `).run(
+      input.principalLabel ?? current.principalLabel,
+      input.status ?? current.status,
+      input.lastRunId ?? current.lastRunId ?? null,
+      input.updatedAt ?? nowIso(),
+      input.lastSeenAt ?? current.lastSeenAt ?? null,
+      id,
+    );
+    return this.getRemoteBridgeSession(id);
+  }
+
+  getRemoteBridgeSession(id) {
+    const row = this.db.prepare("SELECT * FROM remote_bridge_sessions WHERE id = ?").get(id);
+    return row ? this.enrichRemoteBridgeSessionSummary(remoteBridgeSessionRowToSummary(row)) : undefined;
+  }
+
+  getRemoteBridgeSessionAuthRecord(id) {
+    return this.db.prepare(`
+      SELECT id, principal_id, principal_label, channel_kind, workspace_id, thread_id, status, token_hash, token_preview, last_run_id
+      FROM remote_bridge_sessions
+      WHERE id = ?
+    `).get(id);
+  }
+
+  listRemoteBridgeSessions(workspaceId) {
+    const rows = workspaceId
+      ? this.db.prepare("SELECT * FROM remote_bridge_sessions WHERE workspace_id = ? ORDER BY created_at DESC").all(workspaceId)
+      : this.db.prepare("SELECT * FROM remote_bridge_sessions ORDER BY created_at DESC").all();
+    return {
+      sessions: rows.map((row) => this.enrichRemoteBridgeSessionSummary(remoteBridgeSessionRowToSummary(row))),
+    };
+  }
+
+  addRemoteBridgeEvent(input) {
+    this.db.prepare(`
+      INSERT INTO remote_bridge_events (
+        id, session_id, principal_id, workspace_id, run_id, approval_id, type, message, created_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.id ?? randomUUID(),
+      input.sessionId,
+      input.principalId,
+      input.workspaceId,
+      input.runId ?? null,
+      input.approvalId ?? null,
+      input.type,
+      input.message,
+      input.createdAt ?? nowIso(),
+    );
+  }
+
+  listRemoteBridgeEvents(sessionId) {
+    return this.db.prepare(`
+      SELECT * FROM remote_bridge_events
+      WHERE session_id = ?
+      ORDER BY created_at DESC
+      LIMIT 20
+    `).all(sessionId).map(remoteBridgeEventRowToSummary);
+  }
+
+  remoteBridgeSessionOwnsRun(sessionId, runId) {
+    const row = this.db.prepare(`
+      SELECT 1 AS ok
+      FROM remote_bridge_events
+      WHERE session_id = ? AND run_id = ? AND type = 'run.started'
+      LIMIT 1
+    `).get(sessionId, runId);
+    return row?.ok === 1;
+  }
+
+  enrichRemoteBridgeSessionSummary(session) {
+    const workspace = this.getWorkspace(session.workspaceId);
+    const events = this.listRemoteBridgeEvents(session.id);
+    return {
+      ...session,
+      ...(workspace?.name ? { workspaceName: workspace.name } : {}),
+      eventCount: events.length,
+      ...(events[0] ? { latestEvent: events[0] } : {}),
+    };
+  }
+
   recordRunFromDemo(request, state) {
     const runId = state.summary?.runId ?? randomUUID();
     const timestamp = nowIso();
@@ -4866,6 +5342,37 @@ function agentOrchestrationRowToSummary(row) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     ...(row.completed_at ? { completedAt: row.completed_at } : {}),
+  };
+}
+
+function remoteBridgeSessionRowToSummary(row) {
+  return {
+    id: row.id,
+    principalId: row.principal_id,
+    principalLabel: row.principal_label,
+    channelKind: row.channel_kind,
+    workspaceId: row.workspace_id,
+    ...(row.thread_id ? { threadId: row.thread_id } : {}),
+    status: row.status,
+    tokenPreview: row.token_preview,
+    ...(row.last_run_id ? { lastRunId: row.last_run_id } : {}),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    ...(row.last_seen_at ? { lastSeenAt: row.last_seen_at } : {}),
+  };
+}
+
+function remoteBridgeEventRowToSummary(row) {
+  return {
+    id: row.id,
+    sessionId: row.session_id,
+    principalId: row.principal_id,
+    workspaceId: row.workspace_id,
+    ...(row.run_id ? { runId: row.run_id } : {}),
+    ...(row.approval_id ? { approvalId: row.approval_id } : {}),
+    type: row.type,
+    message: row.message,
+    createdAt: row.created_at,
   };
 }
 
