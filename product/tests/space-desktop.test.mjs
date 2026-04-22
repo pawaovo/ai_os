@@ -1343,6 +1343,104 @@ test("space desktop V1.0 readiness summarizes local setup without leaking secret
   }
 });
 
+test("P0 vertical baseline covers provider, memory, chat, run approval, artifacts, and readiness", async () => {
+  const storageDir = await mkdtemp(`${tmpdir()}/ai-os-p0-vertical-`);
+  const providerServer = await startMockOpenAiProvider();
+  const appPort = await getAvailablePort();
+  const appServer = startSpaceDesktopServer({
+    port: appPort,
+    storageDir,
+  });
+
+  try {
+    await waitForHttp(`http://127.0.0.1:${appPort}/`);
+
+    const missingWorkspace = await postJsonAllowFailure(`http://127.0.0.1:${appPort}/api/runs/start`, {
+      goal: "try the vertical baseline without a workspace",
+      executorChoice: "mock",
+    });
+    assert.equal(missingWorkspace.ok, false);
+    assert.match(missingWorkspace.payload.error, /Select a workspace/);
+
+    await postJson(`http://127.0.0.1:${appPort}/api/providers`, {
+      name: "Vertical Provider",
+      protocol: "openai-compatible",
+      baseUrl: `http://127.0.0.1:${providerServer.port}/v1`,
+      apiKey: "sk-vertical-secret",
+      modelId: "vertical-model",
+    });
+
+    const workspace = await postJson(`http://127.0.0.1:${appPort}/api/workspaces`, {
+      name: "P0 Vertical Workspace",
+      path: storageDir,
+    });
+    const memory = await postJson(`http://127.0.0.1:${appPort}/api/memories`, {
+      title: "Release note preference",
+      content: "Prefer local-first release notes with concise highlights.",
+      scope: "workspace",
+      sensitivity: "low",
+    });
+    const thread = await postJson(`http://127.0.0.1:${appPort}/api/threads`, {
+      title: "P0 Vertical Thread",
+    });
+
+    const chat = await postJson(`http://127.0.0.1:${appPort}/api/threads/${thread.thread.id}/messages`, {
+      message: "Use my local-first release note preference for the summary",
+    });
+    assert.equal(chat.memoryUsage.length > 0, true);
+    assert.equal(chat.memoryUsage[0].title, "Release note preference");
+    assert.equal(chat.memoryTrace.mode, "search");
+
+    const readinessBeforeRun = await getJson(`http://127.0.0.1:${appPort}/api/app/readiness`);
+    assert.equal(readinessBeforeRun.activeWorkspace.id, workspace.workspace.id);
+    assert.equal(readinessBeforeRun.activeProvider.name, "Vertical Provider");
+    assert.equal(readinessBeforeRun.counts.providers >= 1, true);
+    assert.equal(readinessBeforeRun.counts.memories >= 1, true);
+    assert.equal(readinessBeforeRun.counts.messages >= 2, true);
+
+    const run = await postJson(`http://127.0.0.1:${appPort}/api/runs/start`, {
+      goal: "use my local-first release note preference to write a release note",
+      executorChoice: "mock",
+      timeoutMs: 5000,
+    });
+    assert.match(run.live.sessionId, /^session-run-live-/);
+    assert.equal(run.live.memoryUsage.length > 0, true);
+    assert.equal(run.live.memoryUsage[0].memoryId, memory.memory.id);
+    assert.equal(run.live.queryLoop.phase, "awaiting-approval");
+
+    await postJson(`http://127.0.0.1:${appPort}/api/runs/${run.live.runId}/approval`, {
+      decision: "grant",
+    });
+    const completed = await waitForLiveRun(appPort, run.live.runId, (live) => live.status === "completed");
+    assert.equal(completed.currentTurn.status, "completed");
+    assert.equal(completed.queryLoop.phase, "completed");
+    assert.equal(completed.items.some((item) => item.kind === "artifact-persist" && item.status === "completed"), true);
+    assert.equal(completed.artifacts.some((artifact) => artifact.kind === "report"), true);
+    assert.equal(completed.artifacts.some((artifact) => artifact.kind === "diff"), true);
+
+    const persistedRun = await getJson(`http://127.0.0.1:${appPort}/api/runs/${run.live.runId}/events`);
+    assert.equal(persistedRun.events.some((event) => event.type === "approval.granted"), true);
+    assert.equal(persistedRun.memoryUsage.length > 0, true);
+    assert.equal(persistedRun.memoryUsage[0].memoryId, memory.memory.id);
+    assert.equal(persistedRun.memoryTrace.mode, "search");
+
+    const artifacts = await getJson(`http://127.0.0.1:${appPort}/api/artifacts`);
+    assert.equal(artifacts.artifacts.some((artifact) => artifact.runId === run.live.runId && artifact.kind === "report"), true);
+    assert.equal(artifacts.artifacts.some((artifact) => artifact.runId === run.live.runId && artifact.kind === "diff"), true);
+    assert.equal(artifacts.artifacts.some((artifact) => artifact.threadId === thread.thread.id && artifact.source === "chat"), true);
+
+    const readinessAfterRun = await getJson(`http://127.0.0.1:${appPort}/api/app/readiness`);
+    assert.equal(readinessAfterRun.counts.completedRuns >= 1, true);
+    assert.equal(readinessAfterRun.counts.pendingApprovals, 0);
+    assert.equal(readinessAfterRun.counts.artifacts >= 3, true);
+    assert.equal(readinessAfterRun.nextActions.includes("Create your first workspace to anchor provider, memory, and automation state."), false);
+  } finally {
+    await appServer.stop();
+    await providerServer.stop();
+    await rm(storageDir, { recursive: true, force: true });
+  }
+});
+
 test("runSpaceDemoRequest executes the mock path through the server runtime", async () => {
   const response = await runSpaceDemoRequest(
     {
