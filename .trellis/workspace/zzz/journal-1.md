@@ -936,3 +936,36 @@ Added a run follow-up panel on Runs, wired one-click artifact, automation, and F
 ### Next Steps
 
 - None - task complete
+
+
+## Session 27: P7 artifact source run navigation
+
+**Date**: 2026-04-23
+**Task**: P7 artifact source run navigation
+**Branch**: `codex/p7-artifact-source-run-navigation`
+
+### Summary
+
+Added source-run navigation to the Artifacts surface, surfaced run linkage in artifact metadata, added bilingual copy and static coverage, and verified behavior in the packaged Electron app.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `397ee26` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
