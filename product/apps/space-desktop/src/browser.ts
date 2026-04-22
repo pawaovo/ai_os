@@ -100,6 +100,55 @@ interface RunItemSummary {
   artifactId?: string;
 }
 
+interface QueryLoopTransitionSummary {
+  phase: string;
+  at: string;
+  reason: string;
+}
+
+interface QueryLoopInterceptionSummary {
+  interceptionId: string;
+  kind: string;
+  stage: string;
+  approvalId: string;
+  status: string;
+  reason: string;
+  createdAt: string;
+  resolvedAt?: string;
+  decision?: string;
+}
+
+interface QueryLoopRetrySiteSummary {
+  site: string;
+  kind: string;
+  retryable: boolean;
+  status: string;
+  attempts: number;
+  lastAttemptAt?: string;
+  lastResolvedAt?: string;
+  lastError?: string;
+}
+
+interface QueryLoopFailureSummary {
+  site: string;
+  retryable: boolean;
+  message: string;
+  at: string;
+}
+
+interface QueryLoopStateSummary {
+  mode: string;
+  phase: string;
+  toolBoundary: string;
+  permissionBoundary: string;
+  retryPolicy: string;
+  lastTransitionAt: string;
+  transitions: QueryLoopTransitionSummary[];
+  interceptions: QueryLoopInterceptionSummary[];
+  retrySites: QueryLoopRetrySiteSummary[];
+  lastFailure?: QueryLoopFailureSummary;
+}
+
 interface ExecutorStatusSummary {
   choice: SpaceDemoExecutorChoice;
   available: boolean;
@@ -210,6 +259,7 @@ interface LiveRunState {
   stream: string[];
   events: RunEventSummary[];
   currentTurn?: RunTurnSummary;
+  queryLoop?: QueryLoopStateSummary;
   items?: RunItemSummary[];
   artifacts: ArtifactSummary[];
   artifactContents: Record<string, string>;

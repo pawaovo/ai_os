@@ -796,6 +796,9 @@ test("space desktop V0.5 run workflow records approval history and trust decisio
     assert.match(approvingRun.live.sessionId, /^session-run-live-/);
     assert.match(approvingRun.live.currentTurn.turnId, /^turn-live-/);
     assert.equal(approvingRun.live.currentTurn.status, "awaiting-approval");
+    assert.equal(approvingRun.live.queryLoop.phase, "awaiting-approval");
+    assert.equal(approvingRun.live.queryLoop.interceptions.some((entry) => entry.stage === "pre-run" && entry.status === "pending"), true);
+    assert.equal(approvingRun.live.queryLoop.retrySites.find((entry) => entry.site === "pre-run-approval").status, "blocked");
     assert.equal(approvingRun.live.items.some((item) => item.kind === "approval"), true);
     const startApprovalItem = approvingRun.live.items.find((item) => item.kind === "approval");
     assert.equal(startApprovalItem.status, "blocked");
@@ -815,6 +818,10 @@ test("space desktop V0.5 run workflow records approval history and trust decisio
     assert.equal(completed.sessionId, approvingRun.live.sessionId);
     assert.equal(completed.currentTurn.status, "completed");
     assert.equal(typeof completed.currentTurn.completedAt, "string");
+    assert.equal(completed.queryLoop.phase, "completed");
+    assert.equal(completed.queryLoop.retrySites.find((entry) => entry.site === "executor-stream").status, "completed");
+    assert.equal(completed.queryLoop.retrySites.find((entry) => entry.site === "artifact-persist").status, "completed");
+    assert.equal(completed.queryLoop.interceptions.some((entry) => entry.stage === "pre-run" && entry.status === "granted"), true);
     const completedApprovalItem = completed.items.find((item) => item.kind === "approval");
     assert.equal(completedApprovalItem.status, "completed");
     assert.equal(completedApprovalItem.eventIds.length >= 2, true);
@@ -863,6 +870,9 @@ test("space desktop V0.5 run workflow records approval history and trust decisio
       decision: "reject",
     });
     const shellFailed = await waitForLiveRun(appPort, shellRun.live.runId, (live) => live.status === "failed");
+    assert.equal(shellFailed.queryLoop.phase, "failed");
+    assert.equal(shellFailed.queryLoop.lastFailure.site, "pre-run-approval");
+    assert.equal(shellFailed.queryLoop.lastFailure.retryable, true);
     assert.equal(shellFailed.events.some((event) => event.type === "approval.rejected"), true);
     const rejectedHistory = await getJson(`http://127.0.0.1:${appPort}/api/approvals`);
     const rejectedApproval = rejectedHistory.approvals.find((approval) => approval.runId === shellRun.live.runId);
@@ -892,7 +902,10 @@ test("space desktop V0.5 run workflow records approval history and trust decisio
     const runtimePending = await waitForLiveRun(appPort, runtimeRun.live.runId, (live) => Boolean(live.pendingApproval));
     assert.equal(runtimePending.pendingApproval.category, "shell-command");
     assert.equal(runtimePending.currentTurn.status, "awaiting-approval");
+    assert.equal(runtimePending.queryLoop.phase, "awaiting-approval");
     const runtimeApprovalId = runtimePending.pendingApproval.approvalId;
+    assert.equal(runtimePending.queryLoop.interceptions.some((entry) => entry.approvalId === runtimeApprovalId && entry.stage === "runtime" && entry.status === "pending"), true);
+    assert.equal(runtimePending.queryLoop.retrySites.find((entry) => entry.site === "runtime-approval").status, "blocked");
     const runtimeApprovalItem = runtimePending.items.find((item) => item.approvalId === runtimeApprovalId);
     assert.equal(runtimeApprovalItem.title, "Runtime Approval");
     assert.equal(runtimeApprovalItem.status, "blocked");
@@ -905,6 +918,9 @@ test("space desktop V0.5 run workflow records approval history and trust decisio
       runtimeRun.live.runId,
       (live) => live.status === "completed" && !live.pendingApproval,
     );
+    assert.equal(runtimeCompleted.queryLoop.phase, "completed");
+    assert.equal(runtimeCompleted.queryLoop.interceptions.some((entry) => entry.approvalId === runtimeApprovalId && entry.status === "granted"), true);
+    assert.equal(runtimeCompleted.queryLoop.retrySites.find((entry) => entry.site === "runtime-approval").status, "completed");
     const runtimeCompletedApprovalItem = runtimeCompleted.items.find((item) => item.approvalId === runtimeApprovalId);
     assert.equal(runtimeCompletedApprovalItem.status, "completed");
     assert.equal(runtimeCompleted.items.some((item) => item.kind === "executor-run" && item.status === "completed"), true);

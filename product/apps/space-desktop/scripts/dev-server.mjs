@@ -1508,6 +1508,146 @@ function createRunTurn(ids, clock) {
   };
 }
 
+function createQueryLoopRetrySite(site, kind) {
+  return {
+    site,
+    kind,
+    retryable: true,
+    status: "ready",
+    attempts: 0,
+  };
+}
+
+function createQueryLoopState(clock) {
+  const createdAt = clock.now();
+  return {
+    mode: "single-agent",
+    phase: "preparing",
+    toolBoundary: "executor-native",
+    permissionBoundary: "app-server-approval",
+    retryPolicy: "manual-rerun",
+    lastTransitionAt: createdAt,
+    transitions: [
+      {
+        phase: "preparing",
+        at: createdAt,
+        reason: "Run session created.",
+      },
+    ],
+    interceptions: [],
+    retrySites: [
+      createQueryLoopRetrySite("pre-run-approval", "permission"),
+      createQueryLoopRetrySite("runtime-approval", "permission"),
+      createQueryLoopRetrySite("executor-stream", "execution"),
+      createQueryLoopRetrySite("artifact-persist", "persistence"),
+    ],
+    lastFailure: undefined,
+  };
+}
+
+function transitionQueryLoop(session, phase, reason) {
+  const at = session.clock.now();
+  const lastTransition = session.queryLoop.transitions.at(-1);
+
+  session.queryLoop.phase = phase;
+  session.queryLoop.lastTransitionAt = at;
+  if (lastTransition?.phase === phase && lastTransition.reason === reason) {
+    return;
+  }
+
+  session.queryLoop.transitions.push({
+    phase,
+    at,
+    reason,
+  });
+}
+
+function updateQueryLoopRetrySite(session, site, patch, options = {}) {
+  const retrySite = session.queryLoop.retrySites.find((entry) => entry.site === site);
+  if (!retrySite) return undefined;
+
+  Object.assign(retrySite, {
+    ...(options.incrementAttempt ? { attempts: retrySite.attempts + 1, lastAttemptAt: session.clock.now() } : {}),
+    ...(patch.status === "completed" || patch.status === "failed" || patch.status === "blocked"
+      ? { lastResolvedAt: session.clock.now() }
+      : {}),
+    ...patch,
+  });
+  return retrySite;
+}
+
+function registerQueryLoopInterception(session, input) {
+  const interception = {
+    interceptionId: `intercept-${randomUUID()}`,
+    kind: "permission",
+    stage: input.stage,
+    approvalId: input.approvalId,
+    status: "pending",
+    reason: input.reason,
+    createdAt: session.clock.now(),
+  };
+
+  session.queryLoop.interceptions.push(interception);
+  updateQueryLoopRetrySite(
+    session,
+    input.stage === "pre-run" ? "pre-run-approval" : "runtime-approval",
+    { status: "blocked", lastError: input.reason },
+    { incrementAttempt: true },
+  );
+  return interception;
+}
+
+function resolveQueryLoopInterception(session, approvalId, patch) {
+  const interception = session.queryLoop.interceptions.find((entry) => entry.approvalId === approvalId);
+  if (!interception) return undefined;
+
+  Object.assign(interception, {
+    status: patch.status,
+    decision: patch.decision,
+    resolvedAt: session.clock.now(),
+  });
+  updateQueryLoopRetrySite(
+    session,
+    interception.stage === "pre-run" ? "pre-run-approval" : "runtime-approval",
+    {
+      status: patch.status === "granted" ? "completed" : patch.status === "interrupted" ? "blocked" : "failed",
+      ...(patch.message ? { lastError: patch.message } : {}),
+    },
+  );
+  return interception;
+}
+
+function recordQueryLoopFailure(session, input) {
+  session.queryLoop.lastFailure = {
+    site: input.site,
+    retryable: input.retryable ?? true,
+    message: input.message,
+    at: session.clock.now(),
+  };
+  updateQueryLoopRetrySite(session, input.site, {
+    status: "failed",
+    lastError: input.message,
+  });
+}
+
+function inferQueryLoopFailureSite(session) {
+  if (session.pendingApproval?.stage === "runtime") return "runtime-approval";
+  if (session.pendingApproval?.stage === "pre-run") return "pre-run-approval";
+
+  switch (session.queryLoop.phase) {
+    case "awaiting-approval":
+      return "pre-run-approval";
+    case "persisting-artifacts":
+      return "artifact-persist";
+    case "executing":
+    case "preparing":
+    case "completed":
+    case "failed":
+    case "interrupted":
+      return "executor-stream";
+  }
+}
+
 function createRunItem(ids, clock, input) {
   return {
     itemId: ids.itemId(),
@@ -1575,6 +1715,7 @@ async function createRunSession(input) {
     status: "queued",
     events: [],
     currentTurn: createRunTurn(ids, clock),
+    queryLoop: createQueryLoopState(clock),
     items: [],
     stream: [],
     artifacts: [],
@@ -1623,6 +1764,11 @@ async function createRunSession(input) {
   session.status = session.pendingApproval ? "awaiting-approval" : "running";
 
   if (session.pendingApproval) {
+    registerQueryLoopInterception(session, {
+      stage: "pre-run",
+      approvalId: session.pendingApproval.approvalId,
+      reason: session.pendingApproval.reason,
+    });
     const approvalItem = appendRunItem(session, createRunItem(ids, clock, {
       kind: "approval",
       status: "blocked",
@@ -1631,6 +1777,7 @@ async function createRunSession(input) {
       approvalId: session.pendingApproval.approvalId,
     }));
     setCurrentTurnStatus(session, "awaiting-approval");
+    transitionQueryLoop(session, "awaiting-approval", "Waiting for pre-run approval.");
     if (session.pendingApproval.autoDecision === "grant") {
       appStore.resolveApproval(session.pendingApproval.approvalId, {
         status: "granted",
@@ -1647,9 +1794,14 @@ async function createRunSession(input) {
         status: "completed",
         detail: "Approval auto-granted by trusted local workspace rule.",
       });
+      resolveQueryLoopInterception(session, session.pendingApproval.approvalId, {
+        status: "granted",
+        decision: "grant",
+      });
       session.pendingApproval = undefined;
       session.status = "running";
       setCurrentTurnStatus(session, "running");
+      transitionQueryLoop(session, "executing", "Auto-granted pre-run approval.");
       appStore.updateRunStatus(session.runId, "running");
       session.promise = runSessionWork(session);
       return session;
@@ -1662,6 +1814,7 @@ async function createRunSession(input) {
       itemId: approvalItem.itemId,
     });
   } else {
+    transitionQueryLoop(session, "executing", "Run dispatched without pre-run approval.");
     session.promise = runSessionWork(session);
   }
 
@@ -1716,17 +1869,27 @@ async function resolveRunApproval(session, decision) {
       detail: approvalDecision === "grant" ? "Approval granted by user." : "Approval rejected by user.",
     });
   }
+  resolveQueryLoopInterception(session, approval.approvalId, {
+    status: approvalDecision === "grant" ? "granted" : "rejected",
+    decision: approvalDecision,
+    message: approvalDecision === "grant" ? "Approval granted by user." : "Approval rejected by user.",
+  });
 
   if (approval.stage === "pre-run") {
     session.pendingApproval = undefined;
 
     if (approvalDecision === "reject") {
+      recordQueryLoopFailure(session, {
+        site: "pre-run-approval",
+        message: "Pre-run approval rejected.",
+      });
       finalizeSession(session, "failed", "Approval rejected before run start.");
       return;
     }
 
     session.status = "running";
     setCurrentTurnStatus(session, "running");
+    transitionQueryLoop(session, "executing", "Pre-run approval granted.");
     appStore.updateRunStatus(session.runId, "running");
     session.promise = runSessionWork(session);
     return;
@@ -1739,7 +1902,14 @@ async function resolveRunApproval(session, decision) {
   session.pendingApproval = undefined;
   session.status = "running";
   setCurrentTurnStatus(session, "running");
+  transitionQueryLoop(session, "executing", approvalDecision === "grant" ? "Runtime approval granted." : "Runtime approval rejected.");
   appStore.updateRunStatus(session.runId, "running");
+  if (approvalDecision === "reject") {
+    recordQueryLoopFailure(session, {
+      site: "runtime-approval",
+      message: "Runtime approval rejected.",
+    });
+  }
   await session.executor.submitApproval(session.runId, {
     approvalId: approval.approvalId,
     decision: approvalDecision,
@@ -1762,6 +1932,15 @@ async function cancelRunSession(session) {
         detail: "Approval interrupted while waiting for user decision.",
       });
     }
+    resolveQueryLoopInterception(session, session.pendingApproval.approvalId, {
+      status: "interrupted",
+      decision: "reject",
+      message: "Approval interrupted while waiting for user decision.",
+    });
+    recordQueryLoopFailure(session, {
+      site: session.pendingApproval.stage === "runtime" ? "runtime-approval" : "pre-run-approval",
+      message: "Run interrupted while waiting for approval.",
+    });
     session.pendingApproval = undefined;
     await session.executor?.interruptRun(session.runId);
     finalizeSession(session, "interrupted", "Run interrupted while waiting for approval.");
@@ -1784,6 +1963,11 @@ async function runSessionWork(session) {
     detail: `${session.executorChoice} executor run started.`,
   }));
   session.activeExecutorItemId = executorItem.itemId;
+  transitionQueryLoop(session, "executing", "Executor run started.");
+  updateQueryLoopRetrySite(session, "executor-stream", {
+    status: "active",
+    lastError: undefined,
+  }, { incrementAttempt: true });
 
   try {
     const executor = createExecutorForSession(session);
@@ -1812,6 +1996,18 @@ async function runSessionWork(session) {
       appendKernelEvent(session, event);
     }
 
+    if ((snapshot.status === "failed" || snapshot.status === "interrupted") && !session.queryLoop.lastFailure) {
+      recordQueryLoopFailure(session, {
+        site: "executor-stream",
+        message: session.latestMessage ?? `Executor run ${snapshot.status}.`,
+      });
+    }
+    updateQueryLoopRetrySite(session, "executor-stream", {
+      status: snapshot.status === "failed" || snapshot.status === "interrupted" ? "failed" : "completed",
+      ...(snapshot.status === "failed" || snapshot.status === "interrupted"
+        ? { lastError: session.latestMessage ?? `Executor run ${snapshot.status}.` }
+        : { lastError: undefined }),
+    });
     completeRunItem(session, executorItem.itemId, {
       status: mapSnapshotStatus(snapshot.status) === "completed" ? "completed" : mapSnapshotStatus(snapshot.status),
       detail: session.latestMessage ?? "Executor run finished.",
@@ -1833,6 +2029,12 @@ async function runSessionWork(session) {
       );
     }
   } catch (error) {
+    if (!session.queryLoop.lastFailure) {
+      recordQueryLoopFailure(session, {
+        site: session.queryLoop.phase === "persisting-artifacts" ? "artifact-persist" : "executor-stream",
+        message: sanitizeErrorMessage(error),
+      });
+    }
     completeRunItem(session, session.activeExecutorItemId, {
       status: isTerminalRunStatus(session.status) ? session.status : "failed",
       detail: sanitizeErrorMessage(error),
@@ -1889,6 +2091,12 @@ function appendKernelEvent(session, event) {
         requestedAction: "Runtime executor approval request.",
         stage: "runtime",
       };
+      registerQueryLoopInterception(session, {
+        stage: "runtime",
+        approvalId: event.approvalId,
+        reason: session.pendingApproval.reason,
+      });
+      transitionQueryLoop(session, "awaiting-approval", "Waiting for runtime approval.");
       itemId = appendRunItem(session, createRunItem(session.ids, session.clock, {
         kind: "approval",
         status: "blocked",
@@ -1959,6 +2167,11 @@ async function persistSessionArtifacts(session, collectedArtifacts) {
     title: "Persist Artifacts",
     detail: "Persisting run artifacts to local storage.",
   }));
+  transitionQueryLoop(session, "persisting-artifacts", "Persisting artifacts to local storage.");
+  updateQueryLoopRetrySite(session, "artifact-persist", {
+    status: "active",
+    lastError: undefined,
+  }, { incrementAttempt: true });
   const persisted = [];
   const artifacts = [...collectedArtifacts];
 
@@ -1995,10 +2208,18 @@ async function persistSessionArtifacts(session, collectedArtifacts) {
       status: "completed",
       detail: `Persisted ${persisted.length} artifact${persisted.length === 1 ? "" : "s"} to local storage.`,
     });
+    updateQueryLoopRetrySite(session, "artifact-persist", {
+      status: "completed",
+      lastError: undefined,
+    });
   } catch (error) {
     completeRunItem(session, artifactItem.itemId, {
       status: "failed",
       detail: sanitizeErrorMessage(error),
+    });
+    recordQueryLoopFailure(session, {
+      site: "artifact-persist",
+      message: sanitizeErrorMessage(error),
     });
     throw error;
   }
@@ -2057,11 +2278,18 @@ function finalizeSession(session, status, message) {
   session.status = status;
   session.completedAt = session.clock.now();
   setCurrentTurnStatus(session, status);
+  transitionQueryLoop(session, status, message ?? `Run ${status}.`);
   if (message) {
     session.latestMessage = message;
   }
   if (!isTerminalRunStatus(status)) return;
 
+  if ((status === "failed" || status === "interrupted") && !session.queryLoop.lastFailure) {
+    recordQueryLoopFailure(session, {
+      site: inferQueryLoopFailureSite(session),
+      message: message ?? `Run ${status}.`,
+    });
+  }
   const lastEventType = session.events.at(-1)?.type;
   if (status === "failed" && lastEventType !== "run.failed") {
     appendLiveEvent(session, { type: "run.failed", message: message ?? "Run failed." });
@@ -2088,6 +2316,13 @@ function serializeRunSession(session) {
     currentTurn: {
       ...session.currentTurn,
       itemIds: [...session.currentTurn.itemIds],
+    },
+    queryLoop: {
+      ...session.queryLoop,
+      transitions: session.queryLoop.transitions.map((entry) => ({ ...entry })),
+      interceptions: session.queryLoop.interceptions.map((entry) => ({ ...entry })),
+      retrySites: session.queryLoop.retrySites.map((entry) => ({ ...entry })),
+      ...(session.queryLoop.lastFailure ? { lastFailure: { ...session.queryLoop.lastFailure } } : {}),
     },
     items: session.items.map((item) => ({
       ...item,
