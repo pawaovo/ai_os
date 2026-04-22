@@ -12,7 +12,14 @@ import {
 } from "./i18n.js";
 import type { ChatUiMessage } from "./server-runtime.js";
 import type { ApprovalRecord, WorkspaceTrustLevel } from "@ai-os/approval-core";
-import type { CapabilityPermission, CapabilityRecord, CapabilityRunRecord, RecipeRecord, RecipeTestRecord } from "@ai-os/capability-contract";
+import type {
+  CapabilityPermission,
+  CapabilityRecord,
+  CapabilityRunRecord,
+  PromptAppDraftRecord,
+  PromptAppRuntimeBinding,
+  RecipeTestRecord,
+} from "@ai-os/capability-contract";
 import type { MemoryRecord, MemoryRetrievalTrace, MemoryScope, MemorySensitivity, RetrievedMemory } from "@ai-os/kernel-memory";
 
 type ProviderProtocol = "openai-compatible" | "anthropic-compatible";
@@ -320,7 +327,7 @@ interface AutomationRunSummary {
 interface MemorySummary extends MemoryRecord {}
 
 interface CapabilitySummary extends CapabilityRecord {}
-interface RecipeSummary extends RecipeRecord {}
+interface RecipeSummary extends PromptAppDraftRecord {}
 interface RecipeTestSummary extends RecipeTestRecord {}
 
 interface LiveRunState {
@@ -507,6 +514,10 @@ const elements = {
   recipePromptInput: getElement("recipe-prompt-input", HTMLTextAreaElement),
   recipeInputSpec: getElement("recipe-input-spec", HTMLTextAreaElement),
   recipeOutputSpec: getElement("recipe-output-spec", HTMLTextAreaElement),
+  promptAppBindingWorkspace: getElement("prompt-app-binding-workspace", HTMLElement),
+  promptAppBindingExecution: getElement("prompt-app-binding-execution", HTMLElement),
+  promptAppBindingTools: getElement("prompt-app-binding-tools", HTMLElement),
+  promptAppBindingArtifacts: getElement("prompt-app-binding-artifacts", HTMLElement),
   recipeSaveButton: getElement("recipe-save-button", HTMLButtonElement),
   recipeTestButton: getElement("recipe-test-button", HTMLButtonElement),
   recipeExportButton: getElement("recipe-export-button", HTMLButtonElement),
@@ -1036,6 +1047,10 @@ function applyStaticTranslations(): void {
   setControlLabel(elements.recipePromptInput, t("recipe-editor.form.prompt"));
   setControlLabel(elements.recipeInputSpec, t("recipe-editor.form.inputSpec"));
   setControlLabel(elements.recipeOutputSpec, t("recipe-editor.form.outputSpec"));
+  setPromptAppBindingLabel(0, t("recipe-editor.binding.workspace"));
+  setPromptAppBindingLabel(1, t("recipe-editor.binding.execution"));
+  setPromptAppBindingLabel(2, t("recipe-editor.binding.tools"));
+  setPromptAppBindingLabel(3, t("recipe-editor.binding.artifacts"));
   elements.recipeSaveButton.textContent = t("recipe-editor.button.save");
   elements.recipeTestButton.textContent = t("recipe-editor.button.test");
 
@@ -1172,6 +1187,11 @@ function setMetricLabel(index: number, text: string): void {
 
 function setApprovalGridLabel(index: number, text: string): void {
   const label = document.querySelectorAll<HTMLElement>(".approval-detail-grid span")[index * 2];
+  if (label) label.textContent = text;
+}
+
+function setPromptAppBindingLabel(index: number, text: string): void {
+  const label = document.querySelectorAll<HTMLElement>(".prompt-app-binding-grid span")[index * 2];
   if (label) label.textContent = text;
 }
 
@@ -2685,6 +2705,7 @@ function renderRecipes(): void {
     elements.recipePromptInput.value = "";
     elements.recipeInputSpec.value = "";
     elements.recipeOutputSpec.value = "";
+    renderPromptAppBinding(undefined);
     elements.recipeSaveButton.disabled = true;
     elements.recipeTestButton.disabled = true;
     elements.recipeExportButton.disabled = true;
@@ -2711,10 +2732,27 @@ function renderRecipes(): void {
   elements.recipePromptInput.value = activeRecipe.prompt;
   elements.recipeInputSpec.value = activeRecipe.inputSpec;
   elements.recipeOutputSpec.value = activeRecipe.outputSpec;
+  renderPromptAppBinding(activeRecipe.runtimeBinding);
   elements.recipeSaveButton.disabled = false;
   elements.recipeTestButton.disabled = false;
   elements.recipeExportButton.disabled = false;
   elements.recipeExportButton.textContent = activeRecipe.capabilityId ? t("recipe-editor.button.exportUpdate") : t("recipe-editor.button.export");
+}
+
+function renderPromptAppBinding(binding: PromptAppRuntimeBinding | undefined): void {
+  elements.promptAppBindingWorkspace.textContent = binding?.workspaceId ?? t("dynamic.none");
+  elements.promptAppBindingExecution.textContent = translateKeyOrFallback(
+    `recipe-editor.bindingValue.execution.${binding?.executionMode ?? "workspace-runtime"}`,
+    binding?.executionMode ?? "workspace-runtime",
+  );
+  elements.promptAppBindingTools.textContent = translateKeyOrFallback(
+    `recipe-editor.bindingValue.tools.${binding?.toolPolicy ?? "workspace-default"}`,
+    binding?.toolPolicy ?? "workspace-default",
+  );
+  elements.promptAppBindingArtifacts.textContent = translateKeyOrFallback(
+    `recipe-editor.bindingValue.artifacts.${binding?.artifactPolicy ?? "workspace-artifact"}`,
+    binding?.artifactPolicy ?? "workspace-artifact",
+  );
 }
 
 function renderRecipeTests(): void {

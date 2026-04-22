@@ -846,8 +846,9 @@ async function handleCreateRecipeFromRun(request, response) {
       outputSpec: "Markdown report artifact",
       sourceRunId: run.id,
       workspaceId: run.workspaceId,
+      runtimeBinding: createDefaultPromptAppRuntimeBinding({ workspaceId: run.workspaceId }),
     });
-    writeJson(response, 200, { recipe });
+    writeJson(response, 200, { recipe, promptApp: recipe });
   } catch (error) {
     writeJson(response, 400, { error: sanitizeErrorMessage(error) });
   }
@@ -863,7 +864,7 @@ async function handleUpdateRecipe(request, response, recipeId) {
       inputSpec: readOptionalString(body.inputSpec),
       outputSpec: readOptionalString(body.outputSpec),
     });
-    writeJson(response, 200, { recipe });
+    writeJson(response, 200, { recipe, promptApp: recipe });
   } catch (error) {
     writeJson(response, 400, { error: sanitizeErrorMessage(error) });
   }
@@ -891,7 +892,8 @@ async function handleExportRecipe(response, recipeId) {
   try {
     const recipe = requireRecipeInActiveWorkspace(recipeId);
     const capability = appStore.exportRecipeAsCapability(recipe);
-    writeJson(response, 200, { recipe: appStore.getRecipe(recipeId), capability });
+    const promptApp = appStore.getRecipe(recipeId);
+    writeJson(response, 200, { recipe: promptApp, promptApp, capability });
   } catch (error) {
     writeJson(response, 400, { error: sanitizeErrorMessage(error) });
   }
@@ -3028,6 +3030,7 @@ class SqliteAppStore {
         prompt TEXT NOT NULL,
         input_spec TEXT NOT NULL,
         output_spec TEXT NOT NULL,
+        runtime_binding_json TEXT,
         source_run_id TEXT,
         workspace_id TEXT,
         capability_id TEXT,
@@ -3076,6 +3079,7 @@ class SqliteAppStore {
     this.addColumnIfMissing("runs", "runtime_state_json", "TEXT");
     this.addColumnIfMissing("runs", "continuation_state_json", "TEXT");
     this.addColumnIfMissing("runs", "last_checkpoint_at", "TEXT");
+    this.addColumnIfMissing("recipes", "runtime_binding_json", "TEXT");
     this.normalizePersistedRunCheckpoints();
     this.syncBuiltInCapabilities();
   }
@@ -3766,15 +3770,17 @@ class SqliteAppStore {
     const timestamp = nowIso();
     this.db.prepare(`
       INSERT INTO recipes (
-        id, title, prompt, input_spec, output_spec, source_run_id, workspace_id, capability_id, created_at, updated_at, last_tested_at
+        id, title, prompt, input_spec, output_spec, runtime_binding_json,
+        source_run_id, workspace_id, capability_id, created_at, updated_at, last_tested_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       input.title,
       input.prompt,
       input.inputSpec,
       input.outputSpec,
+      JSON.stringify(input.runtimeBinding ?? createDefaultPromptAppRuntimeBinding({ workspaceId: input.workspaceId })),
       input.sourceRunId ?? null,
       input.workspaceId ?? null,
       null,
@@ -3790,13 +3796,14 @@ class SqliteAppStore {
     if (!current) throw new Error("Recipe not found.");
     this.db.prepare(`
       UPDATE recipes
-      SET title = ?, prompt = ?, input_spec = ?, output_spec = ?, updated_at = ?
+      SET title = ?, prompt = ?, input_spec = ?, output_spec = ?, runtime_binding_json = ?, updated_at = ?
       WHERE id = ?
     `).run(
       input.title ?? current.title,
       input.prompt ?? current.prompt,
       input.inputSpec ?? current.inputSpec,
       input.outputSpec ?? current.outputSpec,
+      JSON.stringify(input.runtimeBinding ?? current.runtimeBinding ?? createDefaultPromptAppRuntimeBinding({ workspaceId: current.workspaceId })),
       nowIso(),
       id,
     );
@@ -4263,6 +4270,15 @@ function truncateWorkspacePreview(value, limit = 1200) {
   return normalized.length > limit ? `${normalized.slice(0, limit - 3)}...` : normalized;
 }
 
+function createDefaultPromptAppRuntimeBinding(input = {}) {
+  return {
+    ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
+    executionMode: "workspace-runtime",
+    toolPolicy: "workspace-default",
+    artifactPolicy: "workspace-artifact",
+  };
+}
+
 function approvalRowToSummary(row) {
   return {
     approvalId: row.id,
@@ -4328,6 +4344,10 @@ function recipeRowToSummary(row) {
     prompt: row.prompt,
     inputSpec: row.input_spec,
     outputSpec: row.output_spec,
+    runtimeBinding: parseStoredJson(
+      row.runtime_binding_json,
+      createDefaultPromptAppRuntimeBinding({ workspaceId: row.workspace_id ?? undefined }),
+    ),
     ...(row.source_run_id ? { sourceRunId: row.source_run_id } : {}),
     ...(row.workspace_id ? { workspaceId: row.workspace_id } : {}),
     ...(row.capability_id ? { capabilityId: row.capability_id } : {}),

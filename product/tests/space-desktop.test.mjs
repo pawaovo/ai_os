@@ -153,6 +153,7 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   const productReadme = await readFile(resolve(productRoot, "README.md"), "utf8");
   const readme = await readFile(resolve(productRoot, "apps/space-desktop/README.md"), "utf8");
   const i18nSource = await readFile(resolve(productRoot, "apps/space-desktop/src/i18n.ts"), "utf8");
+  const capabilityContractSource = await readFile(resolve(productRoot, "packages/capability/capability-contract/src/index.ts"), "utf8");
   const packageJson = JSON.parse(await readFile(resolve(productRoot, "package.json"), "utf8"));
   const packageScript = await readFile(resolve(productRoot, "apps/space-desktop/scripts/package-macos.mjs"), "utf8");
   const prepareElectronPackageScript = await readFile(resolve(productRoot, "apps/space-desktop/scripts/prepare-electron-package-output.mjs"), "utf8");
@@ -214,6 +215,10 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(html, /id="recipe-prompt-input"/);
   assert.match(html, /id="recipe-input-spec"/);
   assert.match(html, /id="recipe-output-spec"/);
+  assert.match(html, /id="prompt-app-binding-workspace"/);
+  assert.match(html, /id="prompt-app-binding-execution"/);
+  assert.match(html, /id="prompt-app-binding-tools"/);
+  assert.match(html, /id="prompt-app-binding-artifacts"/);
   assert.match(html, /id="recipe-test-button"/);
   assert.match(html, /id="recipe-export-button"/);
   assert.match(html, /id="recipe-test-list"/);
@@ -315,6 +320,8 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(browserSource, /renderWorkspaceNativeSurface/);
   assert.match(browserSource, /workspaceArtifactSurfacePreview/);
   assert.match(browserSource, /workspaceTerminalSurfacePreview/);
+  assert.match(browserSource, /renderPromptAppBinding/);
+  assert.match(browserSource, /promptAppBindingWorkspace/);
   assert.match(browserSource, /localizeExecutorChoice/);
   assert.match(browserSource, /localizeApprovalCategory/);
   assert.match(browserSource, /dynamic\.readiness\.summary/);
@@ -325,6 +332,9 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(i18nSource, /"language\.zh-CN": "中文"/);
   assert.match(i18nSource, /"nav\.start": "开始"/);
   assert.match(i18nSource, /"nav\.start": "Start"/);
+  assert.match(i18nSource, /"recipe-editor\.binding\.workspace": "Workspace"/);
+  assert.match(capabilityContractSource, /export interface PromptAppRuntimeBinding/);
+  assert.match(capabilityContractSource, /export interface PromptAppDraftRecord/);
   assert.match(i18nSource, /"dynamic\.approval\.reason\.file-write":/);
   assert.match(i18nSource, /"dynamic\.capability\.permission\.workspace-read":/);
   assert.match(electronAfterPack, /package\.json/);
@@ -1394,6 +1404,10 @@ test("space desktop V0.9 forge recipes can be created, tested, exported, and rer
     assert.equal(created.recipe.prompt, "summarize workspace status for recipe preview");
     assert.equal(created.recipe.sourceRunId, started.live.runId);
     assert.equal(created.recipe.workspaceId, workspace.workspace.id);
+    assert.equal(created.promptApp.runtimeBinding.workspaceId, workspace.workspace.id);
+    assert.equal(created.promptApp.runtimeBinding.executionMode, "workspace-runtime");
+    assert.equal(created.promptApp.runtimeBinding.toolPolicy, "workspace-default");
+    assert.equal(created.promptApp.runtimeBinding.artifactPolicy, "workspace-artifact");
 
     const updated = await patchJson(`http://127.0.0.1:${appPort}/api/recipes/${created.recipe.id}`, {
       title: "Workspace Digest Recipe",
@@ -1403,6 +1417,7 @@ test("space desktop V0.9 forge recipes can be created, tested, exported, and rer
     });
     assert.equal(updated.recipe.title, "Workspace Digest Recipe");
     assert.equal(updated.recipe.prompt, "Create a concise workspace digest.");
+    assert.equal(updated.promptApp.runtimeBinding.workspaceId, workspace.workspace.id);
 
     const tested = await postJson(`http://127.0.0.1:${appPort}/api/recipes/${created.recipe.id}/test`, {});
     assert.equal(tested.test.status, "completed");
@@ -1412,6 +1427,7 @@ test("space desktop V0.9 forge recipes can be created, tested, exported, and rer
 
     const exported = await postJson(`http://127.0.0.1:${appPort}/api/recipes/${created.recipe.id}/export`, {});
     assert.equal(exported.recipe.capabilityId, exported.capability.id);
+    assert.equal(exported.promptApp.runtimeBinding.workspaceId, workspace.workspace.id);
     assert.equal(exported.capability.kind, "local");
     assert.equal(exported.capability.enabled, true);
 

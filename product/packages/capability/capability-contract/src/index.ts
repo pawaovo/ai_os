@@ -44,12 +44,24 @@ export interface CapabilityRunEvent {
   createdAt: string;
 }
 
-export interface RecipeRecord {
+export type PromptAppExecutionMode = "workspace-runtime";
+export type PromptAppToolPolicy = "workspace-default";
+export type PromptAppArtifactPolicy = "workspace-artifact";
+
+export interface PromptAppRuntimeBinding {
+  workspaceId?: string;
+  executionMode: PromptAppExecutionMode;
+  toolPolicy: PromptAppToolPolicy;
+  artifactPolicy: PromptAppArtifactPolicy;
+}
+
+export interface PromptAppDraftRecord {
   id: string;
   title: string;
   prompt: string;
   inputSpec: string;
   outputSpec: string;
+  runtimeBinding: PromptAppRuntimeBinding;
   sourceRunId?: string;
   workspaceId?: string;
   capabilityId?: string;
@@ -57,6 +69,8 @@ export interface RecipeRecord {
   updatedAt: string;
   lastTestedAt?: string;
 }
+
+export interface RecipeRecord extends PromptAppDraftRecord {}
 
 export interface RecipeTestRecord {
   id: string;
