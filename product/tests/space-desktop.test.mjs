@@ -220,6 +220,9 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(html, /id="workspace-select"/);
   assert.match(html, /id="workspace-trust-level"/);
   assert.match(html, /id="active-workspace-label"/);
+  assert.match(html, /id="workspace-runtime-title"/);
+  assert.match(html, /id="workspace-runtime-list"/);
+  assert.match(html, /id="workspace-runtime-help"/);
   assert.match(html, /id="executor-status-list"/);
   assert.match(html, /id="executor-timeout-input"/);
   assert.match(html, /id="run-cancel-button"/);
@@ -304,6 +307,8 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(browserSource, /x-ai-os-language/);
   assert.match(browserSource, /loadLanguageSetting/);
   assert.match(browserSource, /saveLanguageSetting/);
+  assert.match(browserSource, /renderWorkspaceRuntime/);
+  assert.match(browserSource, /workspaceRuntimeList/);
   assert.match(browserSource, /localizeExecutorChoice/);
   assert.match(browserSource, /localizeApprovalCategory/);
   assert.match(browserSource, /dynamic\.readiness\.summary/);
@@ -666,6 +671,19 @@ test("space desktop dev server persists providers, threads, and messages without
       ["Other Workspace", "Persistent Workspace"],
     );
     assert.equal(workspaces.activeWorkspaceId, workspace.workspace.id);
+    const persistentWorkspace = workspaces.workspaces.find((item) => item.id === workspace.workspace.id);
+    assert.equal(persistentWorkspace.runtime.counts.threads, 1);
+    assert.equal(persistentWorkspace.runtime.counts.runs, 1);
+    assert.equal(persistentWorkspace.runtime.counts.artifacts >= 2, true);
+    assert.equal(persistentWorkspace.runtime.counts.memories, 0);
+    assert.equal(persistentWorkspace.runtime.surfaces.localPathBound, true);
+    assert.equal(persistentWorkspace.runtime.surfaces.runHistoryReady, true);
+    assert.equal(persistentWorkspace.runtime.latestRun.status, "completed");
+    assert.equal(typeof persistentWorkspace.runtime.latestActivityAt, "string");
+    const otherWorkspaceSummary = workspaces.workspaces.find((item) => item.id === otherWorkspace.workspace.id);
+    assert.equal(otherWorkspaceSummary.runtime.counts.threads, 1);
+    assert.equal(otherWorkspaceSummary.runtime.counts.runs, 0);
+    assert.equal(otherWorkspaceSummary.runtime.surfaces.runHistoryReady, false);
 
     const messages = await getJson(`http://127.0.0.1:${appPort}/api/threads/${thread.thread.id}/messages`);
     assert.equal(messages.thread.title, "Persistent Thread");
@@ -815,6 +833,12 @@ test("space desktop V0.5 run workflow records approval history and trust decisio
     assert.equal(pending.pendingApproval.category, "file-write");
     assert.equal(pending.pendingApproval.riskLevel, "medium");
     assert.match(pending.pendingApproval.reason, /File mutation/);
+    const workspaceRuntimeDuringApproval = await getJson(`http://127.0.0.1:${appPort}/api/workspaces`);
+    const activeRuntimeDuringApproval = workspaceRuntimeDuringApproval.workspaces.find((item) => item.id === approvingRun.run.workspaceId).runtime;
+    assert.equal(activeRuntimeDuringApproval.counts.activeRuns, 1);
+    assert.equal(activeRuntimeDuringApproval.currentRun.runId, approvingRun.live.runId);
+    assert.equal(activeRuntimeDuringApproval.currentRun.queryLoop.phase, "awaiting-approval");
+    assert.equal(activeRuntimeDuringApproval.currentRun.pendingApproval.stage, "pre-run");
 
     await postJson(`http://127.0.0.1:${appPort}/api/runs/${approvingRun.live.runId}/approval`, {
       decision: "grant",

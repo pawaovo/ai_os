@@ -31,8 +31,66 @@ interface WorkspaceSummary {
   name: string;
   path?: string;
   trustLevel: WorkspaceTrustLevel;
+  runtime?: WorkspaceRuntimeSummary;
   createdAt: string;
   updatedAt: string;
+}
+
+interface WorkspaceRuntimeSummary {
+  counts: {
+    threads: number;
+    runs: number;
+    activeRuns: number;
+    artifacts: number;
+    memories: number;
+    automations: number;
+  };
+  latestActivityAt?: string;
+  activeThread?: {
+    id: string;
+    title: string;
+    messageCount: number;
+    lastMessagePreview?: string;
+  };
+  latestRun?: {
+    id: string;
+    goal: string;
+    status: string;
+    startedAt: string;
+    completedAt?: string;
+  };
+  currentRun?: {
+    runId: string;
+    sessionId: string;
+    status: string;
+    currentTurn: {
+      turnId: string;
+      status: string;
+      latestEventType: string;
+    };
+    queryLoop: {
+      phase: string;
+      lastFailureSite?: string;
+    };
+    pendingApproval?: {
+      approvalId: string;
+      stage: string;
+    };
+  };
+  latestArtifact?: {
+    id: string;
+    title: string;
+    kind: string;
+    updatedAt: string;
+  };
+  surfaces: {
+    localPathBound: boolean;
+    artifactPreviewReady: boolean;
+    runHistoryReady: boolean;
+    memoryReady: boolean;
+    automationReady: boolean;
+    terminalCandidate: boolean;
+  };
 }
 
 interface ThreadSummary {
@@ -339,6 +397,8 @@ const elements = {
   workspaceUpdateButton: getElement("workspace-update-button", HTMLButtonElement),
   workspaceDeleteButton: getElement("workspace-delete-button", HTMLButtonElement),
   workspaceHelp: getElement("workspace-help", HTMLElement),
+  workspaceRuntimeList: getElement("workspace-runtime-list", HTMLElement),
+  workspaceRuntimeHelp: getElement("workspace-runtime-help", HTMLElement),
   providerForm: getElement("provider-form", HTMLFormElement),
   providerSelect: getElement("provider-select", HTMLSelectElement),
   providerName: getElement("provider-name", HTMLInputElement),
@@ -803,6 +863,10 @@ function applyStaticTranslations(): void {
   elements.workspaceSaveButton.textContent = t("workspace.button.create");
   elements.workspaceUpdateButton.textContent = t("workspace.button.update");
   elements.workspaceDeleteButton.textContent = t("workspace.button.delete");
+  setText("#workspace-runtime-title", t("workspace.runtime.title"));
+  if (!state.activeWorkspaceId) {
+    elements.workspaceRuntimeHelp.textContent = t("workspace.runtime.help.default");
+  }
 
   setText(".threads-panel .eyebrow", t("threads.eyebrow"));
   setText(".threads-panel .mini-label", t("threads.mini"));
@@ -1446,14 +1510,97 @@ function renderWorkspaces(): void {
       path: activeWorkspace.path ? ` / ${activeWorkspace.path}` : "",
       trustLabel: localizeWorkspaceTrustLevel(activeWorkspace.trustLevel),
     });
+    renderWorkspaceRuntime(activeWorkspace);
     return;
   }
 
   elements.activeWorkspaceLabel.textContent = t("dynamic.workspace.noneActive");
   elements.activeWorkspaceLabel.dataset.phase = "idle";
+  renderWorkspaceRuntime(undefined);
   if (state.workspaces.length === 0) {
     elements.workspaceHelp.textContent = t("dynamic.workspace.createToScope");
   }
+}
+
+function renderWorkspaceRuntime(workspace: WorkspaceSummary | undefined): void {
+  if (!workspace?.runtime) {
+    elements.workspaceRuntimeList.replaceChildren(createListItem(t("dynamic.workspaceRuntime.none")));
+    elements.workspaceRuntimeHelp.textContent = t("dynamic.workspaceRuntime.help.noWorkspace");
+    return;
+  }
+
+  const { runtime } = workspace;
+  const items = [
+    createStaticActionListItem(
+      t("dynamic.workspaceRuntime.threads.title"),
+      t("dynamic.workspaceRuntime.threads.meta", {
+        count: String(runtime.counts.threads),
+        active: runtime.activeThread
+          ? runtime.activeThread.title
+          : t("dynamic.workspaceRuntime.activeThread.none"),
+      }),
+      runtime.activeThread ? "completed" : runtime.counts.threads > 0 ? "idle" : "idle",
+    ),
+    createStaticActionListItem(
+      t("dynamic.workspaceRuntime.runs.title"),
+      t("dynamic.workspaceRuntime.runs.meta", {
+        count: String(runtime.counts.runs),
+        activeRuns: String(runtime.counts.activeRuns),
+        latest: runtime.currentRun
+          ? translatedToken(runtime.currentRun.status)
+          : runtime.latestRun
+          ? translatedToken(runtime.latestRun.status)
+          : t("dynamic.workspaceRuntime.latestRun.none"),
+      }),
+      runtime.counts.activeRuns > 0 ? "running" : runtime.counts.runs > 0 ? "completed" : "idle",
+    ),
+    createStaticActionListItem(
+      t("dynamic.workspaceRuntime.artifacts.title"),
+      t("dynamic.workspaceRuntime.artifacts.meta", {
+        count: String(runtime.counts.artifacts),
+        latest: runtime.latestArtifact
+          ? runtime.latestArtifact.title
+          : t("dynamic.workspaceRuntime.latestArtifact.none"),
+      }),
+      runtime.counts.artifacts > 0 ? "completed" : "idle",
+    ),
+    createStaticActionListItem(
+      t("dynamic.workspaceRuntime.memory.title"),
+      t("dynamic.workspaceRuntime.memory.meta", {
+        count: String(runtime.counts.memories),
+      }),
+      runtime.surfaces.memoryReady ? "completed" : "idle",
+    ),
+    createStaticActionListItem(
+      t("dynamic.workspaceRuntime.automations.title"),
+      t("dynamic.workspaceRuntime.automations.meta", {
+        count: String(runtime.counts.automations),
+      }),
+      runtime.surfaces.automationReady ? "completed" : "idle",
+    ),
+    createStaticActionListItem(
+      t("dynamic.workspaceRuntime.surfaces.title"),
+      t("dynamic.workspaceRuntime.surfaces.meta", {
+        localPath: translatedToken(runtime.surfaces.localPathBound ? "completed" : "idle"),
+        artifactPreview: translatedToken(runtime.surfaces.artifactPreviewReady ? "completed" : "idle"),
+        terminal: translatedToken(runtime.surfaces.terminalCandidate ? "completed" : "idle"),
+      }),
+      runtime.surfaces.localPathBound ? "completed" : "idle",
+    ),
+  ];
+
+  elements.workspaceRuntimeList.replaceChildren(...items);
+  elements.workspaceRuntimeHelp.textContent = runtime.latestActivityAt
+    ? t("dynamic.workspaceRuntime.help.latestActivity", {
+        at: formatDate(runtime.latestActivityAt),
+        currentRun: runtime.currentRun
+          ? ` / ${t("dynamic.workspaceRuntime.help.currentRun", {
+              runId: truncate(runtime.currentRun.runId, 12),
+              phase: translatedToken(runtime.currentRun.queryLoop.phase),
+            })}`
+          : "",
+      })
+    : t("dynamic.workspaceRuntime.help.default");
 }
 
 function fillWorkspaceForm(workspace: WorkspaceSummary): void {
@@ -2963,6 +3110,24 @@ function createActionListItem(input: {
 
   button.append(title, meta, badge);
   item.append(button);
+  return item;
+}
+
+function createStaticActionListItem(titleText: string, metaText: string, source: string): HTMLLIElement {
+  const item = document.createElement("li");
+  const title = document.createElement("span");
+  const meta = document.createElement("span");
+  const badge = document.createElement("span");
+
+  title.className = "item-title";
+  title.textContent = titleText;
+  meta.className = "item-meta";
+  meta.textContent = metaText;
+  badge.className = "source-badge";
+  badge.dataset.source = source;
+  badge.textContent = translatedToken(source);
+
+  item.append(title, meta, badge);
   return item;
 }
 

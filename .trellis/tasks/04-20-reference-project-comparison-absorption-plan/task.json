@@ -50,7 +50,14 @@
     "04-22-p0-executor-app-server-event-foundation",
     "04-22-p0-single-agent-query-loop-discipline",
     "04-22-p0-memory-retrieval-integration",
-    "04-22-p0-vertical-integration-regression-baseline"
+    "04-22-p0-vertical-integration-regression-baseline",
+    "04-22-p1-workspace-runtime-contract",
+    "04-22-p1-workspace-long-run-continuation",
+    "04-22-p1-workspace-native-artifact-preview-terminal",
+    "04-22-p1-mcp-client-config-sync",
+    "04-22-p1-prompt-app-contract",
+    "04-22-p1-recipe-prompt-app-bridge",
+    "04-22-p1-future-mcp-server-boundary-spike"
   ],
   "parent": null,
   "relatedFiles": [],

@@ -2886,7 +2886,8 @@ class SqliteAppStore {
   }
 
   listWorkspaces() {
-    const workspaces = this.db.prepare("SELECT * FROM workspaces ORDER BY updated_at DESC").all().map(workspaceRowToSummary);
+    const workspaces = this.db.prepare("SELECT * FROM workspaces ORDER BY updated_at DESC").all()
+      .map((row) => this.enrichWorkspaceSummary(workspaceRowToSummary(row)));
     const activeWorkspaceId = this.getSetting("activeWorkspaceId");
     return { workspaces, ...(activeWorkspaceId ? { activeWorkspaceId } : {}) };
   }
@@ -2905,7 +2906,7 @@ class SqliteAppStore {
   getWorkspace(id) {
     if (!id) return undefined;
     const row = this.db.prepare("SELECT * FROM workspaces WHERE id = ?").get(id);
-    return row ? workspaceRowToSummary(row) : undefined;
+    return row ? this.enrichWorkspaceSummary(workspaceRowToSummary(row)) : undefined;
   }
 
   updateWorkspace(id, input) {
@@ -2944,6 +2945,122 @@ class SqliteAppStore {
     }
 
     return workspace;
+  }
+
+  enrichWorkspaceSummary(workspace) {
+    return {
+      ...workspace,
+      runtime: this.getWorkspaceRuntimeSummary(workspace),
+    };
+  }
+
+  getWorkspaceRuntimeSummary(workspace) {
+    const threads = this.listThreads(workspace.id).threads;
+    const runs = this.listRuns(workspace.id).runs;
+    const artifacts = this.listArtifacts(workspace.id).artifacts;
+    const memories = this.listMemories(workspace.id).memories;
+    const automations = this.listAutomations(workspace.id).automations;
+    const currentRun = [...runSessions.values()]
+      .filter((session) => session.workspaceId === workspace.id && !isTerminalRunStatus(session.status))
+      .sort((left, right) => {
+        const leftActivity = left.events.at(-1)?.createdAt ?? left.currentTurn.startedAt;
+        const rightActivity = right.events.at(-1)?.createdAt ?? right.currentTurn.startedAt;
+        return rightActivity.localeCompare(leftActivity);
+      })
+      .at(0);
+    const activeThreadId = this.getSetting("activeThreadId");
+    const activeThread = activeThreadId ? threads.find((thread) => thread.id === activeThreadId) : undefined;
+    const latestRun = runs[0];
+    const latestArtifact = artifacts[0];
+    const latestMemory = memories[0];
+    const latestAutomation = automations[0];
+    const latestActivityAt = [
+      activeThread?.updatedAt,
+      latestRun?.completedAt ?? latestRun?.startedAt,
+      latestArtifact?.updatedAt,
+      latestMemory?.lastUsedAt ?? latestMemory?.updatedAt,
+      latestAutomation?.updatedAt,
+      workspace.updatedAt,
+    ].filter(Boolean).sort().at(-1);
+
+    return {
+      counts: {
+        threads: threads.length,
+        runs: runs.length,
+        activeRuns: runs.filter((run) => run.status === "running" || run.status === "awaiting-approval").length,
+        artifacts: artifacts.length,
+        memories: memories.length,
+        automations: automations.length,
+      },
+      ...(latestActivityAt ? { latestActivityAt } : {}),
+      ...(activeThread
+        ? {
+            activeThread: {
+              id: activeThread.id,
+              title: activeThread.title,
+              messageCount: activeThread.messageCount,
+              ...(activeThread.lastMessagePreview ? { lastMessagePreview: activeThread.lastMessagePreview } : {}),
+            },
+          }
+        : {}),
+      ...(currentRun
+        ? {
+            currentRun: {
+              runId: currentRun.runId,
+              sessionId: currentRun.sessionId,
+              status: currentRun.status,
+              currentTurn: {
+                turnId: currentRun.currentTurn.turnId,
+                status: currentRun.currentTurn.status,
+                latestEventType: currentRun.currentTurn.latestEventType,
+              },
+              queryLoop: {
+                phase: currentRun.queryLoop.phase,
+                ...(currentRun.queryLoop.lastFailure
+                  ? { lastFailureSite: currentRun.queryLoop.lastFailure.site }
+                  : {}),
+              },
+              ...(currentRun.pendingApproval
+                ? {
+                    pendingApproval: {
+                      approvalId: currentRun.pendingApproval.approvalId,
+                      stage: currentRun.pendingApproval.stage,
+                    },
+                  }
+                : {}),
+            },
+          }
+        : {}),
+      ...(latestRun
+        ? {
+            latestRun: {
+              id: latestRun.id,
+              goal: latestRun.goal,
+              status: latestRun.status,
+              startedAt: latestRun.startedAt,
+              ...(latestRun.completedAt ? { completedAt: latestRun.completedAt } : {}),
+            },
+          }
+        : {}),
+      ...(latestArtifact
+        ? {
+            latestArtifact: {
+              id: latestArtifact.id,
+              title: latestArtifact.title,
+              kind: latestArtifact.kind,
+              updatedAt: latestArtifact.updatedAt,
+            },
+          }
+        : {}),
+      surfaces: {
+        localPathBound: Boolean(workspace.path),
+        artifactPreviewReady: artifacts.length > 0,
+        runHistoryReady: runs.length > 0,
+        memoryReady: memories.length > 0,
+        automationReady: automations.length > 0,
+        terminalCandidate: Boolean(workspace.path),
+      },
+    };
   }
 
   async listProviders() {
