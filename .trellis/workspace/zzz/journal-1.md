@@ -672,3 +672,36 @@ Completed external runtime compatibility, Agent Hub skeleton, and the remaining 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 19: P3 MCP Transport Runtime
+
+**Date**: 2026-04-22
+**Task**: P3 MCP Transport Runtime
+**Branch**: `codex/p3-mcp-runtime`
+
+### Summary
+
+Implemented a real MCP stdio runtime probe, added registry/settings surfaces, improved quoted arg parsing, updated Electron packaging resources, and verified tests plus packaged smoke.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5f32889` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
