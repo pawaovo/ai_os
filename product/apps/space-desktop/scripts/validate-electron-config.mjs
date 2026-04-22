@@ -10,6 +10,10 @@ const config = builderConfig.default ?? builderConfig;
 
 assert(packageJson.main === "apps/space-desktop/electron-app/main.cjs", "package.json main must point to Electron main.");
 assert(packageJson.scripts["package:mac"] === "npm run package:electron:mac", "package:mac must use Electron packaging.");
+assert(
+  packageJson.scripts["package:electron:mac"]?.includes("prepare-electron-package-output.mjs"),
+  "package:electron:mac must clear stale legacy macOS bundles before packaging.",
+);
 assert(Boolean(packageJson.scripts["package:win"]), "package:win script is required.");
 assert(Boolean(packageJson.devDependencies?.electron), "electron devDependency is required.");
 assert(Boolean(packageJson.devDependencies?.["electron-builder"]), "electron-builder devDependency is required.");

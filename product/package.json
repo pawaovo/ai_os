@@ -14,7 +14,7 @@
     "build": "npm run typecheck",
     "package:mac": "npm run package:electron:mac",
     "package:win": "npm run package:electron:win",
-    "package:electron:mac": "npm run typecheck && electron-builder --config electron-builder.config.cjs --mac dir",
+    "package:electron:mac": "npm run typecheck && node ./apps/space-desktop/scripts/prepare-electron-package-output.mjs && electron-builder --config electron-builder.config.cjs --mac dir",
     "package:electron:win": "npm run validate:electron && npm run typecheck && electron-builder --config electron-builder.config.cjs --win",
     "package:mac:webkit": "node ./apps/space-desktop/scripts/package-macos.mjs",
     "validate:electron": "node ./apps/space-desktop/scripts/validate-electron-config.mjs",

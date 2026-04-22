@@ -150,7 +150,7 @@ open "build/electron/mac-arm64/AI OS.app"   # Apple Silicon
 open "build/electron/mac/AI OS.app"         # Intel Mac
 ```
 
-The product desktop shell is Electron. It uses one desktop architecture for macOS and Windows, opens a locked-down Chromium renderer, and starts the local AI OS server inside the Electron main process. The legacy macOS WebKit package path remains only as a rollback fallback.
+The product desktop shell is Electron. It uses one desktop architecture for macOS and Windows, opens a locked-down Chromium renderer, and starts the local AI OS server inside the Electron main process. The legacy macOS WebKit package path remains only as a rollback fallback and now lives under `product/build/webkit/AI OS.app`, so it does not shadow the primary Electron app.
 
 Windows packaging is configured with Electron Builder:
 

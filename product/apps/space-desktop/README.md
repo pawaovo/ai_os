@@ -6,7 +6,7 @@ Electron is now the primary product path:
 
 - macOS: packaged by `electron-builder`
 - Windows: configured by `electron-builder` with NSIS and portable targets through `npm run package:win`
-- Legacy macOS WebKit packaging remains available as `npm run package:mac:webkit` only as a rollback or development fallback
+- Legacy macOS WebKit packaging remains available as `npm run package:mac:webkit` only as a rollback or development fallback, and now outputs to `product/build/webkit/AI OS.app` so it cannot shadow the primary Electron app
 
 ## Runtime Architecture
 

@@ -155,6 +155,7 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   const i18nSource = await readFile(resolve(productRoot, "apps/space-desktop/src/i18n.ts"), "utf8");
   const packageJson = JSON.parse(await readFile(resolve(productRoot, "package.json"), "utf8"));
   const packageScript = await readFile(resolve(productRoot, "apps/space-desktop/scripts/package-macos.mjs"), "utf8");
+  const prepareElectronPackageScript = await readFile(resolve(productRoot, "apps/space-desktop/scripts/prepare-electron-package-output.mjs"), "utf8");
   const electronMain = await readFile(resolve(productRoot, "apps/space-desktop/electron-app/main.cjs"), "utf8");
   const electronAppPackage = JSON.parse(await readFile(resolve(productRoot, "apps/space-desktop/electron-app/package.json"), "utf8"));
   const electronConfig = await readFile(resolve(productRoot, "electron-builder.config.cjs"), "utf8");
@@ -271,8 +272,12 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(packageScript, /README\.md/);
   assert.equal(packageJson.main, "apps/space-desktop/electron-app/main.cjs");
   assert.equal(packageJson.scripts["package:mac"], "npm run package:electron:mac");
+  assert.match(packageJson.scripts["package:electron:mac"], /prepare-electron-package-output\.mjs/);
   assert.equal(packageJson.scripts["package:mac:webkit"], "node ./apps/space-desktop/scripts/package-macos.mjs");
   assert.equal(packageJson.scripts["package:win"], "npm run package:electron:win");
+  assert.match(packageScript, /buildRoot,\s*"webkit"/);
+  assert.match(prepareElectronPackageScript, /build", "AI OS\.app"/);
+  assert.match(prepareElectronPackageScript, /Removed stale legacy bundle/);
   assert.equal(electronAppPackage.main, "main.cjs");
   assert.equal(electronAppPackage.version, "1.0.0");
   assert.match(electronMain, /nodeIntegration:\s*false/);
