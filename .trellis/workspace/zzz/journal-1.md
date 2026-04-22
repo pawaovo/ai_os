@@ -567,3 +567,37 @@ Completed P0 executor session foundation, query loop discipline, memory retrieva
 ### Next Steps
 
 - None - task complete
+
+
+## Session 16: Start P1 workspace runtime work
+
+**Date**: 2026-04-22
+**Task**: Start P1 workspace runtime work
+**Branch**: `codex/bilingual-app-language-toggle`
+
+### Summary
+
+Created the P1 backlog, delivered workspace runtime summary contract, and added durable run checkpoints with safe first-step continuation after restart.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `99aeef1` | (see git log) |
+| `7bf7837` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

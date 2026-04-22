@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 15
+- **Total Sessions**: 16
 - **Last Active**: 2026-04-22
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~569 | Active |
+| `journal-1.md` | ~603 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 16 | 2026-04-22 | Start P1 workspace runtime work | `99aeef1`, `7bf7837` | `codex/bilingual-app-language-toggle` |
 | 15 | 2026-04-22 | Complete P0 runtime foundations | `8dc8b08`, `005ceb7`, `da8356f`, `6b827e5` | `codex/bilingual-app-language-toggle` |
 | 14 | 2026-04-20 | Bilingual UI Adaptation Follow-up | `9ed729a` | `codex/bilingual-app-language-toggle` |
 | 13 | 2026-04-20 | Add bilingual Chinese and English app mode | `ba1db681504f89f9fd80a13080a031916678503e` | `codex/bilingual-app-language-toggle` |
