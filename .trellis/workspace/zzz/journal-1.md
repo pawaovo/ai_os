@@ -870,3 +870,36 @@ Added a backend-owned multi-agent governance summary API, upgraded the Agents pa
 ### Next Steps
 
 - None - task complete
+
+
+## Session 25: P6 first-use setup import and reset
+
+**Date**: 2026-04-22
+**Task**: P6 first-use setup import and reset
+**Branch**: `codex/p6-first-use-onboarding-import`
+
+### Summary
+
+Added backend-owned local setup discovery/import APIs, safe generated-data/profile reset actions, new Start/Settings onboarding surfaces, bilingual copy, and integration coverage for Codex config import plus reset flows.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7d3fb04` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
