@@ -850,6 +850,7 @@ const elements = {
   artifactForm: getElement("artifact-form", HTMLFormElement),
   artifactSelect: getElement("artifact-select", HTMLSelectElement),
   artifactOpenButton: getElement("artifact-open-button", HTMLButtonElement),
+  artifactOpenRunButton: getElement("artifact-open-run-button", HTMLButtonElement),
   artifactDeleteButton: getElement("artifact-delete-button", HTMLButtonElement),
   artifactTitleInput: getElement("artifact-title-input", HTMLInputElement),
   artifactKind: getElement("artifact-kind", HTMLSelectElement),
@@ -1180,6 +1181,10 @@ elements.artifactSelect.addEventListener("change", () => {
 
 elements.artifactOpenButton.addEventListener("click", () => {
   void openArtifact(elements.artifactSelect.value);
+});
+
+elements.artifactOpenRunButton.addEventListener("click", () => {
+  void openArtifactSourceRun();
 });
 
 elements.artifactDeleteButton.addEventListener("click", () => {
@@ -1718,6 +1723,7 @@ function applyStaticTranslations(): void {
   setText(".artifact-panel .mini-label", t("artifact.mini"));
   setText("#artifact-title", t("artifact.title"));
   elements.artifactOpenButton.textContent = t("artifact.button.open");
+  elements.artifactOpenRunButton.textContent = t("artifact.button.openRun");
   elements.artifactDeleteButton.textContent = t("artifact.button.delete");
   setControlLabel(elements.artifactTitleInput, t("artifact.form.title"));
   setPlaceholder(elements.artifactTitleInput, t("artifact.form.title.placeholder"));
@@ -4193,6 +4199,18 @@ async function deleteSelectedArtifact(): Promise<void> {
   }
 }
 
+async function openArtifactSourceRun(): Promise<void> {
+  const runId = state.activeArtifact?.runId;
+  if (!runId) {
+    elements.artifactHelp.textContent = t("dynamic.artifact.noSourceRun");
+    return;
+  }
+
+  setActivePage("runs");
+  await loadRuns().catch(() => undefined);
+  await openRun(runId);
+}
+
 function renderArtifactLibrary(): void {
   elements.artifactSelect.replaceChildren(
     createOption("", state.artifacts.length > 0 ? t("dynamic.artifact.selectOption") : t("dynamic.artifact.noneSaved")),
@@ -4204,6 +4222,7 @@ function renderArtifactLibrary(): void {
     elements.artifactList.replaceChildren(createListItem(t("dynamic.artifact.noneInWorkspace")));
     elements.artifactPreview.textContent = t("artifact.preview.default");
     elements.artifactHelp.textContent = t("dynamic.artifact.saveNoteOrRun");
+    elements.artifactOpenRunButton.disabled = true;
     return;
   }
 
@@ -4212,7 +4231,7 @@ function renderArtifactLibrary(): void {
       id: artifact.id,
       idName: "artifactId",
       title: artifact.title,
-      meta: `${localizeArtifactKind(artifact.kind)} / ${formatDate(artifact.updatedAt)}`,
+      meta: formatArtifactMeta(artifact),
       pressed: artifact.id === state.activeArtifactId,
       source: artifact.source,
     })),
@@ -4221,12 +4240,24 @@ function renderArtifactLibrary(): void {
   const activeArtifact = state.activeArtifact;
   if (!activeArtifact) {
     elements.artifactPreview.textContent = t("dynamic.artifact.selectToPreview");
+    elements.artifactOpenRunButton.disabled = true;
     return;
   }
 
+  elements.artifactOpenRunButton.disabled = !activeArtifact.runId;
   elements.artifactHelp.textContent =
-    t("dynamic.artifact.opened", { source: localizeArtifactSource(activeArtifact.source) }) + (activeArtifact.runId ? ` / ${truncate(activeArtifact.runId, 24)}` : "");
+    t("dynamic.artifact.opened", { source: localizeArtifactSource(activeArtifact.source) })
+    + (activeArtifact.runId ? ` / ${t("dynamic.artifact.sourceRun")} ${truncate(activeArtifact.runId, 24)}` : "");
   elements.artifactPreview.textContent = activeArtifact.content || t("dynamic.artifact.noPreview");
+}
+
+function formatArtifactMeta(artifact: ArtifactSummary): string {
+  return [
+    localizeArtifactKind(artifact.kind),
+    localizeArtifactSource(artifact.source),
+    artifact.runId ? `${t("dynamic.artifact.sourceRun")} ${truncate(artifact.runId, 24)}` : "",
+    formatDate(artifact.updatedAt),
+  ].filter(Boolean).join(" / ");
 }
 
 async function loadRuns(): Promise<void> {

@@ -17,6 +17,7 @@ This directory contains guidelines for frontend development. Fill in each file w
 | [Directory Structure](./directory-structure.md) | Module organization and file layout | To fill |
 | [Component Guidelines](./component-guidelines.md) | Component patterns, props, composition | To fill |
 | [Desktop Readiness Contract](./desktop-readiness-contract.md) | Renderer/UI contract for app readiness and Electron install messaging | Active |
+| [Artifact Source Navigation Surface](./artifact-source-navigation-surface.md) | Artifacts surface contract for showing source run linkage and opening the linked run | Active |
 | [Hook Guidelines](./hook-guidelines.md) | Custom hooks, data fetching patterns | To fill |
 | [First Use Onboarding Surface](./first-use-onboarding-surface.md) | Start/Settings surface for local setup discovery, provider import, and local reset actions | Active |
 | [Mailbox Surface](./mailbox-surface.md) | Agents surface contract for mailbox timeline items linked to orchestration and remote bridge flows | Active |

@@ -336,6 +336,7 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(html, /id="run-follow-up-create-recipe-button"/);
   assert.match(html, /id="run-follow-up-help"/);
   assert.match(html, /id="artifact-select"/);
+  assert.match(html, /id="artifact-open-run-button"/);
   assert.match(html, /id="run-artifact-preview"/);
   assert.match(styles, /\.space-workbench/);
   assert.match(styles, /\.left-rail/);
@@ -429,6 +430,8 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(browserSource, /saveFollowUpArtifactFromActiveRun/);
   assert.match(browserSource, /createFollowUpAutomationFromActiveRun/);
   assert.match(browserSource, /createForgeRecipeFromActiveRun/);
+  assert.match(browserSource, /openArtifactSourceRun/);
+  assert.match(browserSource, /formatArtifactMeta/);
   assert.match(browserSource, /renderWorkspaceRuntime/);
   assert.match(browserSource, /workspaceRuntimeList/);
   assert.match(browserSource, /renderWorkspaceNativeSurface/);
@@ -464,6 +467,8 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(i18nSource, /"localReset\.title": "本地数据重置"/);
   assert.match(i18nSource, /"runFollowUp\.title": "Next Actions"/);
   assert.match(i18nSource, /"runFollowUp\.title": "下一步动作"/);
+  assert.match(i18nSource, /"artifact\.button\.openRun": "Open Source Run"/);
+  assert.match(i18nSource, /"artifact\.button\.openRun": "打开来源 Run"/);
   assert.match(i18nSource, /"recipe-editor\.binding\.workspace": "Workspace"/);
   assert.match(i18nSource, /"agents\.governance\.title": "Multi-Agent Overview"/);
   assert.match(i18nSource, /"agents\.governance\.title": "多 Agent 总览"/);
