@@ -793,6 +793,14 @@ test("space desktop V0.5 run workflow records approval history and trust decisio
       timeoutMs: 5000,
     });
     assert.equal(approvingRun.run.status, "awaiting-approval");
+    assert.match(approvingRun.live.sessionId, /^session-run-live-/);
+    assert.match(approvingRun.live.currentTurn.turnId, /^turn-live-/);
+    assert.equal(approvingRun.live.currentTurn.status, "awaiting-approval");
+    assert.equal(approvingRun.live.items.some((item) => item.kind === "approval"), true);
+    const startApprovalItem = approvingRun.live.items.find((item) => item.kind === "approval");
+    assert.equal(startApprovalItem.status, "blocked");
+    assert.equal(approvingRun.live.currentTurn.itemIds.includes(startApprovalItem.itemId), true);
+    assert.equal(startApprovalItem.eventIds.length, 1);
 
     const pending = await waitForLiveRun(appPort, approvingRun.live.runId, (live) => Boolean(live.pendingApproval));
     assert.equal(pending.status, "awaiting-approval");
@@ -804,6 +812,18 @@ test("space desktop V0.5 run workflow records approval history and trust decisio
       decision: "grant",
     });
     const completed = await waitForLiveRun(appPort, approvingRun.live.runId, (live) => live.status === "completed");
+    assert.equal(completed.sessionId, approvingRun.live.sessionId);
+    assert.equal(completed.currentTurn.status, "completed");
+    assert.equal(typeof completed.currentTurn.completedAt, "string");
+    const completedApprovalItem = completed.items.find((item) => item.kind === "approval");
+    assert.equal(completedApprovalItem.status, "completed");
+    assert.equal(completedApprovalItem.eventIds.length >= 2, true);
+    const executorItem = completed.items.find((item) => item.kind === "executor-run");
+    assert.equal(executorItem.status, "completed");
+    assert.equal(executorItem.eventIds.length >= 3, true);
+    const artifactPersistItem = completed.items.find((item) => item.kind === "artifact-persist");
+    assert.equal(artifactPersistItem.status, "completed");
+    assert.equal(artifactPersistItem.eventIds.length >= 1, true);
     assert.equal(completed.artifacts.some((artifact) => artifact.kind === "diff"), true);
     assert.equal(completed.events.some((event) => event.type === "approval.granted"), true);
 
@@ -862,6 +882,33 @@ test("space desktop V0.5 run workflow records approval history and trust decisio
       path: storageDir,
       trustLevel: "trusted-local-writes",
     });
+
+    const runtimeRun = await postJson(`http://127.0.0.1:${appPort}/api/runs/start`, {
+      goal: "review the current workspace and pause for approval before the final summary",
+      executorChoice: "mock",
+      timeoutMs: 5000,
+    });
+    assert.equal(runtimeRun.live.pendingApproval, undefined);
+    const runtimePending = await waitForLiveRun(appPort, runtimeRun.live.runId, (live) => Boolean(live.pendingApproval));
+    assert.equal(runtimePending.pendingApproval.category, "shell-command");
+    assert.equal(runtimePending.currentTurn.status, "awaiting-approval");
+    const runtimeApprovalId = runtimePending.pendingApproval.approvalId;
+    const runtimeApprovalItem = runtimePending.items.find((item) => item.approvalId === runtimeApprovalId);
+    assert.equal(runtimeApprovalItem.title, "Runtime Approval");
+    assert.equal(runtimeApprovalItem.status, "blocked");
+    assert.equal(runtimePending.items.some((item) => item.kind === "executor-run"), true);
+    await postJson(`http://127.0.0.1:${appPort}/api/runs/${runtimeRun.live.runId}/approval`, {
+      decision: "grant",
+    });
+    const runtimeCompleted = await waitForLiveRun(
+      appPort,
+      runtimeRun.live.runId,
+      (live) => live.status === "completed" && !live.pendingApproval,
+    );
+    const runtimeCompletedApprovalItem = runtimeCompleted.items.find((item) => item.approvalId === runtimeApprovalId);
+    assert.equal(runtimeCompletedApprovalItem.status, "completed");
+    assert.equal(runtimeCompleted.items.some((item) => item.kind === "executor-run" && item.status === "completed"), true);
+
     const autoRun = await postJson(`http://127.0.0.1:${appPort}/api/runs/start`, {
       goal: "edit a trusted local note",
       executorChoice: "mock",

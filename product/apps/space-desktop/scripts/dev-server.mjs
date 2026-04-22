@@ -1498,6 +1498,62 @@ function createExecutorRuntime() {
   };
 }
 
+function createRunTurn(ids, clock) {
+  return {
+    turnId: ids.turnId(),
+    status: "running",
+    startedAt: clock.now(),
+    itemIds: [],
+    latestEventType: "run.session.created",
+  };
+}
+
+function createRunItem(ids, clock, input) {
+  return {
+    itemId: ids.itemId(),
+    kind: input.kind,
+    status: input.status ?? "running",
+    title: input.title,
+    ...(input.detail ? { detail: input.detail } : {}),
+    startedAt: clock.now(),
+    eventIds: [],
+    ...(input.approvalId ? { approvalId: input.approvalId } : {}),
+    ...(input.artifactId ? { artifactId: input.artifactId } : {}),
+  };
+}
+
+function appendRunItem(session, item) {
+  session.items.push(item);
+  session.currentTurn.itemIds.push(item.itemId);
+  session.currentTurn.latestEventType = "run.item.created";
+  return item;
+}
+
+function findRunItemByApprovalId(session, approvalId) {
+  return session.items.find((entry) => entry.approvalId === approvalId);
+}
+
+function completeRunItem(session, itemId, patch = {}) {
+  const item = session.items.find((entry) => entry.itemId === itemId);
+  if (!item) return undefined;
+
+  Object.assign(item, {
+    ...(item.status === "completed" || item.status === "failed" || item.status === "interrupted" || item.status === "blocked"
+      ? {}
+      : { status: patch.status ?? "completed" }),
+    ...(item.completedAt ? {} : { completedAt: patch.completedAt ?? session.clock.now() }),
+    ...patch,
+  });
+  return item;
+}
+
+function setCurrentTurnStatus(session, status) {
+  session.currentTurn.status = status;
+  if (status === "completed" || status === "failed" || status === "interrupted") {
+    session.currentTurn.completedAt ??= session.clock.now();
+  }
+}
+
 async function createRunSession(input) {
   const workspace = await requireRunnableWorkspace();
   const ids = createWorkflowIds();
@@ -1507,6 +1563,7 @@ async function createRunSession(input) {
   const session = {
     runId,
     missionId,
+    sessionId: `session-${runId}`,
     goal: input.goal,
     executorChoice: input.executorChoice,
     workspaceId: workspace.id,
@@ -1517,6 +1574,8 @@ async function createRunSession(input) {
     memoryUsage: appStore.searchMemories(workspace.id, input.goal),
     status: "queued",
     events: [],
+    currentTurn: createRunTurn(ids, clock),
+    items: [],
     stream: [],
     artifacts: [],
     artifactContents: {},
@@ -1530,10 +1589,17 @@ async function createRunSession(input) {
   };
 
   if (session.memoryUsage.length > 0) {
+    const memoryItem = appendRunItem(session, createRunItem(ids, clock, {
+      kind: "memory-context",
+      status: "completed",
+      title: "Memory Context",
+      detail: createMemoryUsageSummary(session.memoryUsage),
+    }));
     appStore.markMemoriesUsed(session.memoryUsage.map((memory) => memory.memoryId));
     appendLiveEvent(session, {
       type: "memory.used",
       message: `Memory used: ${session.memoryUsage.map((memory) => memory.title).join(", ")}`,
+      itemId: memoryItem.itemId,
     });
   }
 
@@ -1557,6 +1623,14 @@ async function createRunSession(input) {
   session.status = session.pendingApproval ? "awaiting-approval" : "running";
 
   if (session.pendingApproval) {
+    const approvalItem = appendRunItem(session, createRunItem(ids, clock, {
+      kind: "approval",
+      status: "blocked",
+      title: "Pre-run Approval",
+      detail: session.pendingApproval.reason,
+      approvalId: session.pendingApproval.approvalId,
+    }));
+    setCurrentTurnStatus(session, "awaiting-approval");
     if (session.pendingApproval.autoDecision === "grant") {
       appStore.resolveApproval(session.pendingApproval.approvalId, {
         status: "granted",
@@ -1567,9 +1641,15 @@ async function createRunSession(input) {
         type: "approval.granted",
         message: `Auto-granted ${session.pendingApproval.category} (${session.pendingApproval.riskLevel}).`,
         approvalId: session.pendingApproval.approvalId,
+        itemId: approvalItem.itemId,
+      });
+      completeRunItem(session, approvalItem.itemId, {
+        status: "completed",
+        detail: "Approval auto-granted by trusted local workspace rule.",
       });
       session.pendingApproval = undefined;
       session.status = "running";
+      setCurrentTurnStatus(session, "running");
       appStore.updateRunStatus(session.runId, "running");
       session.promise = runSessionWork(session);
       return session;
@@ -1579,6 +1659,7 @@ async function createRunSession(input) {
       type: "approval.requested",
       message: `${session.pendingApproval.reason} [${session.pendingApproval.category} / ${session.pendingApproval.riskLevel}]`,
       approvalId: session.pendingApproval.approvalId,
+      itemId: approvalItem.itemId,
     });
   } else {
     session.promise = runSessionWork(session);
@@ -1616,6 +1697,7 @@ async function resolveRunApproval(session, decision) {
 
   const approvalDecision = normalizeApprovalDecision(decision);
   const approval = session.pendingApproval;
+  const approvalItem = findRunItemByApprovalId(session, approval.approvalId);
   appStore.resolveApproval(approval.approvalId, {
     status: approvalDecision === "grant" ? "granted" : "rejected",
     decision: approvalDecision,
@@ -1626,7 +1708,14 @@ async function resolveRunApproval(session, decision) {
     type: approvalDecision === "grant" ? "approval.granted" : "approval.rejected",
     message: approvalDecision === "grant" ? "Approval granted." : "Approval rejected.",
     approvalId: approval.approvalId,
+    ...(approvalItem ? { itemId: approvalItem.itemId } : {}),
   });
+  if (approvalItem) {
+    completeRunItem(session, approvalItem.itemId, {
+      status: approvalDecision === "grant" ? "completed" : "failed",
+      detail: approvalDecision === "grant" ? "Approval granted by user." : "Approval rejected by user.",
+    });
+  }
 
   if (approval.stage === "pre-run") {
     session.pendingApproval = undefined;
@@ -1637,6 +1726,7 @@ async function resolveRunApproval(session, decision) {
     }
 
     session.status = "running";
+    setCurrentTurnStatus(session, "running");
     appStore.updateRunStatus(session.runId, "running");
     session.promise = runSessionWork(session);
     return;
@@ -1647,6 +1737,9 @@ async function resolveRunApproval(session, decision) {
   }
 
   session.pendingApproval = undefined;
+  session.status = "running";
+  setCurrentTurnStatus(session, "running");
+  appStore.updateRunStatus(session.runId, "running");
   await session.executor.submitApproval(session.runId, {
     approvalId: approval.approvalId,
     decision: approvalDecision,
@@ -1657,11 +1750,18 @@ async function cancelRunSession(session) {
   if (isTerminalRunStatus(session.status)) return;
 
   if (session.pendingApproval) {
+    const approvalItem = findRunItemByApprovalId(session, session.pendingApproval.approvalId);
     appStore.resolveApproval(session.pendingApproval.approvalId, {
       status: "rejected",
       decision: "reject",
       note: "Interrupted while waiting for approval.",
     });
+    if (approvalItem) {
+      completeRunItem(session, approvalItem.itemId, {
+        status: "interrupted",
+        detail: "Approval interrupted while waiting for user decision.",
+      });
+    }
     session.pendingApproval = undefined;
     await session.executor?.interruptRun(session.runId);
     finalizeSession(session, "interrupted", "Run interrupted while waiting for approval.");
@@ -1678,6 +1778,13 @@ async function cancelRunSession(session) {
 }
 
 async function runSessionWork(session) {
+  const executorItem = appendRunItem(session, createRunItem(session.ids, session.clock, {
+    kind: "executor-run",
+    title: "Executor Run",
+    detail: `${session.executorChoice} executor run started.`,
+  }));
+  session.activeExecutorItemId = executorItem.itemId;
+
   try {
     const executor = createExecutorForSession(session);
     const controlPlane = new ControlPlane(
@@ -1705,6 +1812,12 @@ async function runSessionWork(session) {
       appendKernelEvent(session, event);
     }
 
+    completeRunItem(session, executorItem.itemId, {
+      status: mapSnapshotStatus(snapshot.status) === "completed" ? "completed" : mapSnapshotStatus(snapshot.status),
+      detail: session.latestMessage ?? "Executor run finished.",
+    });
+    session.activeExecutorItemId = undefined;
+
     const collectedArtifacts = await executor.collectArtifacts(started.run.id);
     const artifacts = await persistSessionArtifacts(session, collectedArtifacts);
     session.artifacts = artifacts;
@@ -1720,6 +1833,11 @@ async function runSessionWork(session) {
       );
     }
   } catch (error) {
+    completeRunItem(session, session.activeExecutorItemId, {
+      status: isTerminalRunStatus(session.status) ? session.status : "failed",
+      detail: sanitizeErrorMessage(error),
+    });
+    session.activeExecutorItemId = undefined;
     if (!isTerminalRunStatus(session.status)) {
       finalizeSession(session, "failed", sanitizeErrorMessage(error));
     }
@@ -1750,13 +1868,19 @@ function buildRunGoalWithMemory(session) {
 function appendKernelEvent(session, event) {
   if (isTerminalRunStatus(session.status)) return;
 
+  let itemId = session.activeExecutorItemId;
+
   switch (event.type) {
+    case "run.started":
+      setCurrentTurnStatus(session, "running");
+      break;
     case "run.stream":
       session.stream.push(event.chunk);
       session.latestMessage = event.chunk;
       break;
     case "approval.requested":
       session.status = "awaiting-approval";
+      setCurrentTurnStatus(session, "awaiting-approval");
       session.pendingApproval = {
         approvalId: event.approvalId,
         category: "shell-command",
@@ -1765,6 +1889,13 @@ function appendKernelEvent(session, event) {
         requestedAction: "Runtime executor approval request.",
         stage: "runtime",
       };
+      itemId = appendRunItem(session, createRunItem(session.ids, session.clock, {
+        kind: "approval",
+        status: "blocked",
+        title: "Runtime Approval",
+        detail: session.pendingApproval.reason,
+        approvalId: event.approvalId,
+      })).itemId;
       appStore.createApproval({
         id: event.approvalId,
         runId: session.runId,
@@ -1790,21 +1921,30 @@ function appendKernelEvent(session, event) {
   appendLiveEvent(session, {
     type: event.type,
     message: summarizeKernelEvent(event),
+    ...(itemId ? { itemId } : {}),
     ...(event.type === "approval.requested" ? { approvalId: event.approvalId } : {}),
   });
 }
 
 function appendLiveEvent(session, event) {
   const liveEvent = {
-    id: randomUUID(),
+    id: session.ids.eventId(),
     runId: session.runId,
     type: event.type,
     message: event.message,
     createdAt: session.clock.now(),
     ...(event.approvalId ? { approvalId: event.approvalId } : {}),
+    ...(event.itemId ? { itemId: event.itemId } : {}),
   };
 
   session.events.push(liveEvent);
+  session.currentTurn.latestEventType = liveEvent.type;
+  if (event.itemId) {
+    const item = session.items.find((entry) => entry.itemId === event.itemId);
+    if (item) {
+      item.eventIds.push(liveEvent.id);
+    }
+  }
   appStore.addRunEvent({
     runId: session.runId,
     type: event.type,
@@ -1814,34 +1954,53 @@ function appendLiveEvent(session, event) {
 }
 
 async function persistSessionArtifacts(session, collectedArtifacts) {
+  const artifactItem = appendRunItem(session, createRunItem(session.ids, session.clock, {
+    kind: "artifact-persist",
+    title: "Persist Artifacts",
+    detail: "Persisting run artifacts to local storage.",
+  }));
   const persisted = [];
   const artifacts = [...collectedArtifacts];
 
-  if (artifacts.length === 0) {
-    artifacts.push(createTranscriptArtifact(session));
-  }
+  try {
+    if (artifacts.length === 0) {
+      artifacts.push(createTranscriptArtifact(session));
+    }
 
-  const diffArtifact = createWorkspaceDiffArtifact(session);
-  if (diffArtifact) {
-    artifacts.push(diffArtifact);
-  }
+    const diffArtifact = createWorkspaceDiffArtifact(session);
+    if (diffArtifact) {
+      artifacts.push(diffArtifact);
+    }
 
-  for (const artifact of artifacts) {
-    const saved = appStore.createArtifact({
-      title: artifact.title,
-      kind: artifact.kind,
-      content: artifact.content ?? "",
-      path: artifact.path,
-      workspaceId: session.workspaceId,
-      threadId: session.threadId,
-      runId: session.runId,
-      source: "run",
+    for (const artifact of artifacts) {
+      const saved = appStore.createArtifact({
+        title: artifact.title,
+        kind: artifact.kind,
+        content: artifact.content ?? "",
+        path: artifact.path,
+        workspaceId: session.workspaceId,
+        threadId: session.threadId,
+        runId: session.runId,
+        source: "run",
+      });
+      persisted.push(saved);
+      appendLiveEvent(session, {
+        type: "artifact.created",
+        message: `Saved artifact: ${saved.title}`,
+        itemId: artifactItem.itemId,
+      });
+    }
+
+    completeRunItem(session, artifactItem.itemId, {
+      status: "completed",
+      detail: `Persisted ${persisted.length} artifact${persisted.length === 1 ? "" : "s"} to local storage.`,
     });
-    persisted.push(saved);
-    appendLiveEvent(session, {
-      type: "artifact.created",
-      message: `Saved artifact: ${saved.title}`,
+  } catch (error) {
+    completeRunItem(session, artifactItem.itemId, {
+      status: "failed",
+      detail: sanitizeErrorMessage(error),
     });
+    throw error;
   }
 
   return persisted;
@@ -1897,6 +2056,7 @@ function createWorkspaceDiffArtifact(session) {
 function finalizeSession(session, status, message) {
   session.status = status;
   session.completedAt = session.clock.now();
+  setCurrentTurnStatus(session, status);
   if (message) {
     session.latestMessage = message;
   }
@@ -1908,17 +2068,31 @@ function finalizeSession(session, status, message) {
   } else if (status === "interrupted" && lastEventType !== "run.interrupted") {
     appendLiveEvent(session, { type: "run.interrupted", message: message ?? "Run interrupted." });
   }
+  completeRunItem(session, session.activeExecutorItemId, {
+    status,
+    detail: message ?? session.latestMessage ?? `Run ${status}.`,
+  });
+  session.activeExecutorItemId = undefined;
   appStore.updateRunStatus(session.runId, status, session.completedAt);
 }
 
 function serializeRunSession(session) {
   return {
+    sessionId: session.sessionId,
     runId: session.runId,
     goal: session.goal,
     executorChoice: session.executorChoice,
     status: session.status,
     stream: [...session.stream],
     events: [...session.events],
+    currentTurn: {
+      ...session.currentTurn,
+      itemIds: [...session.currentTurn.itemIds],
+    },
+    items: session.items.map((item) => ({
+      ...item,
+      eventIds: [...item.eventIds],
+    })),
     artifacts: [...session.artifacts],
     artifactContents: { ...session.artifactContents },
     memoryUsage: [...session.memoryUsage],
@@ -3879,6 +4053,8 @@ function createWorkflowIds() {
   return {
     missionId: () => missionId,
     runId: () => runId,
+    turnId: () => `turn-live-${randomUUID()}`,
+    itemId: () => `item-live-${randomUUID()}`,
     artifactId: () => `artifact-live-${randomUUID()}`,
     eventId: () => `event-live-${randomUUID()}`,
   };

@@ -75,6 +75,29 @@ interface RunEventSummary {
   message: string;
   createdAt: string;
   approvalId?: string;
+  itemId?: string;
+}
+
+interface RunTurnSummary {
+  turnId: string;
+  status: string;
+  startedAt: string;
+  completedAt?: string;
+  itemIds: string[];
+  latestEventType: string;
+}
+
+interface RunItemSummary {
+  itemId: string;
+  kind: string;
+  status: string;
+  title: string;
+  detail?: string;
+  startedAt: string;
+  completedAt?: string;
+  eventIds: string[];
+  approvalId?: string;
+  artifactId?: string;
 }
 
 interface ExecutorStatusSummary {
@@ -179,12 +202,15 @@ interface RecipeSummary extends RecipeRecord {}
 interface RecipeTestSummary extends RecipeTestRecord {}
 
 interface LiveRunState {
+  sessionId?: string;
   runId: string;
   goal: string;
   executorChoice: SpaceDemoExecutorChoice;
   status: string;
   stream: string[];
   events: RunEventSummary[];
+  currentTurn?: RunTurnSummary;
+  items?: RunItemSummary[];
   artifacts: ArtifactSummary[];
   artifactContents: Record<string, string>;
   pendingApproval?: {
