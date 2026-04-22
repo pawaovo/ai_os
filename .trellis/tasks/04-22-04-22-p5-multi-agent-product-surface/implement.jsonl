@@ -1,0 +1,9 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend development guide"}
+{"file": ".trellis/spec/frontend/multi-agent-product-surface.md", "reason": "Primary frontend contract for Agents page evolution"}
+{"file": ".trellis/spec/backend/multi-agent-governance-summary.md", "reason": "Backend-owned governance summary seam"}
+{"file": ".trellis/spec/backend/agent-hub-orchestration-mvp.md", "reason": "Existing orchestration state feeding the surface"}
+{"file": ".trellis/spec/backend/remote-bridge-pilot-mvp.md", "reason": "Remote bridge status and audit feed into the surface"}
+{"file": ".trellis/spec/backend/mailbox-runtime-mvp.md", "reason": "Mailbox timeline and counts feed into governance summary"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Feature spans backend aggregate API, frontend overview surface, tests, and packaging smoke"}

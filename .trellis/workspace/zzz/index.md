@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 23
+- **Total Sessions**: 24
 - **Last Active**: 2026-04-22
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~839 | Active |
+| `journal-1.md` | ~872 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 24 | 2026-04-22 | P5 multi-agent governance overview | `c49e191` | `codex/p5-multi-agent-product-surface` |
 | 23 | 2026-04-22 | P4 Mailbox Runtime MVP | `ff20121` | `codex/p4-mailbox-runtime` |
 | 22 | 2026-04-22 | P3 Remote Bridge Single-Channel Pilot | `862e6c3` | `codex/p3-remote-bridge-pilot` |
 | 21 | 2026-04-22 | P3 MCP Server Hosting MVP | `a935c56` | `codex/p3-mcp-server-hosting` |

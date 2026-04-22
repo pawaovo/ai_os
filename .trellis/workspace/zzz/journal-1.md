@@ -837,3 +837,36 @@ Implemented mailbox persistence, automatic orchestration and remote bridge hando
 ### Next Steps
 
 - None - task complete
+
+
+## Session 24: P5 multi-agent governance overview
+
+**Date**: 2026-04-22
+**Task**: P5 multi-agent governance overview
+**Branch**: `codex/p5-multi-agent-product-surface`
+
+### Summary
+
+Added a backend-owned multi-agent governance summary API, upgraded the Agents page with a unified overview surface, extended bilingual copy/specs, and validated with tests plus packaged Electron smoke.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c49e191` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
