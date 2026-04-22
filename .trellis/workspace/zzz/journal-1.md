@@ -601,3 +601,40 @@ Created the P1 backlog, delivered workspace runtime summary contract, and added 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 17: Complete P1 runtime and prompt app backlog
+
+**Date**: 2026-04-22
+**Task**: Complete P1 runtime and prompt app backlog
+**Branch**: `codex/bilingual-app-language-toggle`
+
+### Summary
+
+Completed remaining P1 backlog: workspace native preview surfaces, Prompt App Draft contract, recipe-to-prompt-app bridge, MCP client config sync, and future MCP server boundary spike. All product code changes passed npm test and validate:electron before final doc close-out.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `534a7d8` | (see git log) |
+| `383a9d1` | (see git log) |
+| `f730062` | (see git log) |
+| `22b5db9` | (see git log) |
+| `1cdee41` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
