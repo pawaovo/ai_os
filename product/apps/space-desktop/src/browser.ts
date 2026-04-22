@@ -787,6 +787,12 @@ const elements = {
   runHistoryList: getElement("run-history-list", HTMLElement),
   runHistoryHelp: getElement("run-history-help", HTMLElement),
   runEventHistory: getElement("run-event-history", HTMLElement),
+  runFollowUpStatus: getElement("run-follow-up-status", HTMLElement),
+  runFollowUpSummary: getElement("run-follow-up-summary", HTMLElement),
+  runFollowUpSaveArtifactButton: getElement("run-follow-up-save-artifact-button", HTMLButtonElement),
+  runFollowUpCreateAutomationButton: getElement("run-follow-up-create-automation-button", HTMLButtonElement),
+  runFollowUpCreateRecipeButton: getElement("run-follow-up-create-recipe-button", HTMLButtonElement),
+  runFollowUpHelp: getElement("run-follow-up-help", HTMLElement),
   approvalHistoryList: getElement("approval-history-list", HTMLElement),
   approvalHistoryHelp: getElement("approval-history-help", HTMLElement),
   memoryForm: getElement("memory-form", HTMLFormElement),
@@ -1149,6 +1155,18 @@ elements.automationList.addEventListener("click", (event) => {
 elements.runHistoryList.addEventListener("click", (event) => {
   const target = event.target instanceof HTMLElement ? event.target.closest<HTMLButtonElement>("button[data-run-id]") : null;
   if (target?.dataset.runId) void openRun(target.dataset.runId);
+});
+
+elements.runFollowUpSaveArtifactButton.addEventListener("click", () => {
+  void saveFollowUpArtifactFromActiveRun();
+});
+
+elements.runFollowUpCreateAutomationButton.addEventListener("click", () => {
+  void createFollowUpAutomationFromActiveRun();
+});
+
+elements.runFollowUpCreateRecipeButton.addEventListener("click", () => {
+  void createForgeRecipeFromActiveRun();
 });
 
 elements.artifactForm.addEventListener("submit", (event) => {
@@ -1667,6 +1685,13 @@ function applyStaticTranslations(): void {
   if (state.runs.length === 0) {
     elements.runHistoryHelp.textContent = t("run-history.help.default");
   }
+
+  setText(".run-follow-up-panel .eyebrow", t("runFollowUp.eyebrow"));
+  setText("#run-follow-up-title", t("runFollowUp.title"));
+  elements.runFollowUpSaveArtifactButton.textContent = t("runFollowUp.button.artifact");
+  elements.runFollowUpCreateAutomationButton.textContent = t("runFollowUp.button.automation");
+  elements.runFollowUpCreateRecipeButton.textContent = t("runFollowUp.button.recipe");
+  renderRunFollowUp();
 
   setText(".approval-history-panel .eyebrow", t("approval-history.eyebrow"));
   setText(".approval-history-panel .mini-label", t("approval-history.mini"));
@@ -4098,6 +4123,26 @@ async function openArtifact(artifactId: string): Promise<void> {
   }
 }
 
+async function createArtifactRecord(input: {
+  title: string;
+  kind: string;
+  content: string;
+  workspaceId?: string | undefined;
+  threadId?: string | undefined;
+  runId?: string | undefined;
+  source: string;
+}): Promise<ArtifactSummary> {
+  const payload = await apiJson<{ artifact: ArtifactSummary }>("/api/artifacts", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  state.activeArtifactId = payload.artifact.id;
+  await loadArtifacts();
+  await loadAppReadiness();
+  return payload.artifact;
+}
+
 async function saveArtifactFromForm(): Promise<void> {
   const title = elements.artifactTitleInput.value.trim();
   if (!title) {
@@ -4107,24 +4152,17 @@ async function saveArtifactFromForm(): Promise<void> {
 
   elements.artifactSaveButton.disabled = true;
   try {
-    const payload = await apiJson<{ artifact: ArtifactSummary }>("/api/artifacts", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        title,
-        kind: elements.artifactKind.value,
-        content: elements.artifactContent.value,
-        workspaceId: state.activeWorkspaceId,
-        threadId: state.activeThreadId,
-        source: "manual",
-      }),
+    const artifact = await createArtifactRecord({
+      title,
+      kind: elements.artifactKind.value,
+      content: elements.artifactContent.value,
+      workspaceId: state.activeWorkspaceId,
+      threadId: state.activeThreadId,
+      source: "manual",
     });
-    state.activeArtifactId = payload.artifact.id;
     elements.artifactTitleInput.value = "";
     elements.artifactContent.value = "";
-    elements.artifactHelp.textContent = t("dynamic.artifact.saved", { title: payload.artifact.title });
-    await loadArtifacts();
-    await loadAppReadiness();
+    elements.artifactHelp.textContent = t("dynamic.artifact.saved", { title: artifact.title });
   } catch (error) {
     elements.artifactHelp.textContent = errorToMessage(error, t("dynamic.artifact.saveFailed"));
   } finally {
@@ -4465,13 +4503,7 @@ async function loadRecipeTests(): Promise<void> {
   }
 }
 
-async function createRecipeFromSelectedRun(): Promise<void> {
-  const runId = elements.forgeRunSelect.value;
-  if (!runId) {
-    elements.forgeHelp.textContent = t("dynamic.forge.selectRunFirst");
-    return;
-  }
-
+async function createRecipeFromRun(runId: string): Promise<RecipeSummary> {
   const payload = await apiJson<{ recipe: RecipeSummary }>("/api/recipes/from-run", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -4480,6 +4512,17 @@ async function createRecipeFromSelectedRun(): Promise<void> {
   state.activeRecipeId = payload.recipe.id;
   await loadRecipes();
   await loadAppReadiness();
+  return payload.recipe;
+}
+
+async function createRecipeFromSelectedRun(): Promise<void> {
+  const runId = elements.forgeRunSelect.value;
+  if (!runId) {
+    elements.forgeHelp.textContent = t("dynamic.forge.selectRunFirst");
+    return;
+  }
+
+  await createRecipeFromRun(runId);
 }
 
 async function saveSelectedRecipe(): Promise<void> {
@@ -4663,6 +4706,21 @@ async function loadAutomationRuns(): Promise<void> {
   }
 }
 
+async function createAutomationRecord(input: {
+  title: string;
+  prompt: string;
+  kind: string;
+  intervalMs?: number | undefined;
+}): Promise<void> {
+  await apiJson<{ automation: AutomationSummary }>("/api/automations", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  await loadAutomations();
+  await loadAppReadiness();
+}
+
 async function createAutomationFromForm(): Promise<void> {
   const title = elements.automationTitleInput.value.trim();
   const prompt = elements.automationPrompt.value.trim();
@@ -4673,19 +4731,13 @@ async function createAutomationFromForm(): Promise<void> {
 
   elements.automationSaveButton.disabled = true;
   try {
-    await apiJson<{ automation: AutomationSummary }>("/api/automations", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        title,
-        prompt,
-        kind: elements.automationKind.value,
-        intervalMs: readAutomationIntervalMs(),
-      }),
+    await createAutomationRecord({
+      title,
+      prompt,
+      kind: elements.automationKind.value,
+      intervalMs: readAutomationIntervalMs(),
     });
     elements.automationHelp.textContent = t("dynamic.automation.created");
-    await loadAutomations();
-    await loadAppReadiness();
   } catch (error) {
     elements.automationHelp.textContent = errorToMessage(error, t("dynamic.automation.createFailed"));
   } finally {
@@ -4780,6 +4832,140 @@ function renderAutomationRuns(): void {
   elements.automationRunHelp.textContent = t("dynamic.automationHistory.count", { count: state.automationRuns.length });
 }
 
+function getActiveRunSummary(): RunSummary | undefined {
+  return state.runs.find((run) => run.id === state.activeRunId);
+}
+
+function renderRunFollowUp(): void {
+  const run = getActiveRunSummary();
+  const liveRun = state.liveRun?.runId === run?.id ? state.liveRun : undefined;
+  const ready = Boolean(run && liveRun && run.status === "completed");
+  elements.runFollowUpSaveArtifactButton.disabled = !ready;
+  elements.runFollowUpCreateAutomationButton.disabled = !ready;
+  elements.runFollowUpCreateRecipeButton.disabled = !ready;
+
+  if (!run || !liveRun) {
+    elements.runFollowUpStatus.textContent = translatedToken("idle");
+    elements.runFollowUpSummary.textContent = t("runFollowUp.summary.none");
+    elements.runFollowUpHelp.textContent = t("runFollowUp.help.none");
+    return;
+  }
+
+  elements.runFollowUpStatus.textContent = translatedToken(run.status);
+  elements.runFollowUpSummary.textContent = t("runFollowUp.summary.selected", {
+    goal: run.goal,
+    executor: localizeExecutorChoice(run.executorChoice),
+  });
+  elements.runFollowUpHelp.textContent = ready
+    ? t("runFollowUp.help.ready")
+    : t("runFollowUp.help.pending", { status: translatedToken(run.status) });
+}
+
+function buildRunFollowUpArtifactContent(liveRun: LiveRunState): string {
+  const summary = elements.runSummary.textContent?.trim() || liveRun.events.at(-1)?.message || "";
+  const latestEvent = liveRun.events.at(-1)?.message || "";
+  return [
+    "# Run Follow-up",
+    "",
+    `- Goal: ${liveRun.goal}`,
+    `- Executor: ${localizeExecutorChoice(liveRun.executorChoice)}`,
+    `- Status: ${translatedToken(liveRun.status)}`,
+    `- Run ID: ${liveRun.runId}`,
+    "",
+    "## Summary",
+    localizeKnownText(summary),
+    "",
+    "## Latest Event",
+    localizeKnownText(latestEvent),
+  ].join("\n");
+}
+
+function buildRunFollowUpAutomationTitle(run: RunSummary): string {
+  return t("runFollowUp.automation.title", { goal: truncate(run.goal, 36) });
+}
+
+function buildRunFollowUpAutomationPrompt(run: RunSummary): string {
+  return t("runFollowUp.automation.prompt", {
+    goal: run.goal,
+    executor: localizeExecutorChoice(run.executorChoice),
+  });
+}
+
+async function saveFollowUpArtifactFromActiveRun(): Promise<void> {
+  const run = getActiveRunSummary();
+  const liveRun = state.liveRun?.runId === run?.id ? state.liveRun : undefined;
+  if (!run || !liveRun || run.status !== "completed") {
+    renderRunFollowUp();
+    return;
+  }
+
+  elements.runFollowUpSaveArtifactButton.disabled = true;
+  try {
+    const artifact = await createArtifactRecord({
+      title: t("runFollowUp.artifact.title", { goal: truncate(run.goal, 36) }),
+      kind: "report",
+      content: buildRunFollowUpArtifactContent(liveRun),
+      workspaceId: run.workspaceId,
+      threadId: run.threadId,
+      runId: run.id,
+      source: "run",
+    });
+    setActivePage("artifacts");
+    await openArtifact(artifact.id);
+    elements.runFollowUpHelp.textContent = t("runFollowUp.created.artifact", { title: artifact.title });
+  } catch (error) {
+    elements.runFollowUpHelp.textContent = errorToMessage(error, t("runFollowUp.failed.artifact"));
+  } finally {
+    renderRunFollowUp();
+  }
+}
+
+async function createFollowUpAutomationFromActiveRun(): Promise<void> {
+  const run = getActiveRunSummary();
+  const liveRun = state.liveRun?.runId === run?.id ? state.liveRun : undefined;
+  if (!run || !liveRun || run.status !== "completed") {
+    renderRunFollowUp();
+    return;
+  }
+
+  elements.runFollowUpCreateAutomationButton.disabled = true;
+  try {
+    const title = buildRunFollowUpAutomationTitle(run);
+    await createAutomationRecord({
+      title,
+      prompt: buildRunFollowUpAutomationPrompt(run),
+      kind: "one-off",
+      intervalMs: 60000,
+    });
+    setActivePage("automations");
+    elements.runFollowUpHelp.textContent = t("runFollowUp.created.automation", { title });
+  } catch (error) {
+    elements.runFollowUpHelp.textContent = errorToMessage(error, t("runFollowUp.failed.automation"));
+  } finally {
+    renderRunFollowUp();
+  }
+}
+
+async function createForgeRecipeFromActiveRun(): Promise<void> {
+  const run = getActiveRunSummary();
+  const liveRun = state.liveRun?.runId === run?.id ? state.liveRun : undefined;
+  if (!run || !liveRun || run.status !== "completed") {
+    renderRunFollowUp();
+    return;
+  }
+
+  elements.runFollowUpCreateRecipeButton.disabled = true;
+  try {
+    const recipe = await createRecipeFromRun(run.id);
+    setActivePage("forge");
+    elements.runFollowUpHelp.textContent = t("runFollowUp.created.recipe", { title: recipe.title });
+  } catch (error) {
+    elements.runFollowUpHelp.textContent = errorToMessage(error, t("runFollowUp.failed.recipe"));
+  } finally {
+    renderRunFollowUp();
+  }
+}
+
 async function openRun(runId: string): Promise<void> {
   if (!runId) return;
 
@@ -4819,6 +5005,7 @@ function renderRunHistory(): void {
     elements.runHistoryList.replaceChildren(createListItem(t("dynamic.runHistory.none")));
     elements.runEventHistory.replaceChildren();
     elements.runHistoryHelp.textContent = t("dynamic.runHistory.runMock");
+    renderRunFollowUp();
     return;
   }
 
@@ -4840,6 +5027,7 @@ function renderRunHistory(): void {
   elements.runEventHistory.replaceChildren(
     ...state.runEvents.map((event) => createEventListItem(event.type, event.message)),
   );
+  renderRunFollowUp();
 }
 
 function createPersistedRunView(
@@ -4890,6 +5078,7 @@ function renderCurrentRunView(): void {
     renderApprovalPanel(undefined);
     elements.runCancelButton.disabled = true;
     renderMemoryUsage();
+    renderRunFollowUp();
     return;
   }
 
@@ -4930,6 +5119,7 @@ function renderCurrentRunView(): void {
   renderMemoryUsage();
   elements.runCancelButton.disabled = isTerminalStatus(liveRun.status);
   elements.runButton.disabled = !isTerminalStatus(liveRun.status) && liveRun.status !== "failed";
+  renderRunFollowUp();
 }
 
 function renderApprovalPanel(approval: LiveRunState["pendingApproval"]): void {

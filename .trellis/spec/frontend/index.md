@@ -23,6 +23,7 @@ This directory contains guidelines for frontend development. Fill in each file w
 | [MCP Hosted Server Surface](./mcp-hosted-server-surface.md) | Settings surface contract for the local Hosted MCP Server command and exported catalog | Active |
 | [Multi Agent Product Surface](./multi-agent-product-surface.md) | Boundary contract for the first read-only frontend surface of future multi-agent governance work | Active |
 | [Remote Bridge Pilot Surface](./remote-bridge-pilot-surface.md) | Settings surface contract for single-channel remote bridge sessions, connect info, and audit trail | Active |
+| [Run Follow Up Surface](./run-follow-up-surface.md) | Runs-side shortcut surface that turns a completed run into an artifact, automation, or Forge recipe | Active |
 | [State Management](./state-management.md) | Local state, global state, server state | To fill |
 | [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | To fill |
 | [Type Safety](./type-safety.md) | Type patterns, validation | To fill |

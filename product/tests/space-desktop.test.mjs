@@ -328,6 +328,13 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(html, /id="automation-list"/);
   assert.match(html, /id="automation-run-list"/);
   assert.match(html, /id="run-history-list"/);
+  assert.match(html, /id="run-follow-up-title"/);
+  assert.match(html, /id="run-follow-up-status"/);
+  assert.match(html, /id="run-follow-up-summary"/);
+  assert.match(html, /id="run-follow-up-save-artifact-button"/);
+  assert.match(html, /id="run-follow-up-create-automation-button"/);
+  assert.match(html, /id="run-follow-up-create-recipe-button"/);
+  assert.match(html, /id="run-follow-up-help"/);
   assert.match(html, /id="artifact-select"/);
   assert.match(html, /id="run-artifact-preview"/);
   assert.match(styles, /\.space-workbench/);
@@ -418,6 +425,10 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(browserSource, /loadLocalSetup/);
   assert.match(browserSource, /importCodexProviderFromLocalSetup/);
   assert.match(browserSource, /resetLocalData\(/);
+  assert.match(browserSource, /renderRunFollowUp/);
+  assert.match(browserSource, /saveFollowUpArtifactFromActiveRun/);
+  assert.match(browserSource, /createFollowUpAutomationFromActiveRun/);
+  assert.match(browserSource, /createForgeRecipeFromActiveRun/);
   assert.match(browserSource, /renderWorkspaceRuntime/);
   assert.match(browserSource, /workspaceRuntimeList/);
   assert.match(browserSource, /renderWorkspaceNativeSurface/);
@@ -451,6 +462,8 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(i18nSource, /"localSetup\.title": "本机配置导入"/);
   assert.match(i18nSource, /"localReset\.title": "Local Data Reset"/);
   assert.match(i18nSource, /"localReset\.title": "本地数据重置"/);
+  assert.match(i18nSource, /"runFollowUp\.title": "Next Actions"/);
+  assert.match(i18nSource, /"runFollowUp\.title": "下一步动作"/);
   assert.match(i18nSource, /"recipe-editor\.binding\.workspace": "Workspace"/);
   assert.match(i18nSource, /"agents\.governance\.title": "Multi-Agent Overview"/);
   assert.match(i18nSource, /"agents\.governance\.title": "多 Agent 总览"/);
@@ -2596,6 +2609,71 @@ test("space desktop V0.9 forge recipes can be created, tested, exported, and rer
 
     const recipeTests = await getJson(`http://127.0.0.1:${appPort}/api/recipe-tests`);
     assert.equal(recipeTests.tests.some((testRun) => testRun.recipeId === created.recipe.id), true);
+  } finally {
+    await appServer.stop();
+    await rm(storageDir, { recursive: true, force: true });
+  }
+});
+
+test("completed runs can drive artifact, automation, and forge follow-up actions", async () => {
+  const storageDir = await mkdtemp(`${tmpdir()}/ai-os-run-follow-up-`);
+  const appPort = await getAvailablePort();
+  const appServer = startSpaceDesktopServer({
+    port: appPort,
+    storageDir,
+  });
+
+  try {
+    await waitForHttp(`http://127.0.0.1:${appPort}/`);
+
+    const workspace = await postJson(`http://127.0.0.1:${appPort}/api/workspaces`, {
+      name: "Run Follow-up Workspace",
+      path: storageDir,
+    });
+    const thread = await postJson(`http://127.0.0.1:${appPort}/api/threads`, {
+      title: "Run Follow-up Thread",
+    });
+
+    const started = await postJson(`http://127.0.0.1:${appPort}/api/runs/start`, {
+      goal: "summarize workspace status for follow-up actions",
+      executorChoice: "mock",
+      timeoutMs: 5000,
+    });
+    await waitForLiveRun(appPort, started.live.runId, (live) => live.status === "completed");
+
+    const artifact = await postJson(`http://127.0.0.1:${appPort}/api/artifacts`, {
+      title: "Run Artifact: summarize workspace status",
+      kind: "report",
+      content: "# Run Follow-up",
+      workspaceId: workspace.workspace.id,
+      threadId: thread.thread.id,
+      runId: started.live.runId,
+      source: "run",
+    });
+    assert.equal(artifact.artifact.runId, started.live.runId);
+    assert.equal(artifact.artifact.source, "run");
+
+    const automation = await postJson(`http://127.0.0.1:${appPort}/api/automations`, {
+      title: "Follow-up: summarize workspace status",
+      kind: "one-off",
+      prompt: "Follow up on the completed run and review its artifacts, risks, and next actions.",
+      intervalMs: 60000,
+    });
+    assert.equal(automation.automation.kind, "one-off");
+
+    const recipe = await postJson(`http://127.0.0.1:${appPort}/api/recipes/from-run`, {
+      runId: started.live.runId,
+    });
+    assert.equal(recipe.recipe.sourceRunId, started.live.runId);
+
+    const artifacts = await getJson(`http://127.0.0.1:${appPort}/api/artifacts`);
+    assert.equal(artifacts.artifacts.some((item) => item.id === artifact.artifact.id && item.runId === started.live.runId), true);
+
+    const automations = await getJson(`http://127.0.0.1:${appPort}/api/automations`);
+    assert.equal(automations.automations.some((item) => item.id === automation.automation.id), true);
+
+    const recipes = await getJson(`http://127.0.0.1:${appPort}/api/recipes`);
+    assert.equal(recipes.recipes.some((item) => item.id === recipe.recipe.id && item.sourceRunId === started.live.runId), true);
   } finally {
     await appServer.stop();
     await rm(storageDir, { recursive: true, force: true });
