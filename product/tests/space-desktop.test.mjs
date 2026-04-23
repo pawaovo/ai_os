@@ -160,6 +160,7 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   const packageJson = JSON.parse(await readFile(resolve(productRoot, "package.json"), "utf8"));
   const packageScript = await readFile(resolve(productRoot, "apps/space-desktop/scripts/package-macos.mjs"), "utf8");
   const packagedSmokeScript = await readFile(resolve(productRoot, "apps/space-desktop/scripts/smoke-packaged-electron.mjs"), "utf8");
+  const realCodexSmokeScript = await readFile(resolve(productRoot, "apps/space-desktop/scripts/smoke-real-codex-success.mjs"), "utf8");
   const prepareElectronPackageScript = await readFile(resolve(productRoot, "apps/space-desktop/scripts/prepare-electron-package-output.mjs"), "utf8");
   const validateElectronConfigScript = await readFile(resolve(productRoot, "apps/space-desktop/scripts/validate-electron-config.mjs"), "utf8");
   const electronMain = await readFile(resolve(productRoot, "apps/space-desktop/electron-app/main.cjs"), "utf8");
@@ -332,6 +333,7 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(html, /id="run-follow-up-title"/);
   assert.match(html, /id="run-follow-up-status"/);
   assert.match(html, /id="run-follow-up-summary"/);
+  assert.match(html, /id="run-follow-up-reuse-inputs-button"/);
   assert.match(html, /id="run-follow-up-save-artifact-button"/);
   assert.match(html, /id="run-follow-up-create-automation-button"/);
   assert.match(html, /id="run-follow-up-create-recipe-button"/);
@@ -376,12 +378,16 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.equal(packageJson.main, "apps/space-desktop/electron-app/main.cjs");
   assert.equal(packageJson.scripts["package:mac"], "npm run package:electron:mac");
   assert.equal(packageJson.scripts["smoke:packaged:mac"], "node ./apps/space-desktop/scripts/smoke-packaged-electron.mjs");
+  assert.equal(packageJson.scripts["smoke:real:codex"], "node ./apps/space-desktop/scripts/smoke-real-codex-success.mjs");
   assert.match(packageJson.scripts["package:electron:mac"], /prepare-electron-package-output\.mjs/);
   assert.equal(packageJson.scripts["package:mac:webkit"], "node ./apps/space-desktop/scripts/package-macos.mjs");
   assert.equal(packageJson.scripts["package:win"], "npm run package:electron:win");
   assert.match(packageScript, /buildRoot,\s*"webkit"/);
   assert.match(packagedSmokeScript, /api\/app\/readiness/);
   assert.match(packagedSmokeScript, /smoke-packaged-electron\.mjs currently supports macOS packaged validation only/);
+  assert.match(realCodexSmokeScript, /api\/recipes\/from-run/);
+  assert.match(realCodexSmokeScript, /waitForTerminalRun/);
+  assert.match(realCodexSmokeScript, /Executor Transcript fallback artifact/);
   assert.match(prepareElectronPackageScript, /build", "AI OS\.app"/);
   assert.match(prepareElectronPackageScript, /Removed stale legacy bundle/);
   assert.equal(electronAppPackage.main, "main.cjs");
@@ -432,6 +438,7 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(browserSource, /importCodexProviderFromLocalSetup/);
   assert.match(browserSource, /resetLocalData\(/);
   assert.match(browserSource, /renderRunFollowUp/);
+  assert.match(browserSource, /useSelectedRunInputs/);
   assert.match(browserSource, /saveFollowUpArtifactFromActiveRun/);
   assert.match(browserSource, /createFollowUpAutomationFromActiveRun/);
   assert.match(browserSource, /createForgeRecipeFromActiveRun/);
@@ -481,6 +488,8 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(i18nSource, /"localReset\.title": "本地数据重置"/);
   assert.match(i18nSource, /"runFollowUp\.title": "Next Actions"/);
   assert.match(i18nSource, /"runFollowUp\.title": "下一步动作"/);
+  assert.match(i18nSource, /"runFollowUp\.button\.reuse": "Reuse Run Inputs"/);
+  assert.match(i18nSource, /"runFollowUp\.button\.reuse": "复用运行输入"/);
   assert.match(i18nSource, /"workspace\.name\.default": "AI OS 工作空间"/);
   assert.match(i18nSource, /"remoteBridge\.title": "远程桥接试点"/);
   assert.match(i18nSource, /"mailbox\.title": "收件箱时间线"/);

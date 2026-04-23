@@ -1,0 +1,55 @@
+{
+  "id": "p11-real-executor-success-loop",
+  "name": "p11-real-executor-success-loop",
+  "title": "P11 Real Executor Success Loop",
+  "description": "",
+  "status": "completed",
+  "dev_type": "fullstack",
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "zzz",
+  "assignee": "zzz",
+  "createdAt": "2026-04-23",
+  "completedAt": "2026-04-23",
+  "branch": "codex/p11-real-codex-success-smoke",
+  "base_branch": "codex/p11-real-executor-success-loop",
+  "worktree_path": null,
+  "current_phase": 6,
+  "next_action": [
+    {
+      "phase": 1,
+      "action": "brainstorm"
+    },
+    {
+      "phase": 2,
+      "action": "research"
+    },
+    {
+      "phase": 3,
+      "action": "implement"
+    },
+    {
+      "phase": 4,
+      "action": "check"
+    },
+    {
+      "phase": 5,
+      "action": "update-spec"
+    },
+    {
+      "phase": 6,
+      "action": "record-session"
+    }
+  ],
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "04-23-p11-real-codex-success-smoke"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "Completed the first real executor success-loop slice: added a run-input reuse action in the Runs follow-up panel and verified the real Codex happy path with automated approval, transcript persistence, recipe creation, packaged smoke, and Electron validation.",
+  "meta": {}
+}

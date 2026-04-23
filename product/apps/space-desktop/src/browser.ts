@@ -789,6 +789,7 @@ const elements = {
   runEventHistory: getElement("run-event-history", HTMLElement),
   runFollowUpStatus: getElement("run-follow-up-status", HTMLElement),
   runFollowUpSummary: getElement("run-follow-up-summary", HTMLElement),
+  runFollowUpReuseInputsButton: getElement("run-follow-up-reuse-inputs-button", HTMLButtonElement),
   runFollowUpSaveArtifactButton: getElement("run-follow-up-save-artifact-button", HTMLButtonElement),
   runFollowUpCreateAutomationButton: getElement("run-follow-up-create-automation-button", HTMLButtonElement),
   runFollowUpCreateRecipeButton: getElement("run-follow-up-create-recipe-button", HTMLButtonElement),
@@ -1179,6 +1180,10 @@ elements.automationList.addEventListener("click", (event) => {
 elements.runHistoryList.addEventListener("click", (event) => {
   const target = event.target instanceof HTMLElement ? event.target.closest<HTMLButtonElement>("button[data-run-id]") : null;
   if (target?.dataset.runId) void openRun(target.dataset.runId);
+});
+
+elements.runFollowUpReuseInputsButton.addEventListener("click", () => {
+  useSelectedRunInputs();
 });
 
 elements.approvalHistoryList.addEventListener("click", (event) => {
@@ -1725,6 +1730,7 @@ function applyStaticTranslations(): void {
 
   setText(".run-follow-up-panel .eyebrow", t("runFollowUp.eyebrow"));
   setText("#run-follow-up-title", t("runFollowUp.title"));
+  elements.runFollowUpReuseInputsButton.textContent = t("runFollowUp.button.reuse");
   elements.runFollowUpSaveArtifactButton.textContent = t("runFollowUp.button.artifact");
   elements.runFollowUpCreateAutomationButton.textContent = t("runFollowUp.button.automation");
   elements.runFollowUpCreateRecipeButton.textContent = t("runFollowUp.button.recipe");
@@ -4945,10 +4951,31 @@ function getActiveRunSummary(): RunSummary | undefined {
   return state.runs.find((run) => run.id === state.activeRunId);
 }
 
+function useSelectedRunInputs(): void {
+  const run = getActiveRunSummary();
+  if (!run) {
+    renderRunFollowUp();
+    return;
+  }
+
+  elements.input.value = run.goal;
+  elements.executor.value = run.executorChoice;
+  if (state.liveRun?.runId === run.id && typeof state.liveRun.timeoutMs === "number") {
+    elements.executorTimeoutInput.value = String(state.liveRun.timeoutMs);
+  }
+  elements.runSummary.textContent = t("runFollowUp.reused", {
+    goal: truncate(run.goal, 48),
+    executor: localizeExecutorChoice(run.executorChoice),
+  });
+  elements.statusPill.textContent = translatedToken("idle");
+  elements.statusPill.dataset.phase = "idle";
+}
+
 function renderRunFollowUp(): void {
   const run = getActiveRunSummary();
   const liveRun = state.liveRun?.runId === run?.id ? state.liveRun : undefined;
   const ready = Boolean(run && liveRun && run.status === "completed");
+  elements.runFollowUpReuseInputsButton.disabled = !run;
   elements.runFollowUpSaveArtifactButton.disabled = !ready;
   elements.runFollowUpCreateAutomationButton.disabled = !ready;
   elements.runFollowUpCreateRecipeButton.disabled = !ready;

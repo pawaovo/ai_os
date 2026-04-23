@@ -18,6 +18,7 @@
 - `run-follow-up-title`
 - `run-follow-up-status`
 - `run-follow-up-summary`
+- `run-follow-up-reuse-inputs-button`
 - `run-follow-up-save-artifact-button`
 - `run-follow-up-create-automation-button`
 - `run-follow-up-create-recipe-button`
@@ -34,6 +35,7 @@ POST /api/recipes/from-run
 ### 3. Contracts
 
 - The follow-up surface must stay additive to the existing Runs page.
+- The follow-up surface may help the user reuse the selected run's goal and executor inputs without inventing a second run form.
 - The follow-up surface must only enable its action buttons for a completed selected run.
 - The follow-up surface must not create a second run-detail model; it must reuse the existing selected run state.
 - Saving a follow-up artifact must preserve `runId` linkage so the artifact remains traceable to the originating run.
@@ -48,6 +50,7 @@ POST /api/recipes/from-run
 | No run selected | panel shows empty-state copy and actions stay disabled | renderer behavior |
 | Selected run is non-terminal | panel shows waiting copy and actions stay disabled | renderer behavior |
 | Selected run is completed | artifact / automation / recipe buttons become enabled | manual UI smoke |
+| Selected run exists | reuse-input button repopulates the run form with the selected goal and executor | renderer behavior + manual UI smoke |
 | Artifact action succeeds | Artifacts page can open the newly created follow-up artifact | manual UI smoke + `space-desktop.test.mjs` |
 | Automation action succeeds | Automations page reflects the new follow-up automation | `space-desktop.test.mjs` |
 | Recipe action succeeds | Forge page reflects the newly created recipe | `space-desktop.test.mjs` |
@@ -57,6 +60,7 @@ POST /api/recipes/from-run
 #### Good
 
 - A user can finish a run and immediately turn it into persistent follow-up work.
+- A user can take an older run and quickly reuse its inputs for another attempt.
 - Follow-up actions reuse existing product routes and data models.
 
 #### Base
@@ -75,6 +79,7 @@ POST /api/recipes/from-run
   - assert browser source references render/action helpers
   - assert bilingual follow-up keys exist
   - assert a completed run can drive artifact, automation, and recipe creation
+  - assert the reuse-input button is present and wired
 - Packaged smoke:
   - assert Runs page shows the follow-up panel
   - assert a completed run leaves the panel in an enabled state

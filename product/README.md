@@ -128,6 +128,13 @@ cd product
 AI_SPACE_EXECUTOR_TIMEOUT_MS=120000 npm run desktop:dev
 ```
 
+Run a real local Codex success-path smoke with your installed Codex CLI:
+
+```bash
+cd product
+npm run smoke:real:codex
+```
+
 ## Build The Electron Desktop App
 
 ```bash
@@ -160,6 +167,13 @@ npm run package:win
 ```
 
 Run `npm run validate:electron` on any host to statically verify the macOS and Windows Electron packaging configuration. Production distribution still needs signing, notarization on macOS, Windows code signing, and auto-update.
+
+You can also run a packaged macOS smoke check after packaging:
+
+```bash
+cd product
+npm run smoke:packaged:mac
+```
 
 ## Current Limits
 

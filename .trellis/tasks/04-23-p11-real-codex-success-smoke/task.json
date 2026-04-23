@@ -1,0 +1,53 @@
+{
+  "id": "p11-real-codex-success-smoke",
+  "name": "p11-real-codex-success-smoke",
+  "title": "P11 Real Codex Success Smoke",
+  "description": "",
+  "status": "completed",
+  "dev_type": "fullstack",
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "zzz",
+  "assignee": "zzz",
+  "createdAt": "2026-04-23",
+  "completedAt": "2026-04-23",
+  "branch": "codex/p11-real-codex-success-smoke",
+  "base_branch": "codex/p11-real-codex-success-smoke",
+  "worktree_path": null,
+  "current_phase": 6,
+  "next_action": [
+    {
+      "phase": 1,
+      "action": "brainstorm"
+    },
+    {
+      "phase": 2,
+      "action": "research"
+    },
+    {
+      "phase": 3,
+      "action": "implement"
+    },
+    {
+      "phase": 4,
+      "action": "check"
+    },
+    {
+      "phase": 5,
+      "action": "update-spec"
+    },
+    {
+      "phase": 6,
+      "action": "record-session"
+    }
+  ],
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "04-23-p11-real-executor-success-loop",
+  "relatedFiles": [],
+  "notes": "Completed the real Codex success-path smoke: added a dedicated smoke:real:codex command that verifies approval, completed status, Executor Transcript artifact persistence, and Forge recipe source-run linkage through the live product APIs.",
+  "meta": {}
+}
