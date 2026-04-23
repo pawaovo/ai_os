@@ -58,6 +58,7 @@ interface AppReadinessSummary {
 - `Settings` must expose a user-selectable language control with English and Chinese options.
 - Switching language must update both static page copy and major dynamic UI copy without requiring a manual page rebuild.
 - Language switching must also update user-facing dynamic metadata, including executor labels, approval categories, capability permissions, artifact source/kind labels, and untouched default help text for panels that already loaded data.
+- Language switching must also update system-owned default names and known generated labels when the renderer can identify them safely, such as the default workspace name, imported-from-Codex provider names, remote bridge default principal labels, and common generated run/session titles.
 - The Node Runtime card must render:
   - `"Electron provides the packaged desktop runtime."` when `nodeRequired === false`
   - `"Node must be available on PATH when running the local server outside Electron."` when `nodeRequired === true`
@@ -71,6 +72,7 @@ interface AppReadinessSummary {
 | `/api/app/readiness` fetch fails | renderer shows load failure message instead of crashing | `renderAppReadiness()` fallback path |
 | Saved language exists in local settings | page reload restores the saved language | bilingual smoke with `/api/settings/language` |
 | Dynamic lists or panel help loaded before language switch stay in the old language | mixed-language Settings, Executors, Capabilities, or Automations panels after switching language | renderer smoke after toggling `#language-select` |
+| System-owned default labels remain English after switching to Chinese | mixed-language workspace/provider/remote-bridge labels even though page chrome switched | packaged App smoke in Chinese mode |
 | Install path changes on backend only | regression test fails because docs/UI strings drift | `space-desktop.test.mjs` |
 | Windows package command exists on backend but is not rendered | install panel hides part of the documented cross-platform story | `space-desktop.test.mjs` source assertion and manual UI smoke |
 | `nodeRequired` toggles but UI copy does not | readiness install card shows wrong runtime expectation | manual smoke in Settings |
@@ -84,6 +86,7 @@ interface AppReadinessSummary {
 - Install panel also surfaces the Windows packaging command.
 - Settings page exposes a language selector and Chinese mode re-renders page copy.
 - Chinese mode also re-renders dynamic status/help text instead of leaving executor, approval, or capability metadata in English.
+- Chinese mode also re-renders known system-generated labels such as the default workspace name, imported provider label, remote bridge default principal, and common generated session titles.
 - Settings page still renders after navigation from Start.
 - Local install help text says Electron is the product shell.
 
@@ -104,6 +107,7 @@ interface AppReadinessSummary {
   - `package:mac` and `package:win` scripts point to Electron commands.
   - Windows packaging guidance is surfaced by the renderer code.
   - BrowserWindow security flags remain locked down.
+  - Known system-generated labels have localization coverage in both `i18n.ts` and `browser.ts`.
 - Packaged app smoke must confirm:
   - Start page renders readiness/install cards.
   - Settings page renders the Electron install instructions after navigation.

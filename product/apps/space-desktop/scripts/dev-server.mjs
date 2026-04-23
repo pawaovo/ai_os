@@ -516,6 +516,20 @@ function serverT(language, key, variables = {}) {
   return translateApp(language, key, variables);
 }
 
+function localizeSystemOwnedText(language, text) {
+  if (typeof text !== "string" || text.trim().length === 0) return text;
+  if (text === "AI OS Workspace") return serverT(language, "workspace.name.default");
+  if (text === "Remote Pilot") return serverT(language, "remoteBridge.principalLabel.default");
+  const importedFromCodexMatch = /^Imported from Codex(?: \((.+)\))?$/.exec(text);
+  if (importedFromCodexMatch) {
+    const provider = importedFromCodexMatch[1]?.trim();
+    return provider
+      ? serverT(language, "dynamic.system.importedFromCodexNamed", { provider })
+      : serverT(language, "dynamic.system.importedFromCodex");
+  }
+  return text;
+}
+
 async function handleAppReadiness(request, response) {
   const language = requestLanguage(request);
   writeJson(response, 200, await createAppReadinessSummary(language));
@@ -762,7 +776,7 @@ async function createAppReadinessSummary(language) {
       ready: Boolean(activeWorkspace),
       readyDetail: activeWorkspace
         ? serverT(language, "server.readiness.workspace.ready", {
-            name: activeWorkspace.name,
+            name: localizeSystemOwnedText(language, activeWorkspace.name),
             path: activeWorkspace.path ? ` / ${activeWorkspace.path}` : "",
             trust: serverT(language, `workspace.trust.${activeWorkspace.trustLevel}`),
           })
@@ -776,7 +790,7 @@ async function createAppReadinessSummary(language) {
       ready: Boolean(activeProvider),
       readyDetail: activeProvider
         ? serverT(language, "server.readiness.provider.ready", {
-            name: activeProvider.name,
+            name: localizeSystemOwnedText(language, activeProvider.name),
             protocol: serverT(language, `provider.protocol.${activeProvider.protocol}`),
             modelId: activeProvider.modelId,
           })
@@ -1003,7 +1017,9 @@ async function createMultiAgentGovernanceSummary(language) {
 }
 
 function createMultiAgentGovernanceSummaryText(language, input) {
-  const workspaceName = input.activeWorkspace?.name ?? serverT(language, "dynamic.workspace.noneActive");
+  const workspaceName = input.activeWorkspace?.name
+    ? localizeSystemOwnedText(language, input.activeWorkspace.name)
+    : serverT(language, "dynamic.workspace.noneActive");
   switch (input.status) {
     case "awaiting-approval":
       return serverT(language, "server.multiAgent.summary.awaitingApproval", {
@@ -1107,7 +1123,7 @@ function createMultiAgentGovernanceAttentionItems(language, input) {
       title: serverT(language, "server.multiAgent.attention.remoteSessions.title"),
       detail: serverT(language, "server.multiAgent.attention.remoteSessions.detail", {
         count: input.activeRemoteSessions.length,
-        principal: session.principalLabel,
+        principal: localizeSystemOwnedText(language, session.principalLabel),
       }),
       at: session.lastSeenAt ?? session.updatedAt,
       targetPage: "settings",
@@ -1157,7 +1173,7 @@ function createGovernanceActivityFromRemoteEvent(language, session, event) {
     status: session.status,
     title: serverT(language, `remoteBridge.event.${event.type}`),
     detail: [
-      session.principalLabel,
+      localizeSystemOwnedText(language, session.principalLabel),
       ...(event.runId ? [truncateText(event.runId, 18)] : []),
       ...(event.approvalId ? [truncateText(event.approvalId, 18)] : []),
     ].join(" / "),
@@ -1177,7 +1193,7 @@ function createGovernanceActivityFromMailbox(language, item) {
     title: item.title,
     detail: [
       serverT(language, `mailbox.flow.${item.flowKind}`),
-      `${item.senderLabel} -> ${item.recipientLabel}`,
+      `${localizeSystemOwnedText(language, item.senderLabel)} -> ${localizeSystemOwnedText(language, item.recipientLabel)}`,
     ].join(" / "),
     at: item.updatedAt ?? item.createdAt,
     targetPage: item.runId ? "runs" : "agents",

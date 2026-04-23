@@ -1386,6 +1386,7 @@ function applyStaticTranslations(): void {
   setText("#workspace-title", t("workspace.title"));
   setControlLabel(elements.workspaceSelect, t("workspace.saved"));
   setControlLabel(elements.workspaceName, t("workspace.name"));
+  syncLocalizedInputValue(elements.workspaceName, "workspace.name.default");
   setControlLabel(elements.workspacePath, t("workspace.path"));
   setPlaceholder(elements.workspacePath, t("workspace.path.placeholder"));
   setControlLabel(elements.workspaceTrustLevel, t("workspace.trust"));
@@ -1983,7 +1984,7 @@ function renderLocalSetup(): void {
 
   elements.localSetupHelp.textContent = providerImport?.available
     ? t("localSetup.help.importReady", {
-        name: providerImport.name ?? t("dynamic.none"),
+        name: providerImport.name ? localizeKnownText(providerImport.name) : t("dynamic.none"),
         modelId: providerImport.modelId ?? t("dynamic.none"),
       })
     : t("localSetup.help.default");
@@ -2044,7 +2045,7 @@ function describeLocalSetupProviderImport(providerImport?: LocalSetupProviderImp
   if (!providerImport) return t("localSetup.providerImport.unavailable");
   if (!providerImport.available) return providerImport.detail ? localizeKnownText(providerImport.detail) : t("localSetup.providerImport.unavailable");
   return [
-    providerImport.name ?? t("dynamic.none"),
+    providerImport.name ? localizeKnownText(providerImport.name) : t("dynamic.none"),
     providerImport.protocol ? localizeProviderProtocol(providerImport.protocol) : t("dynamic.none"),
     providerImport.modelId ?? t("dynamic.none"),
     providerImport.apiKeyPreview ?? t("dynamic.none"),
@@ -2070,11 +2071,11 @@ async function importCodexProviderFromLocalSetup(): Promise<void> {
     renderLocalDataReset();
     setActivePage("providers");
     elements.localSetupHelp.textContent = t("localSetup.imported", {
-      name: payload.provider?.name ?? t("dynamic.none"),
+      name: payload.provider?.name ? localizeKnownText(payload.provider.name) : t("dynamic.none"),
       preview: payload.provider?.apiKeyPreview ?? t("dynamic.none"),
     });
     elements.providerHelp.textContent = t("localSetup.imported", {
-      name: payload.provider?.name ?? t("dynamic.none"),
+      name: payload.provider?.name ? localizeKnownText(payload.provider.name) : t("dynamic.none"),
       preview: payload.provider?.apiKeyPreview ?? t("dynamic.none"),
     });
     elements.providerHelp.dataset.dynamic = "true";
@@ -2312,7 +2313,7 @@ async function createWorkspaceFromForm(): Promise<void> {
     });
     state.activeWorkspaceId = payload.workspace.id;
     state.activeThreadId = undefined;
-    elements.workspaceHelp.textContent = t("dynamic.workspace.created", { name: payload.workspace.name });
+    elements.workspaceHelp.textContent = t("dynamic.workspace.created", { name: localizeKnownText(payload.workspace.name) });
     await refreshWorkspaceScopedData();
   } catch (error) {
     elements.workspaceHelp.textContent = errorToMessage(error, t("dynamic.workspace.createFailed"));
@@ -2362,7 +2363,7 @@ async function updateSelectedWorkspace(): Promise<void> {
         }),
       },
     );
-    elements.workspaceHelp.textContent = t("dynamic.workspace.updated", { name: payload.workspace.name });
+    elements.workspaceHelp.textContent = t("dynamic.workspace.updated", { name: localizeKnownText(payload.workspace.name) });
     await refreshWorkspaceScopedData();
   } catch (error) {
     elements.workspaceHelp.textContent = errorToMessage(error, t("dynamic.workspace.updateFailed"));
@@ -2547,7 +2548,7 @@ function renderRemoteBridgePilot(): void {
       ? pilot.sessions.map((session) => createActionListItem({
           id: session.id,
           idName: "remoteBridgeSessionId",
-          title: session.principalLabel,
+          title: localizeKnownText(session.principalLabel),
           meta: [
             formatRemoteBridgeWorkspace(session),
             localizeRemoteBridgeChannelKind(session.channelKind),
@@ -2598,7 +2599,10 @@ function createMailboxListItem(item: MailboxItemSummary): HTMLLIElement {
     button.disabled = true;
   }
   title.className = "item-title";
-  title.textContent = `${item.title} / ${item.senderLabel} -> ${item.recipientLabel}`;
+  title.textContent = [
+    localizeKnownText(item.title),
+    `${localizeKnownText(item.senderLabel)} -> ${localizeKnownText(item.recipientLabel)}`,
+  ].join(" / ");
   meta.className = "item-meta";
   meta.textContent = [
     translateKeyOrFallback(`mailbox.flow.${item.flowKind}`, item.flowKind),
@@ -2640,12 +2644,14 @@ function getActiveRemoteBridgeSession(): RemoteBridgeSessionSummary | undefined 
 
 function formatRemoteBridgeWorkspace(session: RemoteBridgeSessionSummary): string {
   const workspaceName = session.workspaceName?.trim();
-  return workspaceName ? `${workspaceName} / ${session.workspaceId}` : session.workspaceId;
+  return workspaceName ? `${localizeKnownText(workspaceName)} / ${session.workspaceId}` : session.workspaceId;
 }
 
 function renderRemoteBridgeSessionDetail(session?: RemoteBridgeSessionSummary): void {
   elements.remoteBridgeSessionId.textContent = session?.id ?? t("dynamic.none");
-  elements.remoteBridgeSessionPrincipal.textContent = session?.principalLabel ?? t("dynamic.none");
+  elements.remoteBridgeSessionPrincipal.textContent = session?.principalLabel
+    ? localizeKnownText(session.principalLabel)
+    : t("dynamic.none");
   elements.remoteBridgeSessionWorkspace.textContent = session ? formatRemoteBridgeWorkspace(session) : t("dynamic.none");
   elements.remoteBridgeSessionChannel.textContent = session
     ? localizeRemoteBridgeChannelKind(session.channelKind)
@@ -2664,7 +2670,7 @@ function renderRemoteBridgeConnectInfo(): void {
 
   elements.remoteBridgeConnect.replaceChildren(
     createEventListItem(t("remoteBridge.connect.sessionId"), state.remoteBridgeConnect.sessionId),
-    createEventListItem(t("remoteBridge.connect.principal"), state.remoteBridgeConnect.principalLabel),
+    createEventListItem(t("remoteBridge.connect.principal"), localizeKnownText(state.remoteBridgeConnect.principalLabel)),
     createEventListItem(t("remoteBridge.connect.token"), state.remoteBridgeConnect.bearerToken),
     createEventListItem(t("remoteBridge.connect.runStartUrl"), state.remoteBridgeConnect.runStartUrl),
     createEventListItem(t("remoteBridge.connect.runLiveUrl"), state.remoteBridgeConnect.runLiveUrlTemplate),
@@ -2725,7 +2731,7 @@ function describeRemoteBridgeHelp(activeSession?: RemoteBridgeSessionSummary): s
   const parts = [detail ? localizeKnownText(detail) : t("remoteBridge.help.default")];
   if (activeSession) {
     parts.push(t("remoteBridge.help.detail", {
-      principal: activeSession.principalLabel,
+      principal: localizeKnownText(activeSession.principalLabel),
       workspace: formatRemoteBridgeWorkspace(activeSession),
     }));
   }
@@ -2739,7 +2745,7 @@ function renderWorkspaces(): void {
   const activeWorkspace = getActiveWorkspace();
   const options = [
     createOption("", state.workspaces.length > 0 ? t("dynamic.workspace.selectOption") : t("dynamic.workspace.noneSaved")),
-    ...state.workspaces.map((workspace) => createOption(workspace.id, workspace.name)),
+    ...state.workspaces.map((workspace) => createOption(workspace.id, localizeKnownText(workspace.name))),
   ];
 
   elements.workspaceSelect.replaceChildren(...options);
@@ -2747,10 +2753,10 @@ function renderWorkspaces(): void {
 
   if (activeWorkspace) {
     fillWorkspaceForm(activeWorkspace);
-    elements.activeWorkspaceLabel.textContent = activeWorkspace.name;
+    elements.activeWorkspaceLabel.textContent = localizeKnownText(activeWorkspace.name);
     elements.activeWorkspaceLabel.dataset.phase = "completed";
     elements.workspaceHelp.textContent = t("dynamic.workspace.active", {
-      name: activeWorkspace.name,
+      name: localizeKnownText(activeWorkspace.name),
       path: activeWorkspace.path ? ` / ${activeWorkspace.path}` : "",
       trustLabel: localizeWorkspaceTrustLevel(activeWorkspace.trustLevel),
     });
@@ -2805,7 +2811,7 @@ function renderWorkspaceRuntime(workspace: WorkspaceSummary | undefined): void {
       t("dynamic.workspaceRuntime.artifacts.meta", {
         count: String(runtime.counts.artifacts),
         latest: runtime.latestArtifact
-          ? runtime.latestArtifact.title
+          ? localizeKnownText(runtime.latestArtifact.title)
           : t("dynamic.workspaceRuntime.latestArtifact.none"),
       }),
       runtime.counts.artifacts > 0 ? "completed" : "idle",
@@ -2866,7 +2872,7 @@ function renderWorkspaceNativeSurface(workspace: WorkspaceSummary | undefined): 
 
   if (runtime.artifactPreview) {
     elements.workspaceArtifactSurfaceMeta.textContent = t("workspace.surface.artifact.meta", {
-      title: runtime.artifactPreview.title,
+      title: localizeKnownText(runtime.artifactPreview.title),
       kind: localizeArtifactKind(runtime.artifactPreview.kind),
       source: localizeArtifactSource(runtime.artifactPreview.source),
       updatedAt: formatDate(runtime.artifactPreview.updatedAt),
@@ -2891,7 +2897,7 @@ function renderWorkspaceNativeSurface(workspace: WorkspaceSummary | undefined): 
 }
 
 function fillWorkspaceForm(workspace: WorkspaceSummary): void {
-  elements.workspaceName.value = workspace.name;
+  elements.workspaceName.value = localizeKnownText(workspace.name);
   elements.workspacePath.value = workspace.path ?? "";
   elements.workspaceTrustLevel.value = workspace.trustLevel;
 }
@@ -2966,7 +2972,7 @@ function renderAgentRuntimes(): void {
 
   elements.agentRuntimeList.replaceChildren(
     ...state.agentRuntimes.map((runtime) => createStaticActionListItem(
-      `${translateKeyOrFallback(`agentRuntime.kind.${runtime.kind}`, runtime.kind)} / ${runtime.title}`,
+      `${translateKeyOrFallback(`agentRuntime.kind.${runtime.kind}`, runtime.kind)} / ${localizeKnownText(runtime.title)}`,
       describeAgentRuntime(runtime),
       runtime.status,
     )),
@@ -3066,7 +3072,7 @@ function createMultiAgentGovernanceListItem(item: MultiAgentGovernanceItem): HTM
   if (item.approvalId) button.dataset.governanceApprovalId = item.approvalId;
 
   title.className = "item-title";
-  title.textContent = item.title;
+  title.textContent = localizeKnownText(item.title);
   meta.className = "item-meta";
   meta.textContent = [
     localizeGovernanceKind(item.kind),
@@ -3481,7 +3487,7 @@ async function saveMcpConfigFromForm(): Promise<void> {
 function describeAgentRuntime(runtime: AgentRuntimeSummary): string {
   if (runtime.kind === "mcp-client" && runtime.mcpRuntime) {
     const parts = [
-      runtime.detail,
+      localizeKnownText(runtime.detail),
       formatMcpRuntimeServerMeta(runtime.mcpRuntime),
       formatMcpRuntimeToolsMeta(runtime.mcpRuntime),
       formatMcpRuntimeProbedAtMeta(runtime.mcpRuntime),
@@ -3492,11 +3498,11 @@ function describeAgentRuntime(runtime: AgentRuntimeSummary): string {
   if (runtime.compatibility) {
     return t("agentRuntime.meta.compatibility", {
       transport: translateKeyOrFallback(`dynamic.executor.transport.${runtime.compatibility.transport}`, runtime.compatibility.transport),
-      detail: runtime.detail,
+      detail: localizeKnownText(runtime.detail),
     });
   }
 
-  return runtime.detail;
+  return localizeKnownText(runtime.detail);
 }
 
 function renderHostedMcpServer(): void {
@@ -3525,10 +3531,10 @@ function renderHostedMcpServer(): void {
     ...(
       hostedServer.tools.length > 0
         ? hostedServer.tools.map((tool) => createStaticActionListItem(
-            tool.title?.trim() || tool.name,
+            localizeKnownText(tool.title?.trim() || tool.name),
             [
-              tool.title?.trim() && tool.title.trim() !== tool.name ? tool.name : "",
-              tool.description?.trim() ?? "",
+              tool.title?.trim() && tool.title.trim() !== tool.name ? localizeKnownText(tool.name) : "",
+              tool.description?.trim() ? localizeKnownText(tool.description.trim()) : "",
             ].filter(Boolean).join(" / ") || t("dynamic.none"),
             "configured",
           ))
@@ -3539,10 +3545,10 @@ function renderHostedMcpServer(): void {
     ...(
       hostedServer.resources.length > 0
         ? hostedServer.resources.map((resource) => createStaticActionListItem(
-            resource.title?.trim() || resource.uri,
+            localizeKnownText(resource.title?.trim() || resource.uri),
             [
-              resource.title?.trim() && resource.title.trim() !== resource.uri ? resource.uri : "",
-              resource.description?.trim() ?? "",
+              resource.title?.trim() && resource.title.trim() !== resource.uri ? localizeKnownText(resource.uri) : "",
+              resource.description?.trim() ? localizeKnownText(resource.description.trim()) : "",
             ].filter(Boolean).join(" / ") || t("dynamic.none"),
             "configured",
           ))
@@ -3633,7 +3639,10 @@ async function loadProviders(): Promise<void> {
 
     elements.providerSelect.replaceChildren(
       createOption("", payload.providers.length > 0 ? t("dynamic.provider.selectOption") : t("dynamic.provider.noneSaved")),
-      ...payload.providers.map((provider) => createOption(provider.id ?? "", `${provider.name} / ${provider.modelId}`)),
+      ...payload.providers.map((provider) => createOption(
+        provider.id ?? "",
+        `${localizeKnownText(provider.name)} / ${provider.modelId}`,
+      )),
     );
     elements.providerSelect.value = activeProvider?.id ?? "";
 
@@ -3666,13 +3675,13 @@ async function selectProviderFromList(): Promise<void> {
   await saveModelSelection(provider.id, provider.modelId);
   elements.providerStatus.textContent = translatedToken("configured");
   elements.providerStatus.dataset.phase = "completed";
-  elements.providerHelp.textContent = t("dynamic.provider.active", { name: provider.name });
+  elements.providerHelp.textContent = t("dynamic.provider.active", { name: localizeKnownText(provider.name) });
   elements.providerHelp.dataset.dynamic = "true";
   await loadProviders();
 }
 
 function fillProviderForm(provider: ProviderSummary): void {
-  elements.providerName.value = provider.name;
+  elements.providerName.value = localizeKnownText(provider.name);
   elements.providerProtocol.value = provider.protocol;
   elements.providerBaseUrl.value = provider.baseUrl;
   elements.providerModel.value = provider.modelId;
@@ -4213,7 +4222,7 @@ async function saveArtifactFromForm(): Promise<void> {
     });
     elements.artifactTitleInput.value = "";
     elements.artifactContent.value = "";
-    elements.artifactHelp.textContent = t("dynamic.artifact.saved", { title: artifact.title });
+    elements.artifactHelp.textContent = t("dynamic.artifact.saved", { title: localizeKnownText(artifact.title) });
   } catch (error) {
     elements.artifactHelp.textContent = errorToMessage(error, t("dynamic.artifact.saveFailed"));
   } finally {
@@ -4259,7 +4268,10 @@ async function openArtifactSourceRun(): Promise<void> {
 function renderArtifactLibrary(): void {
   elements.artifactSelect.replaceChildren(
     createOption("", state.artifacts.length > 0 ? t("dynamic.artifact.selectOption") : t("dynamic.artifact.noneSaved")),
-    ...state.artifacts.map((artifact) => createOption(artifact.id, `${artifact.title} / ${localizeArtifactSource(artifact.source)}`)),
+    ...state.artifacts.map((artifact) => createOption(
+      artifact.id,
+      `${localizeKnownText(artifact.title)} / ${localizeArtifactSource(artifact.source)}`,
+    )),
   );
   elements.artifactSelect.value = state.activeArtifactId ?? "";
 
@@ -4510,7 +4522,7 @@ function renderCapabilities(): void {
     ...state.capabilities.map((capability) => createActionListItem({
       id: capability.id,
       idName: "capabilityId",
-      title: capability.title,
+      title: localizeKnownText(capability.title),
       meta: `${localizeCapabilityKind(capability.kind)} / ${translatedToken(capability.enabled ? "enabled" : "disabled")} / ${t("dynamic.capability.permissionCount", { count: capability.permissions.length })}`,
       pressed: capability.id === activeCapability?.id,
       source: capability.enabled ? "completed" : "paused",
@@ -5284,7 +5296,9 @@ function renderRunOutput(nextState: SpaceDemoState): void {
   }
 
   elements.runArtifactList.replaceChildren(
-    ...nextState.artifacts.map((artifact) => createListItem(`${artifact.title} (${localizeArtifactKind(artifact.kind)})`)),
+    ...nextState.artifacts.map((artifact) => createListItem(
+      `${localizeKnownText(artifact.title)} (${localizeArtifactKind(artifact.kind)})`,
+    )),
   );
   elements.runArtifactPreview.textContent =
     nextState.artifactContents[nextState.artifacts[0]?.id ?? ""] ?? t("dynamic.artifact.noPreview");
@@ -5312,11 +5326,11 @@ function createReadinessListItem(input: AppReadinessCheck): HTMLLIElement {
   button.type = "button";
   button.className = "list-button readiness-list-item";
   button.dataset.readinessTarget = input.targetPage;
-  button.setAttribute("aria-label", `${t("artifact.button.open")} ${localizePageTarget(input.targetPage)} / ${input.title}`);
+  button.setAttribute("aria-label", `${t("artifact.button.open")} ${localizePageTarget(input.targetPage)} / ${localizeKnownText(input.title)}`);
   title.className = "item-title";
-  title.textContent = input.title;
+  title.textContent = localizeKnownText(input.title);
   meta.className = "item-meta";
-  meta.textContent = input.detail;
+  meta.textContent = localizeKnownText(input.detail);
   badge.className = "source-badge";
   badge.dataset.source = input.status;
   badge.textContent = translatedToken(input.status);
@@ -5345,9 +5359,9 @@ function createActionListItem(input: {
   button.dataset[input.idName] = input.id;
   button.setAttribute("aria-pressed", input.pressed ? "true" : "false");
   title.className = "item-title";
-  title.textContent = input.title;
+  title.textContent = localizeKnownText(input.title);
   meta.className = "item-meta";
-  meta.textContent = input.meta;
+  meta.textContent = localizeKnownText(input.meta);
   badge.className = "source-badge";
   badge.dataset.source = input.source;
   badge.textContent = translatedToken(input.source);
@@ -5364,9 +5378,9 @@ function createStaticActionListItem(titleText: string, metaText: string, source:
   const badge = document.createElement("span");
 
   title.className = "item-title";
-  title.textContent = titleText;
+  title.textContent = localizeKnownText(titleText);
   meta.className = "item-meta";
-  meta.textContent = metaText;
+  meta.textContent = localizeKnownText(metaText);
   badge.className = "source-badge";
   badge.dataset.source = source;
   badge.textContent = translatedToken(source);
@@ -5377,7 +5391,7 @@ function createStaticActionListItem(titleText: string, metaText: string, source:
 
 function createListItem(text: string): HTMLLIElement {
   const item = document.createElement("li");
-  item.textContent = text;
+  item.textContent = localizeKnownText(text);
   return item;
 }
 
@@ -5458,6 +5472,100 @@ function errorToMessage(error: unknown, fallback: string): string {
 function localizeKnownText(text: string): string {
   if (translatedValuesForKey("dynamic.chat.initialPrompt").includes(text)) return t("dynamic.chat.initialPrompt");
   if (text === "Personal AI OS") return t("hero.title");
+  if (text === "AI OS Workspace") return t("workspace.name.default");
+  if (text === "Remote Pilot") return t("remoteBridge.principalLabel.default");
+  const importedFromCodexMatch = /^Imported from Codex(?: \((.+)\))?$/.exec(text);
+  if (importedFromCodexMatch) {
+    const provider = importedFromCodexMatch[1]?.trim();
+    return provider
+      ? t("dynamic.system.importedFromCodexNamed", { provider })
+      : t("dynamic.system.importedFromCodex");
+  }
+  if (text === "Workspace Summary") return t("dynamic.system.workspaceSummaryTitle");
+  if (text === "# Workspace Summary") return `# ${t("dynamic.system.workspaceSummaryTitle")}`;
+  if (text === "Memory Brief") return t("dynamic.system.memoryBriefTitle");
+  if (text === "# Memory Brief") return `# ${t("dynamic.system.memoryBriefTitle")}`;
+  if (text === "Automation Overview") return t("dynamic.system.automationOverviewTitle");
+  if (text === "# Automation Overview") return `# ${t("dynamic.system.automationOverviewTitle")}`;
+  if (text === "MCP Client") return t("dynamic.system.mcpClientTitle");
+  if (text === "Memory Context") return t("dynamic.system.memoryContextTitle");
+  if (text === "Pre-run Approval") return t("dynamic.system.preRunApprovalTitle");
+  if (text === "Executor Run") return t("dynamic.system.executorRunTitle");
+  if (text === "Runtime Approval") return t("dynamic.system.runtimeApprovalTitle");
+  if (text === "Persist Artifacts") return t("dynamic.system.persistArtifactsTitle");
+  if (text === "Executor Transcript") return t("dynamic.system.executorTranscriptTitle");
+  if (text === "# Executor Transcript") return `# ${t("dynamic.system.executorTranscriptTitle")}`;
+  if (text === "Workspace Diff Summary") return t("dynamic.system.workspaceDiffSummaryTitle");
+  if (text === "# Workspace Diff Summary") return `# ${t("dynamic.system.workspaceDiffSummaryTitle")}`;
+  if (text === "Remote Session Created") return t("dynamic.system.remoteSessionCreatedTitle");
+  if (text === "Remote Run Started") return t("dynamic.system.remoteRunStartedTitle");
+  if (text === "Remote Approval Resolved") return t("dynamic.system.remoteApprovalResolvedTitle");
+  const remoteSessionCreatedMatch = /^Remote bridge session created for (.+)\.$/.exec(text);
+  if (remoteSessionCreatedMatch) {
+    return t("dynamic.system.remoteSessionCreatedBody", {
+      principal: localizeKnownText(remoteSessionCreatedMatch[1] ?? "").trim(),
+    });
+  }
+  const remoteRunStartedMatch = /^(.+) started remote bridge run (.+)\.$/.exec(text);
+  if (remoteRunStartedMatch) {
+    return t("dynamic.system.remoteRunStartedBody", {
+      principal: localizeKnownText(remoteRunStartedMatch[1] ?? "").trim(),
+      id: remoteRunStartedMatch[2] ?? "",
+    });
+  }
+  const remoteApprovalResolvedMatch = /^(.+) resolved remote approval with decision (.+)\.$/.exec(text);
+  if (remoteApprovalResolvedMatch) {
+    return t("dynamic.system.remoteApprovalResolvedBody", {
+      principal: localizeKnownText(remoteApprovalResolvedMatch[1] ?? "").trim(),
+      decision: translatedToken((remoteApprovalResolvedMatch[2] ?? "").trim().toLowerCase()),
+    });
+  }
+  const memoryUsedMatch = /^Memory used: (.+)$/.exec(text);
+  if (memoryUsedMatch) {
+    return t("dynamic.system.memoryUsed", {
+      titles: memoryUsedMatch[1] ?? "",
+    });
+  }
+  const autoGrantedMatch = /^Auto-granted ([^(]+) \(([^)]+)\)\.$/.exec(text);
+  if (autoGrantedMatch) {
+    const category = autoGrantedMatch[1]?.trim() ?? "";
+    const risk = autoGrantedMatch[2]?.trim().toLowerCase() ?? "";
+    return t("dynamic.system.autoGranted", {
+      category: translateKeyOrFallback(`dynamic.approval.category.${category}`, category),
+      risk: translatedToken(risk),
+    });
+  }
+  const runAlreadyMatch = /^Run is already ([^.]+)\.$/.exec(text);
+  if (runAlreadyMatch) {
+    const status = runAlreadyMatch[1]?.trim().toLowerCase() ?? "";
+    return t("dynamic.system.runAlready", {
+      status: translatedToken(status),
+    });
+  }
+  if (text === "Executor work already started. Restart requires a rerun from the same workspace and goal.") {
+    return t("dynamic.system.executorRestartRequiresRerun");
+  }
+  if (text === "No MCP client command configured.") {
+    return t("dynamic.system.noMcpClientCommand");
+  }
+  const commandAvailableMatch = /^Command is available: (.+)$/.exec(text);
+  if (commandAvailableMatch) {
+    return t("dynamic.system.commandAvailable", {
+      command: commandAvailableMatch[1] ?? "",
+    });
+  }
+  const commandNotAvailableMatch = /^Command is not available on PATH: (.+)$/.exec(text);
+  if (commandNotAvailableMatch) {
+    return t("dynamic.system.commandNotAvailable", {
+      command: commandNotAvailableMatch[1] ?? "",
+    });
+  }
+  if (text === "Pre-run approval rejected.") return t("dynamic.system.preRunApprovalRejected");
+  if (text === "Runtime approval rejected.") return t("dynamic.system.runtimeApprovalRejected");
+  if (text === "Approval interrupted while waiting for user decision.") return t("dynamic.system.approvalInterrupted");
+  if (text === "Run interrupted while waiting for approval.") return t("dynamic.system.runInterruptedWhileWaitingApproval");
+  if (text === "Run runtime checkpoint is unavailable.") return t("dynamic.system.runtimeCheckpointUnavailable");
+  if (text === "Pre-run approval can continue after restart.") return t("dynamic.system.preRunApprovalContinueAfterRestart");
   if (text === "Provider connection succeeded.") return t("dynamic.provider.connectionSucceeded");
   if (text.startsWith("Provider connection succeeded. Models:")) {
     return `${t("dynamic.provider.connectionSucceeded")} ${t("dynamic.provider.modelsLabel")} ${text.replace("Provider connection succeeded. Models:", "").trim()}`;

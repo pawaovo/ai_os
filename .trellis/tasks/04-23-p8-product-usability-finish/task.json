@@ -1,0 +1,53 @@
+{
+  "id": "p8-product-usability-finish",
+  "name": "p8-product-usability-finish",
+  "title": "P8 Product Usability Finish",
+  "description": "",
+  "status": "completed",
+  "dev_type": "fullstack",
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "zzz",
+  "assignee": "zzz",
+  "createdAt": "2026-04-23",
+  "completedAt": "2026-04-23",
+  "branch": "codex/p7-cross-object-navigation-shortcuts",
+  "base_branch": "codex/p7-cross-object-navigation-shortcuts",
+  "worktree_path": null,
+  "current_phase": 6,
+  "next_action": [
+    {
+      "phase": 1,
+      "action": "brainstorm"
+    },
+    {
+      "phase": 2,
+      "action": "research"
+    },
+    {
+      "phase": 3,
+      "action": "implement"
+    },
+    {
+      "phase": 4,
+      "action": "check"
+    },
+    {
+      "phase": 5,
+      "action": "update-spec"
+    },
+    {
+      "phase": 6,
+      "action": "record-session"
+    }
+  ],
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "Completed product usability finish work: Chinese-mode copy cleanup, localized system-owned defaults and generated labels, readiness summary localization, and verification via npm test, validate:electron, package:mac, packaged app smoke, and packaged readiness endpoint checks.",
+  "meta": {}
+}
