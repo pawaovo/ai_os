@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 27
+- **Total Sessions**: 28
 - **Last Active**: 2026-04-23
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~971 | Active |
+| `journal-1.md` | ~1004 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 28 | 2026-04-23 | P11 real codex success smoke | `967dbac` | `codex/p11-real-codex-success-smoke` |
 | 27 | 2026-04-23 | P7 artifact source run navigation | `397ee26` | `codex/p7-artifact-source-run-navigation` |
 | 26 | 2026-04-22 | P7 run follow-up actions | `e988ee5` | `codex/p7-run-artifact-automation-forge-actions` |
 | 25 | 2026-04-22 | P6 first-use setup import and reset | `7d3fb04` | `codex/p6-first-use-onboarding-import` |

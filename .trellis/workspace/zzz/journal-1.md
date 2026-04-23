@@ -19,7 +19,10 @@ Completed V0.1 bootstrap phases 7-11: control plane, companion core, workspace/a
 
 ### Main Changes
 
-(Add details)
+- Added `run-follow-up-reuse-inputs-button` to the Runs follow-up panel so a selected run can repopulate the current run goal and executor choice for a fast retry.
+- Added bilingual copy for the reuse action and reuse status summary in the desktop renderer.
+- Added `smoke:real:codex` plus `smoke-real-codex-success.mjs` to validate the real Codex happy path through approval, completion, transcript persistence, and Forge recipe creation.
+- Added Trellis task records for `p11-real-executor-success-loop` and `p11-real-codex-success-smoke`, including PRDs and completion metadata.
 
 ### Git Commits
 
@@ -29,7 +32,11 @@ Completed V0.1 bootstrap phases 7-11: control plane, companion core, workspace/a
 
 ### Testing
 
-- [OK] (Add test results)
+- [OK] `npm test`
+- [OK] `npm run validate:electron`
+- [OK] `npm run package:mac`
+- [OK] `npm run smoke:packaged:mac`
+- [OK] `npm run smoke:real:codex`
 
 ### Status
 
@@ -957,6 +964,39 @@ Added source-run navigation to the Artifacts surface, surfaced run linkage in ar
 | Hash | Message |
 |------|---------|
 | `397ee26` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 28: P11 real codex success smoke
+
+**Date**: 2026-04-23
+**Task**: P11 real codex success smoke
+**Branch**: `codex/p11-real-codex-success-smoke`
+
+### Summary
+
+Added selected-run input reuse on the Runs follow-up panel plus a real Codex success smoke, then verified tests, Electron validation, packaging, packaged smoke, and the live Codex success path.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `967dbac` | (see git log) |
 
 ### Testing
 
