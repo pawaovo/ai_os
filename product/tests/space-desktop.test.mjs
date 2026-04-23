@@ -337,6 +337,7 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(html, /id="run-follow-up-help"/);
   assert.match(html, /id="artifact-select"/);
   assert.match(html, /id="artifact-open-run-button"/);
+  assert.match(html, /id="recipe-open-source-run-button"/);
   assert.match(html, /id="run-artifact-preview"/);
   assert.match(styles, /\.space-workbench/);
   assert.match(styles, /\.left-rail/);
@@ -447,6 +448,14 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(browserSource, /\/api\/remote-bridge\/pilot/);
   assert.match(browserSource, /\/api\/mailbox/);
   assert.match(browserSource, /\/api\/multi-agent-governance/);
+  assert.match(browserSource, /data-mailbox-orchestration-id/);
+  assert.match(browserSource, /data-mailbox-remote-bridge-session-id/);
+  assert.match(browserSource, /data-approval-run-id/);
+  assert.match(browserSource, /recipe-open-source-run-button/);
+  assert.match(browserSource, /openRecipeSourceRun/);
+  assert.match(browserSource, /openRunFromNavigation/);
+  assert.match(browserSource, /createRemoteBridgeSessionFromForm[\s\S]*loadMailbox\(\)\.catch/);
+  assert.match(browserSource, /startAgentOrchestrationFromForm[\s\S]*loadMailbox\(\)\.catch/);
   assert.match(browserSource, /loadAgentRuntimes/);
   assert.match(browserSource, /loadMultiAgentGovernance/);
   assert.match(browserSource, /renderAgentRuntimes/);

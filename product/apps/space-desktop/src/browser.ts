@@ -832,6 +832,7 @@ const elements = {
   promptAppInstallationAt: getElement("prompt-app-installation-at", HTMLElement),
   recipeSaveButton: getElement("recipe-save-button", HTMLButtonElement),
   recipeTestButton: getElement("recipe-test-button", HTMLButtonElement),
+  recipeOpenSourceRunButton: getElement("recipe-open-source-run-button", HTMLButtonElement),
   recipeExportButton: getElement("recipe-export-button", HTMLButtonElement),
   recipeTestPreview: getElement("recipe-test-preview", HTMLElement),
   recipeTestList: getElement("recipe-test-list", HTMLElement),
@@ -938,9 +939,27 @@ elements.remoteBridgeSessionList.addEventListener("click", (event) => {
 
 elements.mailboxList.addEventListener("click", (event) => {
   const target = event.target instanceof HTMLElement
-    ? event.target.closest<HTMLButtonElement>("button[data-mailbox-run-id]")
+    ? event.target.closest<HTMLButtonElement>(
+      "button[data-mailbox-run-id], button[data-mailbox-orchestration-id], button[data-mailbox-remote-bridge-session-id]",
+    )
     : null;
-  if (target?.dataset.mailboxRunId) void openRun(target.dataset.mailboxRunId);
+  if (!target) return;
+
+  if (target.dataset.mailboxRunId) {
+    void openRunFromNavigation(target.dataset.mailboxRunId);
+    return;
+  }
+
+  if (target.dataset.mailboxOrchestrationId) {
+    setActivePage("agents");
+    void openAgentOrchestration(target.dataset.mailboxOrchestrationId);
+    return;
+  }
+
+  if (target.dataset.mailboxRemoteBridgeSessionId) {
+    setActivePage("settings");
+    void openRemoteBridgeSession(target.dataset.mailboxRemoteBridgeSessionId);
+  }
 });
 
 elements.multiAgentGovernanceAttention.addEventListener("click", (event) => {
@@ -996,7 +1015,7 @@ elements.agentTaskList.addEventListener("click", (event) => {
   const target = event.target instanceof HTMLElement
     ? event.target.closest<HTMLButtonElement>("button[data-agent-child-run-id]")
     : null;
-  if (target?.dataset.agentChildRunId) void openAgentTaskChildRun(target.dataset.agentChildRunId);
+  if (target?.dataset.agentChildRunId) void openRunFromNavigation(target.dataset.agentChildRunId);
 });
 
 elements.workspaceSelect.addEventListener("change", () => {
@@ -1132,6 +1151,10 @@ elements.recipeTestButton.addEventListener("click", () => {
   void testSelectedRecipe();
 });
 
+elements.recipeOpenSourceRunButton.addEventListener("click", () => {
+  void openRecipeSourceRun();
+});
+
 elements.recipeExportButton.addEventListener("click", () => {
   void exportSelectedRecipe();
 });
@@ -1156,6 +1179,13 @@ elements.automationList.addEventListener("click", (event) => {
 elements.runHistoryList.addEventListener("click", (event) => {
   const target = event.target instanceof HTMLElement ? event.target.closest<HTMLButtonElement>("button[data-run-id]") : null;
   if (target?.dataset.runId) void openRun(target.dataset.runId);
+});
+
+elements.approvalHistoryList.addEventListener("click", (event) => {
+  const target = event.target instanceof HTMLElement
+    ? event.target.closest<HTMLButtonElement>("button[data-approval-run-id]")
+    : null;
+  if (target?.dataset.approvalRunId) void openRunFromNavigation(target.dataset.approvalRunId);
 });
 
 elements.runFollowUpSaveArtifactButton.addEventListener("click", () => {
@@ -1615,6 +1645,7 @@ function applyStaticTranslations(): void {
   setPromptAppInstallationLabel(1, t("recipe-editor.installation.installedAt"));
   elements.recipeSaveButton.textContent = t("recipe-editor.button.save");
   elements.recipeTestButton.textContent = t("recipe-editor.button.test");
+  elements.recipeOpenSourceRunButton.textContent = t("artifact.button.openRun");
   if (state.activeRecipeId) {
     const activeRecipe = getActiveRecipe();
     if (activeRecipe) {
@@ -2449,6 +2480,7 @@ async function createRemoteBridgeSessionFromForm(): Promise<void> {
     state.remoteBridgeConnect = payload.connect;
     state.remoteBridgeSessionError = undefined;
     await loadRemoteBridgePilot();
+    await loadMailbox().catch(() => undefined);
     await loadMultiAgentGovernance().catch(() => undefined);
     state.activeRemoteBridgeSessionId = payload.session.id;
     await openRemoteBridgeSession(payload.session.id, false);
@@ -2558,6 +2590,10 @@ function createMailboxListItem(item: MailboxItemSummary): HTMLLIElement {
   button.className = "list-button";
   if (item.runId) {
     button.dataset.mailboxRunId = item.runId;
+  } else if (item.orchestrationId) {
+    button.dataset.mailboxOrchestrationId = item.orchestrationId;
+  } else if (item.remoteBridgeSessionId) {
+    button.dataset.mailboxRemoteBridgeSessionId = item.remoteBridgeSessionId;
   } else {
     button.disabled = true;
   }
@@ -2566,6 +2602,7 @@ function createMailboxListItem(item: MailboxItemSummary): HTMLLIElement {
   meta.className = "item-meta";
   meta.textContent = [
     translateKeyOrFallback(`mailbox.flow.${item.flowKind}`, item.flowKind),
+    localizeMailboxNavigationTarget(item),
     formatDate(item.createdAt),
     localizeKnownText(item.body),
   ].join(" / ");
@@ -2584,6 +2621,13 @@ function localizeRemoteBridgeTransport(value: string): string {
 
 function localizeRemoteBridgeChannelKind(value: string): string {
   return translateKeyOrFallback(`remoteBridge.channel.${value}`, value);
+}
+
+function localizeMailboxNavigationTarget(item: MailboxItemSummary): string {
+  if (item.runId) return t("nav.runs");
+  if (item.orchestrationId) return t("agents.list.eyebrow");
+  if (item.remoteBridgeSessionId) return t("remoteBridge.title");
+  return t("dynamic.none");
 }
 
 function getActiveRemoteBridgeSession(): RemoteBridgeSessionSummary | undefined {
@@ -3087,6 +3131,7 @@ async function startAgentOrchestrationFromForm(): Promise<void> {
       id: truncate(orchestration.id, 24),
     });
     elements.agentOrchestrationFormHelp.dataset.dynamic = "true";
+    await loadMailbox().catch(() => undefined);
     await loadMultiAgentGovernance().catch(() => undefined);
     renderAgentOrchestrationList();
     renderAgentOrchestrationDetail(orchestration);
@@ -3123,7 +3168,7 @@ async function openAgentOrchestration(orchestrationId: string): Promise<void> {
   }
 }
 
-async function openAgentTaskChildRun(runId: string): Promise<void> {
+async function openRunFromNavigation(runId: string): Promise<void> {
   if (!runId) return;
 
   setActivePage("runs");
@@ -3138,7 +3183,7 @@ async function handleMultiAgentGovernanceAction(event: Event): Promise<void> {
   if (!target) return;
 
   if (target.dataset.governanceRunId) {
-    await openAgentTaskChildRun(target.dataset.governanceRunId);
+    await openRunFromNavigation(target.dataset.governanceRunId);
     return;
   }
 
@@ -4603,6 +4648,12 @@ async function exportSelectedRecipe(): Promise<void> {
   await loadAppReadiness();
 }
 
+async function openRecipeSourceRun(): Promise<void> {
+  const recipe = getActiveRecipe();
+  if (!recipe?.sourceRunId) return;
+  await openRunFromNavigation(recipe.sourceRunId);
+}
+
 function renderRecipes(): void {
   if (state.recipes.length === 0) {
     elements.recipeList.replaceChildren(createListItem(t("dynamic.recipe.none")));
@@ -4615,6 +4666,7 @@ function renderRecipes(): void {
     renderPromptAppInstallation(undefined);
     elements.recipeSaveButton.disabled = true;
     elements.recipeTestButton.disabled = true;
+    elements.recipeOpenSourceRunButton.disabled = true;
     elements.recipeExportButton.disabled = true;
     elements.recipeExportButton.textContent = t("recipe-editor.button.export");
     return;
@@ -4643,6 +4695,7 @@ function renderRecipes(): void {
   renderPromptAppInstallation(activeRecipe.installation);
   elements.recipeSaveButton.disabled = false;
   elements.recipeTestButton.disabled = false;
+  elements.recipeOpenSourceRunButton.disabled = !activeRecipe.sourceRunId;
   elements.recipeExportButton.disabled = false;
   elements.recipeExportButton.textContent = activeRecipe.capabilityId ? t("recipe-editor.button.exportUpdate") : t("recipe-editor.button.export");
 }
@@ -4702,17 +4755,26 @@ function renderApprovalHistory(): void {
   }
 
   elements.approvalHistoryList.replaceChildren(
-    ...state.approvals.map((approval) => createActionListItem({
-      id: approval.approvalId,
-      idName: "approvalId",
-      title: `${localizeApprovalCategory(approval.category)} / ${translatedToken(approval.riskLevel)}`,
-      meta: `${translatedToken(approval.status)}${approval.decision ? `:${translatedToken(approval.decision)}` : ""} / ${approval.resolvedAt ? formatDate(approval.resolvedAt) : translatedToken("pending")} / ${approval.requestedAction}`,
-      pressed: state.liveRun?.pendingApproval?.approvalId === approval.approvalId,
-      source: approval.status,
-    })),
+    ...state.approvals.map((approval) => createApprovalHistoryListItem(approval)),
   );
 
   elements.approvalHistoryHelp.textContent = t("dynamic.approvalHistory.count", { count: state.approvals.length });
+}
+
+function createApprovalHistoryListItem(approval: ApprovalRecord): HTMLLIElement {
+  const item = createActionListItem({
+    id: approval.approvalId,
+    idName: "approvalId",
+    title: `${localizeApprovalCategory(approval.category)} / ${translatedToken(approval.riskLevel)}`,
+    meta: `${translatedToken(approval.status)}${approval.decision ? `:${translatedToken(approval.decision)}` : ""} / ${approval.resolvedAt ? formatDate(approval.resolvedAt) : translatedToken("pending")} / ${approval.requestedAction}`,
+    pressed: state.liveRun?.pendingApproval?.approvalId === approval.approvalId,
+    source: approval.status,
+  });
+  const button = item.querySelector<HTMLButtonElement>("button[data-approval-id]");
+  if (button) {
+    button.dataset.approvalRunId = approval.runId;
+  }
+  return item;
 }
 
 async function loadAutomations(): Promise<void> {
