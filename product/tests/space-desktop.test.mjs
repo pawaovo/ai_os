@@ -159,6 +159,7 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   const capabilityContractSource = await readFile(resolve(productRoot, "packages/capability/capability-contract/src/index.ts"), "utf8");
   const packageJson = JSON.parse(await readFile(resolve(productRoot, "package.json"), "utf8"));
   const packageScript = await readFile(resolve(productRoot, "apps/space-desktop/scripts/package-macos.mjs"), "utf8");
+  const packagedSmokeScript = await readFile(resolve(productRoot, "apps/space-desktop/scripts/smoke-packaged-electron.mjs"), "utf8");
   const prepareElectronPackageScript = await readFile(resolve(productRoot, "apps/space-desktop/scripts/prepare-electron-package-output.mjs"), "utf8");
   const validateElectronConfigScript = await readFile(resolve(productRoot, "apps/space-desktop/scripts/validate-electron-config.mjs"), "utf8");
   const electronMain = await readFile(resolve(productRoot, "apps/space-desktop/electron-app/main.cjs"), "utf8");
@@ -374,10 +375,13 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(packageScript, /README\.md/);
   assert.equal(packageJson.main, "apps/space-desktop/electron-app/main.cjs");
   assert.equal(packageJson.scripts["package:mac"], "npm run package:electron:mac");
+  assert.equal(packageJson.scripts["smoke:packaged:mac"], "node ./apps/space-desktop/scripts/smoke-packaged-electron.mjs");
   assert.match(packageJson.scripts["package:electron:mac"], /prepare-electron-package-output\.mjs/);
   assert.equal(packageJson.scripts["package:mac:webkit"], "node ./apps/space-desktop/scripts/package-macos.mjs");
   assert.equal(packageJson.scripts["package:win"], "npm run package:electron:win");
   assert.match(packageScript, /buildRoot,\s*"webkit"/);
+  assert.match(packagedSmokeScript, /api\/app\/readiness/);
+  assert.match(packagedSmokeScript, /smoke-packaged-electron\.mjs currently supports macOS packaged validation only/);
   assert.match(prepareElectronPackageScript, /build", "AI OS\.app"/);
   assert.match(prepareElectronPackageScript, /Removed stale legacy bundle/);
   assert.equal(electronAppPackage.main, "main.cjs");
@@ -497,7 +501,11 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(browserSource, /dynamic\.system\.runAlready/);
   assert.match(browserSource, /dynamic\.system\.commandExited/);
   assert.match(browserSource, /dynamic\.system\.executorTimeout/);
+  assert.match(browserSource, /await loadModelsForSelectedProvider\(\)\.catch\(\(\) => undefined\)/);
+  assert.match(browserSource, /elements\.chatInput\.value = message;/);
   assert.match(devServer, /function localizeSystemOwnedText/);
+  assert.match(devServer, /serverT\(currentUiLanguage\(\), "threads\.button\.new"\)/);
+  assert.match(devServer, /serverT\(currentUiLanguage\(\), "remoteBridge\.principalLabel\.default"\)/);
   assert.match(capabilityContractSource, /export interface PromptAppRuntimeBinding/);
   assert.match(capabilityContractSource, /export interface PromptAppDraftRecord/);
   assert.match(i18nSource, /"dynamic\.approval\.reason\.file-write":/);
@@ -1016,6 +1024,50 @@ test("local setup discovery can import Codex provider config and reset local dat
     await appServer.stop();
     await rm(storageDir, { recursive: true, force: true });
     await rm(codexHome, { recursive: true, force: true });
+  }
+});
+
+test("server-owned first-use defaults follow the saved UI language", async () => {
+  const storageDir = await mkdtemp(`${tmpdir()}/ai-os-first-use-defaults-`);
+  const providerServer = await startMockOpenAiProvider();
+  const appPort = await getAvailablePort();
+  const appServer = startSpaceDesktopServer({
+    port: appPort,
+    storageDir,
+  });
+
+  try {
+    await waitForHttp(`http://127.0.0.1:${appPort}/`);
+    await patchJson(`http://127.0.0.1:${appPort}/api/settings/language`, {
+      language: "zh-CN",
+    });
+
+    const workspace = await postJson(`http://127.0.0.1:${appPort}/api/workspaces`, {
+      name: "First Use Defaults Workspace",
+      path: storageDir,
+    });
+
+    await postJson(`http://127.0.0.1:${appPort}/api/providers`, {
+      name: "First Use Provider",
+      protocol: "openai-compatible",
+      baseUrl: `http://127.0.0.1:${providerServer.port}/v1`,
+      apiKey: "sk-first-use-secret",
+      modelId: "first-use-model",
+    });
+
+    const autoThreadChat = await postJson(`http://127.0.0.1:${appPort}/api/chat/send`, {
+      message: "Create the first thread automatically.",
+      history: [],
+    });
+    assert.equal(autoThreadChat.thread.title, "新建线程");
+
+    const remoteSession = await postJson(`http://127.0.0.1:${appPort}/api/remote-bridge/pilot/sessions`, {});
+    assert.equal(remoteSession.session.principalLabel, "远程助手");
+    assert.equal(remoteSession.session.workspaceId, workspace.workspace.id);
+  } finally {
+    await appServer.stop();
+    await providerServer.stop();
+    await rm(storageDir, { recursive: true, force: true });
   }
 });
 

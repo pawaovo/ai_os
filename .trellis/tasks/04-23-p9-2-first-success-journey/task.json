@@ -1,0 +1,53 @@
+{
+  "id": "p9-2-first-success-journey",
+  "name": "p9-2-first-success-journey",
+  "title": "P9.2 First Success Journey",
+  "description": "",
+  "status": "completed",
+  "dev_type": "fullstack",
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "zzz",
+  "assignee": "zzz",
+  "createdAt": "2026-04-23",
+  "completedAt": "2026-04-23",
+  "branch": "codex/p9-1-real-executor-stabilization",
+  "base_branch": "codex/p9-1-real-executor-stabilization",
+  "worktree_path": null,
+  "current_phase": 6,
+  "next_action": [
+    {
+      "phase": 1,
+      "action": "brainstorm"
+    },
+    {
+      "phase": 2,
+      "action": "research"
+    },
+    {
+      "phase": 3,
+      "action": "implement"
+    },
+    {
+      "phase": 4,
+      "action": "check"
+    },
+    {
+      "phase": 5,
+      "action": "update-spec"
+    },
+    {
+      "phase": 6,
+      "action": "record-session"
+    }
+  ],
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "Completed first-success-journey polish: provider import now eagerly reloads models, failed chats restore user input, and server-owned default thread / remote principal labels follow the saved UI language.",
+  "meta": {}
+}

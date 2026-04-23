@@ -1,0 +1,53 @@
+{
+  "id": "p10-packaged-electron-smoke-automation",
+  "name": "p10-packaged-electron-smoke-automation",
+  "title": "P10 Packaged Electron Smoke Automation",
+  "description": "",
+  "status": "completed",
+  "dev_type": "fullstack",
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "zzz",
+  "assignee": "zzz",
+  "createdAt": "2026-04-23",
+  "completedAt": "2026-04-23",
+  "branch": "codex/p9-1-real-executor-stabilization",
+  "base_branch": "codex/p9-1-real-executor-stabilization",
+  "worktree_path": null,
+  "current_phase": 6,
+  "next_action": [
+    {
+      "phase": 1,
+      "action": "brainstorm"
+    },
+    {
+      "phase": 2,
+      "action": "research"
+    },
+    {
+      "phase": 3,
+      "action": "implement"
+    },
+    {
+      "phase": 4,
+      "action": "check"
+    },
+    {
+      "phase": 5,
+      "action": "update-spec"
+    },
+    {
+      "phase": 6,
+      "action": "record-session"
+    }
+  ],
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "Completed packaged Electron smoke automation: added smoke:packaged:mac script, packaged readiness launch helper, and validation coverage for repeatable local packaged-app smoke checks.",
+  "meta": {}
+}

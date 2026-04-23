@@ -17,6 +17,7 @@
     "package:electron:mac": "npm run typecheck && node ./apps/space-desktop/scripts/prepare-electron-package-output.mjs && electron-builder --config electron-builder.config.cjs --mac dir",
     "package:electron:win": "npm run validate:electron && npm run typecheck && electron-builder --config electron-builder.config.cjs --win",
     "package:mac:webkit": "node ./apps/space-desktop/scripts/package-macos.mjs",
+    "smoke:packaged:mac": "node ./apps/space-desktop/scripts/smoke-packaged-electron.mjs",
     "validate:electron": "node ./apps/space-desktop/scripts/validate-electron-config.mjs",
     "typecheck": "tsc -b",
     "test": "npm run typecheck && node --test tests/*.test.mjs"

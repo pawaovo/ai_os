@@ -176,6 +176,8 @@ Contract details:
   - Assert lockfile/install graph is consistent.
 - `cd product && npm run package:mac`
   - Assert macOS dir packaging succeeds on the host.
+- `cd product && npm run smoke:packaged:mac`
+  - Launch the packaged macOS Electron binary, wait for `/api/app/readiness`, then exit cleanly.
 - `cd product && npm run package:win` on Windows hosts
   - Assert installer and unpacked Windows outputs are created.
 - Packaged smoke:

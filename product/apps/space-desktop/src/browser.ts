@@ -2066,6 +2066,9 @@ async function importCodexProviderFromLocalSetup(): Promise<void> {
     state.localSetup = payload.discovery;
     state.localSetupError = undefined;
     await loadProviders();
+    if (state.activeProviderId) {
+      await loadModelsForSelectedProvider().catch(() => undefined);
+    }
     await loadAppReadiness();
     renderLocalSetup();
     renderLocalDataReset();
@@ -3998,6 +4001,7 @@ async function sendChatFromForm(): Promise<void> {
     await loadArtifacts();
     await loadAppReadiness();
   } catch (error) {
+    elements.chatInput.value = message;
     state.chatMessages = [
       ...state.chatMessages,
       {
@@ -5474,6 +5478,7 @@ function localizeKnownText(text: string): string {
   if (text === "Personal AI OS") return t("hero.title");
   if (text === "AI OS Workspace") return t("workspace.name.default");
   if (text === "Remote Pilot") return t("remoteBridge.principalLabel.default");
+  if (text === "New Thread") return t("threads.button.new");
   const importedFromCodexMatch = /^Imported from Codex(?: \((.+)\))?$/.exec(text);
   if (importedFromCodexMatch) {
     const provider = importedFromCodexMatch[1]?.trim();

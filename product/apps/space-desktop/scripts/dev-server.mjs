@@ -516,6 +516,10 @@ function serverT(language, key, variables = {}) {
   return translateApp(language, key, variables);
 }
 
+function currentUiLanguage() {
+  return normalizeAppLanguage(appStore.getSetting("uiLanguage"));
+}
+
 function localizeSystemOwnedText(language, text) {
   if (typeof text !== "string" || text.trim().length === 0) return text;
   if (text === "AI OS Workspace") return serverT(language, "workspace.name.default");
@@ -2721,7 +2725,7 @@ function getRemoteBridgePilotSummary(request) {
 }
 
 function parseRemoteBridgeSessionCreateInput(body) {
-  const principalLabel = readOptionalString(body.principalLabel) ?? "Remote Pilot";
+  const principalLabel = readOptionalString(body.principalLabel) ?? serverT(currentUiLanguage(), "remoteBridge.principalLabel.default");
   const workspaceId = readOptionalString(body.workspaceId) ?? appStore.getSetting("activeWorkspaceId");
   if (!workspaceId) throw new Error("Select a workspace before creating a remote bridge session.");
   return {
@@ -5069,7 +5073,7 @@ class SqliteAppStore {
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
-      input.title ?? "New Thread",
+      input.title ?? serverT(currentUiLanguage(), "threads.button.new"),
       input.providerId ?? null,
       input.modelId ?? null,
       input.workspaceId ?? this.getSetting("activeWorkspaceId") ?? null,
