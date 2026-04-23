@@ -482,6 +482,8 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(i18nSource, /"mailbox\.title": "收件箱时间线"/);
   assert.match(i18nSource, /"hostedMcp\.title": "托管 MCP 服务"/);
   assert.match(i18nSource, /"status\.awaiting-approval": "等待审批"/);
+  assert.match(i18nSource, /"dynamic\.system\.commandExited": "\{\{command\}\} 已以退出码 \{\{code\}\} 结束。"/);
+  assert.match(i18nSource, /"dynamic\.system\.executorTimeout": "\{\{command\}\} 超过了 \{\{timeout\}\}ms 执行超时限制。"/);
   assert.match(i18nSource, /"artifact\.button\.openRun": "Open Source Run"/);
   assert.match(i18nSource, /"artifact\.button\.openRun": "打开来源 Run"/);
   assert.match(i18nSource, /"recipe-editor\.binding\.workspace": "Workspace"/);
@@ -493,6 +495,8 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(browserSource, /syncLocalizedInputValue\(elements\.workspaceName, "workspace\.name\.default"\)/);
   assert.match(browserSource, /dynamic\.system\.remoteSessionCreatedBody/);
   assert.match(browserSource, /dynamic\.system\.runAlready/);
+  assert.match(browserSource, /dynamic\.system\.commandExited/);
+  assert.match(browserSource, /dynamic\.system\.executorTimeout/);
   assert.match(devServer, /function localizeSystemOwnedText/);
   assert.match(capabilityContractSource, /export interface PromptAppRuntimeBinding/);
   assert.match(capabilityContractSource, /export interface PromptAppDraftRecord/);
@@ -2166,6 +2170,83 @@ test("space desktop V0.5 run workflow records approval history and trust decisio
   }
 });
 
+test("failed real executor runs keep one terminal failure event and fallback transcript artifacts", async () => {
+  const storageDir = await mkdtemp(`${tmpdir()}/ai-os-real-executor-failure-`);
+  const fakeBinDir = await mkdtemp(`${tmpdir()}/ai-os-fake-executor-bin-`);
+  const appPort = await getAvailablePort();
+  const appServer = startSpaceDesktopServer({
+    port: appPort,
+    storageDir,
+    envOverrides: {
+      PATH: `${fakeBinDir}:${process.env.PATH ?? ""}`,
+    },
+  });
+
+  try {
+    await writeExecutable(
+      resolve(fakeBinDir, "codex"),
+      [
+        "#!/bin/zsh",
+        "if [[ \"$1\" == \"--version\" ]]; then",
+        "  echo \"codex 0.0.0-test\"",
+        "  exit 0",
+        "fi",
+        "print '{\"type\":\"thread.started\"}'",
+        "print '{\"type\":\"item.agentMessage.delta\",\"delta\":\"Fake Codex partial output\"}'",
+        "exit 2",
+      ].join("\n"),
+    );
+
+    await waitForHttp(`http://127.0.0.1:${appPort}/`);
+
+    const workspace = await postJson(`http://127.0.0.1:${appPort}/api/workspaces`, {
+      name: "Real Executor Failure Workspace",
+      path: storageDir,
+    });
+    await patchJson(`http://127.0.0.1:${appPort}/api/settings/workspace-selection`, {
+      workspaceId: workspace.workspace.id,
+    });
+
+    const started = await postJson(`http://127.0.0.1:${appPort}/api/runs/start`, {
+      goal: "Review the workspace and continue with a concise summary.",
+      executorChoice: "codex",
+      timeoutMs: 5000,
+    });
+    const runId = started.run.id;
+
+    await postJson(`http://127.0.0.1:${appPort}/api/runs/${encodeURIComponent(runId)}/approval`, {
+      decision: "grant",
+    });
+
+    let live;
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      live = await getJson(`http://127.0.0.1:${appPort}/api/runs/${encodeURIComponent(runId)}/live`);
+      if (live.live.status === "failed" && live.live.artifacts.length > 0) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    assert.equal(live.live.status, "failed");
+    assert.equal(live.live.artifacts.length, 1);
+    assert.equal(live.live.artifacts[0].title, "Executor Transcript");
+
+    const events = await getJson(`http://127.0.0.1:${appPort}/api/runs/${encodeURIComponent(runId)}/events`);
+    assert.deepEqual(
+      events.events.map((event) => event.type),
+      ["approval.requested", "approval.granted", "run.started", "run.stream", "run.failed", "artifact.created"],
+    );
+    assert.equal(events.events.filter((event) => event.type === "run.failed").length, 1);
+
+    const artifacts = await getJson(`http://127.0.0.1:${appPort}/api/artifacts`);
+    const transcript = artifacts.artifacts.find((artifact) => artifact.runId === runId && artifact.title === "Executor Transcript");
+    assert.ok(transcript);
+    assert.match(transcript.content, /Fake Codex partial output/);
+  } finally {
+    await appServer.stop();
+    await rm(storageDir, { recursive: true, force: true });
+    await rm(fakeBinDir, { recursive: true, force: true });
+  }
+});
+
 test("space desktop V0.6 automations run locally and respect approvals", async () => {
   const storageDir = await mkdtemp(`${tmpdir()}/ai-os-v06-`);
   const appPort = await getAvailablePort();
@@ -2993,6 +3074,33 @@ test("runSpaceDemoRequest can normalize Claude Code output without launching a r
   assert.match(response.state.artifactContents[response.state.artifacts[0].id], /Claude result/);
 });
 
+test("runSpaceDemoRequest keeps fallback transcript artifacts for failed real executor runs", async () => {
+  const runner = createThrowingProcessRunner([
+    '{"type":"thread.started"}',
+    '{"type":"item.agentMessage.delta","delta":"Partial Codex output"}',
+  ], new Error("Codex process failed after partial output."));
+  const response = await runSpaceDemoRequest(
+    {
+      goal: "Run Codex through failing fake process",
+      executorChoice: "codex",
+    },
+    {
+      runner,
+    },
+  );
+
+  assert.equal(response.state.phase, "failed");
+  assert.equal(response.state.executorChoice, "codex");
+  assert.deepEqual(
+    response.state.events.map((event) => event.type),
+    ["run.started", "run.stream", "run.failed"],
+  );
+  assert.equal(response.state.artifacts.length, 1);
+  assert.equal(response.state.artifacts[0].title, "Executor Transcript");
+  assert.match(response.state.artifactContents[response.state.artifacts[0].id], /Partial Codex output/);
+  assert.match(response.state.error ?? "", /Codex process failed after partial output/);
+});
+
 function createUnavailableRunner() {
   return {
     async isAvailable() {
@@ -3019,6 +3127,29 @@ function createFakeProcessRunner(lines) {
       })();
     },
   };
+}
+
+function createThrowingProcessRunner(lines, error) {
+  const calls = [];
+
+  return {
+    calls,
+    async isAvailable() {
+      return true;
+    },
+    run(command) {
+      calls.push(command);
+      return (async function* () {
+        for (const line of lines) yield line;
+        throw error;
+      })();
+    },
+  };
+}
+
+async function writeExecutable(path, content) {
+  await writeFile(path, content, "utf8");
+  execFileSync("chmod", ["+x", path]);
 }
 
 function createSseResponse(text) {

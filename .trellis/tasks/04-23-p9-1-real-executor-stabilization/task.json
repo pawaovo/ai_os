@@ -1,0 +1,53 @@
+{
+  "id": "p9-1-real-executor-stabilization",
+  "name": "p9-1-real-executor-stabilization",
+  "title": "P9.1 Real Executor Stabilization",
+  "description": "",
+  "status": "completed",
+  "dev_type": "fullstack",
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "zzz",
+  "assignee": "zzz",
+  "createdAt": "2026-04-23",
+  "completedAt": "2026-04-23",
+  "branch": "codex/p9-1-real-executor-stabilization",
+  "base_branch": "codex/p7-cross-object-navigation-shortcuts",
+  "worktree_path": null,
+  "current_phase": 6,
+  "next_action": [
+    {
+      "phase": 1,
+      "action": "brainstorm"
+    },
+    {
+      "phase": 2,
+      "action": "research"
+    },
+    {
+      "phase": 3,
+      "action": "implement"
+    },
+    {
+      "phase": 4,
+      "action": "check"
+    },
+    {
+      "phase": 5,
+      "action": "update-spec"
+    },
+    {
+      "phase": 6,
+      "action": "record-session"
+    }
+  ],
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "Completed real executor stabilization for process-runner failures: normalized adapter failure events, deduplicated terminal failed events, preserved transcript fallback artifacts for failed real executor runs, and verified with npm test, validate:electron, package:mac, and packaged fake-codex smoke.",
+  "meta": {}
+}

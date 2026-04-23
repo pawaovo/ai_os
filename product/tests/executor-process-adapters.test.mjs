@@ -27,6 +27,28 @@ function createRunner(lines) {
   };
 }
 
+function createFailingRunner(lines, error) {
+  const calls = {
+    isAvailable: [],
+    run: [],
+  };
+
+  return {
+    calls,
+    async isAvailable(command) {
+      calls.isAvailable.push(command);
+      return true;
+    },
+    run(command) {
+      calls.run.push(command);
+      return (async function* () {
+        for (const line of lines) yield line;
+        throw error;
+      })();
+    },
+  };
+}
+
 const ids = {
   runId: () => "run-test",
   eventId: () => "event-test",
@@ -110,6 +132,26 @@ test("CodexProcessExecutor accepts Codex exec JSONL output shape", async () => {
   assert.equal(events[1].chunk, "OK");
 });
 
+test("CodexProcessExecutor normalizes runner failures into terminal run.failed events", async () => {
+  const runner = createFailingRunner([
+    '{"type":"thread.started"}',
+    '{"type":"item.agentMessage.delta","delta":"partial"}',
+  ], new Error("Codex process failed."));
+  const executor = CodexProcessExecutor.create({
+    id: "executor-test",
+    runner,
+    ids,
+    clock,
+  });
+
+  const result = await executor.startRun(task);
+  const events = [];
+  for await (const event of result.events) events.push(event);
+
+  assert.deepEqual(events.map((event) => event.type), ["run.started", "run.stream", "run.failed"]);
+  assert.equal(events.at(-1)?.message, "Codex process failed.");
+});
+
 test("ClaudeCodeProcessExecutor streams normalized kernel events from process lines", async () => {
   const runner = createRunner([
     "not json",
@@ -177,4 +219,24 @@ test("ClaudeCodeProcessExecutor accepts Claude Code stream-json output shape", a
   assert.deepEqual(events.map((event) => event.type), ["run.started", "run.stream", "run.completed"]);
   assert.deepEqual(events.map((event) => event.spaceId), ["space-test", "space-test", "space-test"]);
   assert.equal(events[1].chunk, "OK");
+});
+
+test("ClaudeCodeProcessExecutor normalizes runner failures into terminal run.failed events", async () => {
+  const runner = createFailingRunner([
+    '{"type":"session.started"}',
+    '{"type":"assistant.delta","text":"partial"}',
+  ], new Error("Claude process failed."));
+  const executor = ClaudeCodeProcessExecutor.create({
+    id: "executor-test",
+    runner,
+    ids,
+    clock,
+  });
+
+  const result = await executor.startRun(task);
+  const events = [];
+  for await (const event of result.events) events.push(event);
+
+  assert.deepEqual(events.map((event) => event.type), ["run.started", "run.stream", "run.failed"]);
+  assert.equal(events.at(-1)?.message, "Claude process failed.");
 });

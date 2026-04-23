@@ -178,7 +178,17 @@ export class CodexProcessExecutor implements CodeExecutor {
         }
         return;
       }
-      throw error;
+      if (!terminalEventEmitted) {
+        yield {
+          id: this.ids.eventId(),
+          type: "run.failed",
+          occurredAt: this.clock.now(),
+          spaceId: task.spaceId,
+          runId: run.id,
+          message: error instanceof Error ? error.message : "Codex run failed.",
+        };
+      }
+      return;
     } finally {
       this.abortControllers.delete(run.id);
     }

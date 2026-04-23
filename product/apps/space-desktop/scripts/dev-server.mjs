@@ -3817,10 +3817,11 @@ function finalizeSession(session, status, message) {
       message: message ?? `Run ${status}.`,
     });
   }
-  const lastEventType = session.events.at(-1)?.type;
-  if (status === "failed" && lastEventType !== "run.failed") {
+  const hasTerminalFailureEvent = session.events.some((event) => event.type === "run.failed");
+  const hasTerminalInterruptEvent = session.events.some((event) => event.type === "run.interrupted");
+  if (status === "failed" && !hasTerminalFailureEvent) {
     appendLiveEvent(session, { type: "run.failed", message: message ?? "Run failed." });
-  } else if (status === "interrupted" && lastEventType !== "run.interrupted") {
+  } else if (status === "interrupted" && !hasTerminalInterruptEvent) {
     appendLiveEvent(session, { type: "run.interrupted", message: message ?? "Run interrupted." });
   }
   completeRunItem(session, session.activeExecutorItemId, {
@@ -7038,10 +7039,12 @@ class NodeProcessRunner {
       command.signal?.removeEventListener("abort", abortListener);
     });
     if (timedOut) {
-      throw new Error(`${command.command} exceeded ${timeoutMs}ms demo timeout.${summarizeProcessOutput(lastStdoutLine)}`);
+      throw new Error(`${command.command} exceeded ${timeoutMs}ms executor timeout.`);
     }
     if (interrupted) throw createAbortError(`${command.command} interrupted.`);
-    if (code !== 0) throw new Error(stderr.trim() || `${command.command} exited with code ${code}`);
+    if (code !== 0) {
+      throw new Error(redactProcessOutput(stderr.trim()) || `${command.command} exited with code ${code}`);
+    }
   }
 }
 

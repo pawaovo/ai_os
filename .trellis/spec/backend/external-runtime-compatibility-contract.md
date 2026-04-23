@@ -47,6 +47,7 @@ interface ExternalRuntimeCompatibility {
   - runtime approval bridge is not yet native
   - artifact collection is currently fallback-only
   - session continuation is currently product-pre-run only
+- Process-adapter runner failures should still normalize into terminal `run.failed` events when possible, so product-layer failed runs can preserve event history and fallback transcript artifacts instead of aborting the entire run pipeline.
 - Mock executor may declare richer local support, but it must stay clearly identified as embedded.
 
 ### 4. Validation & Error Matrix
@@ -56,6 +57,7 @@ interface ExternalRuntimeCompatibility {
 | Mock executor listed | compatibility shows embedded/native artifact support | `space-desktop.test.mjs` |
 | Codex listed | compatibility shows process-cli and fallback-only artifact collection | `space-desktop.test.mjs` |
 | Claude listed | compatibility shows product-pre-run continuation semantics | `space-desktop.test.mjs` |
+| Real process run fails after partial output | terminal `run.failed` event is still emitted and product fallback artifacts can persist | adapter tests + product smoke |
 
 ### 5. Good / Base / Bad Cases
 
@@ -63,6 +65,7 @@ interface ExternalRuntimeCompatibility {
 
 - Product can describe runtime capability gaps without adding Agent Hub first.
 - Compatibility information reflects real adapter support.
+- Failed real executor runs still stay observable through normal product history and transcript fallback paths.
 
 #### Base
 
@@ -77,6 +80,7 @@ interface ExternalRuntimeCompatibility {
 
 - `cd product && node --test tests/space-desktop.test.mjs`
   - assert compatibility shape on `/api/executors`
+  - assert process adapter failures normalize into terminal failure events
 - `cd product && npm test`
 
 ### 7. Wrong vs Correct

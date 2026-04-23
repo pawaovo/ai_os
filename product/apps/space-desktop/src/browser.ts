@@ -5560,6 +5560,20 @@ function localizeKnownText(text: string): string {
       command: commandNotAvailableMatch[1] ?? "",
     });
   }
+  const commandExitedMatch = /^(.+?) exited with code (\d+)\.?$/.exec(text);
+  if (commandExitedMatch) {
+    return t("dynamic.system.commandExited", {
+      command: commandExitedMatch[1] ?? "",
+      code: commandExitedMatch[2] ?? "",
+    });
+  }
+  const executorTimeoutMatch = /^(.+?) exceeded (\d+)ms executor timeout\.$/.exec(text);
+  if (executorTimeoutMatch) {
+    return t("dynamic.system.executorTimeout", {
+      command: executorTimeoutMatch[1] ?? "",
+      timeout: executorTimeoutMatch[2] ?? "",
+    });
+  }
   if (text === "Pre-run approval rejected.") return t("dynamic.system.preRunApprovalRejected");
   if (text === "Runtime approval rejected.") return t("dynamic.system.runtimeApprovalRejected");
   if (text === "Approval interrupted while waiting for user decision.") return t("dynamic.system.approvalInterrupted");
