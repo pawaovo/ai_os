@@ -1,0 +1,8 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend development guide"}
+{"file": ".trellis/spec/backend/local-setup-import-and-reset.md", "reason": "Existing local setup and reset contract is the closest backend boundary for backup/restore."}
+{"file": ".trellis/spec/backend/electron-desktop-shell.md", "reason": "Backup/restore must stay compatible with Electron storage root and secret-store selection."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse the existing reset/import path instead of inventing a separate admin system."}
+{"file": ".trellis/spec/frontend/first-use-onboarding-surface.md", "reason": "Backup/restore will extend the existing local setup/reset UI surface."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Backup/restore changes backend API, persistence, and renderer together."}

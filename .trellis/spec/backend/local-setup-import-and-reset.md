@@ -9,6 +9,8 @@
 - Trigger: changing `/api/local-setup`.
 - Trigger: changing `/api/local-setup/import`.
 - Trigger: changing `/api/local-data/reset`.
+- Trigger: changing `/api/local-data/backup`.
+- Trigger: changing `/api/local-data/restore`.
 - Trigger: changing local Codex discovery logic or reset semantics in `product/apps/space-desktop/scripts/dev-server.mjs`.
 
 ### 2. Signatures
@@ -19,6 +21,8 @@
 GET /api/local-setup
 POST /api/local-setup/import
 POST /api/local-data/reset
+GET /api/local-data/backup
+POST /api/local-data/restore
 ```
 
 #### Discovery Shape
@@ -70,6 +74,27 @@ interface LocalDataResetInput {
   mode: "generated-data" | "profile";
   confirmText: "delete-local-data";
 }
+
+interface LocalDataBackupManifest {
+  format: "ai-os-local-backup";
+  version: 1;
+  appVersion: string;
+  createdAt: string;
+  summary: LocalSetupDiscoverySummary["localData"];
+  includes: {
+    providerApiKeys: false;
+    tables: string[];
+    note: string;
+  };
+  payload: {
+    tables: Record<string, Record<string, unknown>[]>;
+  };
+}
+
+interface LocalDataRestoreInput {
+  backup: LocalDataBackupManifest;
+  confirmText: "restore-local-backup";
+}
 ```
 
 ### 3. Contracts
@@ -103,6 +128,11 @@ interface LocalDataResetInput {
   - current UI language
   - built-in capability definitions
 - Reset actions must require explicit confirmation text in the API input.
+- Backup export must stay backend-owned and return a structured manifest instead of exposing direct renderer file access to the profile directory.
+- The first backup version may exclude provider API keys even when provider metadata is backed up.
+- Restore must require explicit confirmation text in the API input.
+- Restore must replace current local product data with the supplied backup payload and clear currently saved provider API keys before rebuilding provider metadata from the backup.
+- Backup validation must reject unsupported format versions or malformed table payloads.
 
 ### 4. Validation & Error Matrix
 
@@ -112,7 +142,10 @@ interface LocalDataResetInput {
 | Local setup import is triggered | provider is saved and API key preview is returned, not raw key | `space-desktop.test.mjs` |
 | Generated-data reset is triggered | generated records clear while providers/workspaces remain | `space-desktop.test.mjs` |
 | Profile reset is triggered | providers/workspaces clear and counts return to zero | `space-desktop.test.mjs` |
+| Backup export is triggered | backend returns a versioned manifest with local tables and no provider API keys | `space-desktop.test.mjs` |
+| Backup restore is triggered | local data is rebuilt from the manifest and language/selection state can be recovered | `space-desktop.test.mjs` |
 | Confirmation text is missing or wrong | reset request fails | endpoint validation |
+| Restore confirmation text is missing or wrong | restore request fails | endpoint validation |
 
 ### 5. Good / Base / Bad Cases
 
@@ -120,6 +153,7 @@ interface LocalDataResetInput {
 
 - The backend can detect local Codex-compatible provider metadata without leaking secrets.
 - The product can clean up local test/demo data safely.
+- The product can export and restore local product state without requiring filesystem surgery by the user.
 
 #### Base
 
@@ -130,6 +164,7 @@ interface LocalDataResetInput {
 - Reading local config in the renderer.
 - Returning raw API keys from discovery or import.
 - Letting reset behavior silently wipe user data without explicit confirmation.
+- Treating a malformed backup as valid local state.
 
 ### 6. Tests Required
 
@@ -138,6 +173,8 @@ interface LocalDataResetInput {
   - assert Codex config import flow with overridden local Codex home
   - assert generated-data reset behavior
   - assert profile reset behavior
+  - assert local backup export payload shape
+  - assert local backup restore can recover saved data and language
 - Packaged smoke:
   - assert packaged app can still discover local CLI availability
   - assert reset flow leaves packaged profile in a consistent state
@@ -148,8 +185,10 @@ interface LocalDataResetInput {
 
 - Add a local import button that expects the browser to read `~/.codex/config.toml`.
 - Implement one destructive reset path with no distinction between generated data and full profile reset.
+- Replace the local SQLite file in place while the server is still using it.
 
 #### Correct
 
 - Keep discovery/import/reset as explicit backend operations.
 - Distinguish safe generated-data cleanup from full profile reset.
+- Export a structured local backup manifest and restore it through explicit backend validation.

@@ -115,6 +115,12 @@ Provider API keys are stored separately from normal browser-visible state:
 - Non-Electron Windows development: protected local files
 - Test override: `AI_SPACE_SECRET_BACKEND=file`
 
+Local backup and restore now live in `Settings -> Local Data Reset`:
+
+- Export downloads a JSON backup of local product data and settings
+- Provider API keys are excluded from backups in this first cut
+- After restore, re-enter provider API keys if you need live model access again
+
 Executor choices:
 
 - `Mock local executor`: deterministic and safe default for repeatable manual testing

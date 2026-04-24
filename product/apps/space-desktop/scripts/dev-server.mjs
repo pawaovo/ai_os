@@ -29,6 +29,59 @@ const SPACE_RUNTIME_SPACE_ID = "space-local-runtime";
 const APP_VERSION = "1.0.0";
 const APP_RELEASE_NAME = "Personal AI OS";
 const desktopShell = process.env.AI_SPACE_DESKTOP_SHELL ?? "local-browser-server";
+const LOCAL_DATA_BACKUP_FORMAT = "ai-os-local-backup";
+const LOCAL_DATA_BACKUP_VERSION = 1;
+const LOCAL_DATA_BACKUP_TABLES = [
+  "providers",
+  "app_settings",
+  "workspaces",
+  "threads",
+  "messages",
+  "artifacts",
+  "runs",
+  "run_events",
+  "approvals",
+  "memories",
+  "capabilities",
+  "capability_runs",
+  "capability_run_events",
+  "recipes",
+  "recipe_tests",
+  "automations",
+  "automation_runs",
+  "agent_orchestrations",
+  "remote_bridge_sessions",
+  "remote_bridge_events",
+  "mailbox_items",
+];
+const LOCAL_DATA_GENERATED_TABLES = [
+  "messages",
+  "threads",
+  "run_events",
+  "runs",
+  "approvals",
+  "artifacts",
+  "automation_runs",
+  "automations",
+  "memories",
+  "recipe_tests",
+  "recipes",
+  "capability_run_events",
+  "capability_runs",
+  "agent_orchestrations",
+  "remote_bridge_events",
+  "remote_bridge_sessions",
+  "mailbox_items",
+];
+const LOCAL_DATA_PROFILE_TABLES = ["providers", "workspaces"];
+const LOCAL_DATA_GENERATED_SETTING_KEYS = ["activeThreadId"];
+const LOCAL_DATA_PROFILE_SETTING_KEYS = [
+  "activeWorkspaceId",
+  "activeProviderId",
+  "activeModelId",
+  "activeThreadId",
+  "mcp_global_config_json",
+];
 
 if (process.env.AI_SPACE_SKIP_BUILD !== "1") {
   buildProduct();
@@ -141,6 +194,16 @@ async function handleRequest(request, response) {
 
   if (request.method === "POST" && pathname === "/api/local-data/reset") {
     await handleResetLocalData(request, response);
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/local-data/backup") {
+    await handleGetLocalDataBackup(response);
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/local-data/restore") {
+    await handleRestoreLocalData(request, response);
     return;
   }
 
@@ -590,6 +653,35 @@ async function handleResetLocalData(request, response) {
     agentOrchestrationSessions.clear();
     writeJson(response, 200, {
       mode,
+      discovery: await createLocalSetupDiscoverySummary(),
+    });
+  } catch (error) {
+    writeJson(response, 400, { error: sanitizeErrorMessage(error) });
+  }
+}
+
+async function handleGetLocalDataBackup(response) {
+  try {
+    writeJson(response, 200, {
+      backup: appStore.createLocalDataBackup(),
+    });
+  } catch (error) {
+    writeJson(response, 400, { error: sanitizeErrorMessage(error) });
+  }
+}
+
+async function handleRestoreLocalData(request, response) {
+  try {
+    const body = await readJsonBody(request, { maxLength: 25_000_000 });
+    const confirmText = readRequiredString(body.confirmText, "confirmText");
+    if (confirmText !== "restore-local-backup") {
+      throw new Error("Explicit confirmation is required before restoring a local backup.");
+    }
+
+    await appStore.restoreLocalDataBackup(body.backup);
+    runSessions.clear();
+    agentOrchestrationSessions.clear();
+    writeJson(response, 200, {
       discovery: await createLocalSetupDiscoverySummary(),
     });
   } catch (error) {
@@ -4089,12 +4181,13 @@ function isTerminalRunStatus(status) {
   return status === "completed" || status === "failed" || status === "interrupted";
 }
 
-async function readJsonBody(request) {
+async function readJsonBody(request, input = {}) {
+  const maxLength = Number.isFinite(input.maxLength) ? input.maxLength : 100_000;
   let body = "";
 
   for await (const chunk of request) {
     body += chunk;
-    if (body.length > 100_000) throw new Error("Request body is too large.");
+    if (body.length > maxLength) throw new Error("Request body is too large.");
   }
 
   return JSON.parse(body);
@@ -4275,6 +4368,47 @@ function threadIdFromPath(pathname) {
 function readRequiredString(value, field) {
   if (typeof value !== "string" || value.trim().length === 0) throw new Error(`Missing required field: ${field}`);
   return value.trim();
+}
+
+function readRequiredObject(value, field) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Missing required object field: ${field}`);
+  }
+  return value;
+}
+
+function normalizeLocalDataBackup(value) {
+  const backup = readRequiredObject(value, "backup");
+  const format = readRequiredString(backup.format, "backup.format");
+  if (format !== LOCAL_DATA_BACKUP_FORMAT) {
+    throw new Error("Unsupported local backup format.");
+  }
+
+  if (backup.version !== LOCAL_DATA_BACKUP_VERSION) {
+    throw new Error("Unsupported local backup version.");
+  }
+
+  const payload = readRequiredObject(backup.payload, "backup.payload");
+  const tablesSource = readRequiredObject(payload.tables, "backup.payload.tables");
+  const tables = {};
+
+  for (const table of LOCAL_DATA_BACKUP_TABLES) {
+    const rows = tablesSource[table];
+    if (rows === undefined) {
+      tables[table] = [];
+      continue;
+    }
+    if (!Array.isArray(rows)) {
+      throw new Error(`Backup table must be an array: ${table}`);
+    }
+    tables[table] = rows.map((row, index) => readRequiredObject(row, `backup.payload.tables.${table}[${index}]`));
+  }
+
+  return {
+    format,
+    version: LOCAL_DATA_BACKUP_VERSION,
+    payload: { tables },
+  };
 }
 
 function readOptionalString(value) {
@@ -4650,6 +4784,90 @@ class SqliteAppStore {
     }
   }
 
+  deleteRowsFromTables(tables) {
+    for (const table of tables) {
+      this.db.prepare(`DELETE FROM ${table}`).run();
+    }
+  }
+
+  deleteSettings(keys) {
+    const statement = this.db.prepare("DELETE FROM app_settings WHERE key = ?");
+    for (const key of keys) {
+      statement.run(key);
+    }
+  }
+
+  listTableColumns(table) {
+    return this.db.prepare(`PRAGMA table_info(${table})`).all().map((column) => column.name);
+  }
+
+  selectAllRows(table) {
+    return this.db.prepare(`SELECT * FROM ${table} ORDER BY rowid ASC`).all();
+  }
+
+  insertRowsIntoTable(table, rows) {
+    if (!rows.length) return;
+    const columns = this.listTableColumns(table);
+    const placeholders = columns.map(() => "?").join(", ");
+    const statement = this.db.prepare(`
+      INSERT INTO ${table} (${columns.join(", ")})
+      VALUES (${placeholders})
+    `);
+
+    for (const row of rows) {
+      statement.run(...columns.map((column) => row[column] ?? null));
+    }
+  }
+
+  async deleteCurrentProviderSecrets() {
+    const providerRows = this.db.prepare("SELECT id FROM providers").all();
+    for (const row of providerRows) {
+      await this.secretStore.deleteProviderApiKey(row.id);
+    }
+  }
+
+  createLocalDataBackup() {
+    const tables = {};
+    for (const table of LOCAL_DATA_BACKUP_TABLES) {
+      tables[table] = this.selectAllRows(table);
+    }
+
+    return {
+      format: LOCAL_DATA_BACKUP_FORMAT,
+      version: LOCAL_DATA_BACKUP_VERSION,
+      appVersion: APP_VERSION,
+      createdAt: nowIso(),
+      summary: this.getLocalDataSummary(),
+      includes: {
+        providerApiKeys: false,
+        tables: [...LOCAL_DATA_BACKUP_TABLES],
+        note: "Provider API keys are excluded from local backups. Re-enter them after restore.",
+      },
+      payload: { tables },
+    };
+  }
+
+  async restoreLocalDataBackup(input) {
+    const backup = normalizeLocalDataBackup(input);
+
+    await this.deleteCurrentProviderSecrets();
+
+    this.db.exec("BEGIN");
+    try {
+      this.deleteRowsFromTables([...LOCAL_DATA_BACKUP_TABLES].reverse());
+      for (const table of LOCAL_DATA_BACKUP_TABLES) {
+        this.insertRowsIntoTable(table, backup.payload.tables[table]);
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+
+    this.syncBuiltInCapabilities();
+    return this.getLocalDataSummary();
+  }
+
   getLocalDataSummary() {
     const counts = {
       workspaces: this.countRows("workspaces"),
@@ -4695,53 +4913,16 @@ class SqliteAppStore {
   async resetLocalData(mode) {
     const savedLanguage = this.getSetting("uiLanguage");
     if (mode === "profile") {
-      const providerRows = this.db.prepare("SELECT id FROM providers").all();
-      for (const row of providerRows) {
-        await this.secretStore.deleteProviderApiKey(row.id);
-      }
+      await this.deleteCurrentProviderSecrets();
     }
 
-    this.db.exec(`
-      DELETE FROM messages;
-      DELETE FROM threads;
-      DELETE FROM run_events;
-      DELETE FROM runs;
-      DELETE FROM approvals;
-      DELETE FROM artifacts;
-      DELETE FROM automation_runs;
-      DELETE FROM automations;
-      DELETE FROM memories;
-      DELETE FROM recipe_tests;
-      DELETE FROM recipes;
-      DELETE FROM capability_runs;
-      DELETE FROM agent_orchestrations;
-      DELETE FROM remote_bridge_events;
-      DELETE FROM remote_bridge_sessions;
-      DELETE FROM mailbox_items;
-    `);
+    this.deleteRowsFromTables(LOCAL_DATA_GENERATED_TABLES);
 
     if (mode === "profile") {
-      this.db.exec(`
-        DELETE FROM providers;
-        DELETE FROM workspaces;
-      `);
-      this.db.prepare(`
-        DELETE FROM app_settings
-        WHERE key IN (
-          'activeWorkspaceId',
-          'activeProviderId',
-          'activeModelId',
-          'activeThreadId',
-          'mcp_global_config_json'
-        )
-      `).run();
+      this.deleteRowsFromTables(LOCAL_DATA_PROFILE_TABLES);
+      this.deleteSettings(LOCAL_DATA_PROFILE_SETTING_KEYS);
     } else {
-      this.db.prepare(`
-        DELETE FROM app_settings
-        WHERE key IN (
-          'activeThreadId'
-        )
-      `).run();
+      this.deleteSettings(LOCAL_DATA_GENERATED_SETTING_KEYS);
     }
 
     if (savedLanguage) {

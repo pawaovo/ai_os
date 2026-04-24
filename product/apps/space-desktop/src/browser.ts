@@ -583,6 +583,22 @@ interface LocalSetupDiscoverySummary {
   localData: LocalDataSummary;
 }
 
+interface LocalDataBackupManifest {
+  format: string;
+  version: number;
+  appVersion: string;
+  createdAt: string;
+  summary: LocalDataSummary;
+  includes: {
+    providerApiKeys: boolean;
+    tables: string[];
+    note: string;
+  };
+  payload: {
+    tables: Record<string, Array<Record<string, unknown>>>;
+  };
+}
+
 interface LiveRunState {
   sessionId?: string;
   runId: string;
@@ -701,6 +717,9 @@ const elements = {
   localDataResetList: getElement("local-data-reset-list", HTMLElement),
   localDataResetGeneratedButton: getElement("local-data-reset-generated-button", HTMLButtonElement),
   localDataResetProfileButton: getElement("local-data-reset-profile-button", HTMLButtonElement),
+  localDataBackupExportButton: getElement("local-data-backup-export-button", HTMLButtonElement),
+  localDataBackupRestoreButton: getElement("local-data-backup-restore-button", HTMLButtonElement),
+  localDataBackupFileInput: getElement("local-data-backup-file-input", HTMLInputElement),
   localDataResetHelp: getElement("local-data-reset-help", HTMLElement),
   workspaceForm: getElement("workspace-form", HTMLFormElement),
   workspaceSelect: getElement("workspace-select", HTMLSelectElement),
@@ -993,6 +1012,19 @@ elements.localDataResetGeneratedButton.addEventListener("click", () => {
 
 elements.localDataResetProfileButton.addEventListener("click", () => {
   void resetLocalData("profile");
+});
+
+elements.localDataBackupExportButton.addEventListener("click", () => {
+  void exportLocalBackup();
+});
+
+elements.localDataBackupRestoreButton.addEventListener("click", () => {
+  elements.localDataBackupFileInput.value = "";
+  elements.localDataBackupFileInput.click();
+});
+
+elements.localDataBackupFileInput.addEventListener("change", () => {
+  void restoreLocalBackupFromSelectedFile();
 });
 
 elements.workspaceForm.addEventListener("submit", (event) => {
@@ -1748,6 +1780,8 @@ function applyStaticTranslations(): void {
   setText("#local-data-reset-title", t("localReset.title"));
   elements.localDataResetGeneratedButton.textContent = t("localReset.button.generated");
   elements.localDataResetProfileButton.textContent = t("localReset.button.profile");
+  elements.localDataBackupExportButton.textContent = t("localReset.button.export");
+  elements.localDataBackupRestoreButton.textContent = t("localReset.button.restore");
   renderLocalDataReset();
 
   setText(".automation-history-panel .eyebrow", t("automation-history.eyebrow"));
@@ -2023,6 +2057,11 @@ function renderLocalDataReset(): void {
       }),
       localData.counts.providers > 0 || localData.counts.workspaces > 0 ? "optional" : "completed",
     ),
+    createStaticActionListItem(
+      t("localReset.backup.title"),
+      t("localReset.backup.detail"),
+      "optional",
+    ),
   );
   elements.localDataResetHelp.textContent = t("localReset.help.default");
 }
@@ -2101,8 +2140,7 @@ async function resetLocalData(mode: "generated-data" | "profile"): Promise<void>
     : t("localReset.confirm.generated");
   if (!globalThis.confirm(message)) return;
 
-  elements.localDataResetGeneratedButton.disabled = true;
-  elements.localDataResetProfileButton.disabled = true;
+  setLocalDataActionButtonsDisabled(true);
   try {
     const payload = await apiJson<{ discovery: LocalSetupDiscoverySummary }>("/api/local-data/reset", {
       method: "POST",
@@ -2112,52 +2150,126 @@ async function resetLocalData(mode: "generated-data" | "profile"): Promise<void>
         confirmText: "delete-local-data",
       }),
     });
-    state.localSetup = payload.discovery;
-    state.localSetupError = undefined;
-    stopRunPolling();
-    stopAgentOrchestrationPolling();
-    state.activeRunId = undefined;
-    state.liveRun = undefined;
-    state.runEvents = [];
-    state.activeOrchestrationId = undefined;
-    state.orchestrations = [];
-    state.mailboxItems = [];
-    state.remoteBridgePilot = undefined;
-    state.remoteBridgeSession = undefined;
-    state.remoteBridgeEvents = [];
-    state.remoteBridgeConnect = undefined;
-    await loadWorkspaces();
-    await loadProviders();
-    await loadThreads();
-    await loadArtifacts();
-    await loadRuns();
-    await loadApprovals();
-    await loadAutomations();
-    await loadAutomationRuns();
-    await loadMemories();
-    await loadCapabilities();
-    await loadCapabilityRuns();
-    await loadRecipes();
-    await loadRecipeTests();
-    await loadMcpConfig();
-    await loadAgentRuntimes();
-    await loadMultiAgentGovernance();
-    await loadAgentOrchestrations();
-    await loadHostedMcpServer();
-    await loadRemoteBridgePilot();
-    await loadMailbox();
-    await loadAppReadiness();
-    renderLocalSetup();
-    renderLocalDataReset();
+    await refreshAfterLocalDataMutation(payload.discovery);
     elements.localDataResetHelp.textContent = t(
       mode === "profile" ? "localReset.completed.profile" : "localReset.completed.generated",
     );
   } catch (error) {
     elements.localDataResetHelp.textContent = errorToMessage(error, t("localReset.failed"));
   } finally {
-    elements.localDataResetGeneratedButton.disabled = false;
-    elements.localDataResetProfileButton.disabled = false;
+    setLocalDataActionButtonsDisabled(false);
   }
+}
+
+async function exportLocalBackup(): Promise<void> {
+  setLocalDataActionButtonsDisabled(true);
+  try {
+    const payload = await apiJson<{ backup: LocalDataBackupManifest }>("/api/local-data/backup");
+    const fileName = buildLocalBackupFileName(payload.backup.createdAt);
+    downloadJsonFile(fileName, payload.backup);
+    elements.localDataResetHelp.textContent = t("localReset.exported", { fileName });
+  } catch (error) {
+    elements.localDataResetHelp.textContent = errorToMessage(error, t("localReset.exportFailed"));
+  } finally {
+    setLocalDataActionButtonsDisabled(false);
+  }
+}
+
+async function restoreLocalBackupFromSelectedFile(): Promise<void> {
+  const file = elements.localDataBackupFileInput.files?.[0];
+  if (!file) return;
+
+  let backup: LocalDataBackupManifest;
+  try {
+    backup = JSON.parse(await file.text()) as LocalDataBackupManifest;
+  } catch (error) {
+    elements.localDataResetHelp.textContent = errorToMessage(error, t("localReset.restoreInvalid"));
+    elements.localDataBackupFileInput.value = "";
+    return;
+  }
+
+  elements.localDataBackupFileInput.value = "";
+  if (!globalThis.confirm(t("localReset.confirm.restore"))) return;
+
+  setLocalDataActionButtonsDisabled(true);
+  try {
+    const payload = await apiJson<{ discovery: LocalSetupDiscoverySummary }>("/api/local-data/restore", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        backup,
+        confirmText: "restore-local-backup",
+      }),
+    });
+    await refreshAfterLocalDataMutation(payload.discovery);
+    elements.localDataResetHelp.textContent = t("localReset.restored");
+  } catch (error) {
+    elements.localDataResetHelp.textContent = errorToMessage(error, t("localReset.restoreFailed"));
+  } finally {
+    setLocalDataActionButtonsDisabled(false);
+  }
+}
+
+function setLocalDataActionButtonsDisabled(disabled: boolean): void {
+  elements.localDataResetGeneratedButton.disabled = disabled;
+  elements.localDataResetProfileButton.disabled = disabled;
+  elements.localDataBackupExportButton.disabled = disabled;
+  elements.localDataBackupRestoreButton.disabled = disabled;
+}
+
+async function refreshAfterLocalDataMutation(discovery: LocalSetupDiscoverySummary): Promise<void> {
+  state.localSetup = discovery;
+  state.localSetupError = undefined;
+  stopRunPolling();
+  stopAgentOrchestrationPolling();
+  state.activeRunId = undefined;
+  state.liveRun = undefined;
+  state.runEvents = [];
+  state.activeOrchestrationId = undefined;
+  state.orchestrations = [];
+  state.mailboxItems = [];
+  state.remoteBridgePilot = undefined;
+  state.remoteBridgeSession = undefined;
+  state.remoteBridgeEvents = [];
+  state.remoteBridgeConnect = undefined;
+  await loadWorkspaces();
+  await loadProviders();
+  await loadThreads();
+  await loadArtifacts();
+  await loadRuns();
+  await loadApprovals();
+  await loadAutomations();
+  await loadAutomationRuns();
+  await loadMemories();
+  await loadCapabilities();
+  await loadCapabilityRuns();
+  await loadRecipes();
+  await loadRecipeTests();
+  await loadMcpConfig();
+  await loadAgentRuntimes();
+  await loadMultiAgentGovernance();
+  await loadAgentOrchestrations();
+  await loadHostedMcpServer();
+  await loadRemoteBridgePilot();
+  await loadMailbox();
+  await loadAppReadiness();
+  renderLocalSetup();
+  renderLocalDataReset();
+}
+
+function buildLocalBackupFileName(createdAt: string): string {
+  const safeTimestamp = createdAt.replace(/[^0-9A-Za-z-]+/g, "-");
+  return `ai-os-local-backup-${safeTimestamp}.json`;
+}
+
+function downloadJsonFile(fileName: string, payload: unknown): void {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 async function loadExecutors(): Promise<void> {

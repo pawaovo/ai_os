@@ -208,6 +208,9 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(html, /id="local-data-reset-list"/);
   assert.match(html, /id="local-data-reset-generated-button"/);
   assert.match(html, /id="local-data-reset-profile-button"/);
+  assert.match(html, /id="local-data-backup-export-button"/);
+  assert.match(html, /id="local-data-backup-restore-button"/);
+  assert.match(html, /id="local-data-backup-file-input"/);
   assert.match(html, /id="local-data-reset-help"/);
   assert.match(html, /Capabilities And Forge/);
   assert.match(html, /Local Install/);
@@ -486,6 +489,10 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(i18nSource, /"localSetup\.title": "本机配置导入"/);
   assert.match(i18nSource, /"localReset\.title": "Local Data Reset"/);
   assert.match(i18nSource, /"localReset\.title": "本地数据重置"/);
+  assert.match(i18nSource, /"localReset\.button\.export": "Export Local Backup"/);
+  assert.match(i18nSource, /"localReset\.button\.export": "导出本地备份"/);
+  assert.match(i18nSource, /"localReset\.button\.restore": "Restore Local Backup"/);
+  assert.match(i18nSource, /"localReset\.button\.restore": "恢复本地备份"/);
   assert.match(i18nSource, /"runFollowUp\.title": "Next Actions"/);
   assert.match(i18nSource, /"runFollowUp\.title": "下一步动作"/);
   assert.match(i18nSource, /"runFollowUp\.button\.reuse": "Reuse Run Inputs"/);
@@ -510,9 +517,15 @@ test("space desktop V1.0 page exposes readiness and forge controls", async () =>
   assert.match(browserSource, /dynamic\.system\.runAlready/);
   assert.match(browserSource, /dynamic\.system\.commandExited/);
   assert.match(browserSource, /dynamic\.system\.executorTimeout/);
+  assert.match(browserSource, /\/api\/local-data\/backup/);
+  assert.match(browserSource, /\/api\/local-data\/restore/);
+  assert.match(browserSource, /downloadJsonFile/);
+  assert.match(browserSource, /local-data-backup-file-input/);
   assert.match(browserSource, /await loadModelsForSelectedProvider\(\)\.catch\(\(\) => undefined\)/);
   assert.match(browserSource, /elements\.chatInput\.value = message;/);
   assert.match(devServer, /function localizeSystemOwnedText/);
+  assert.match(devServer, /\/api\/local-data\/backup/);
+  assert.match(devServer, /\/api\/local-data\/restore/);
   assert.match(devServer, /serverT\(currentUiLanguage\(\), "threads\.button\.new"\)/);
   assert.match(devServer, /serverT\(currentUiLanguage\(\), "remoteBridge\.principalLabel\.default"\)/);
   assert.match(capabilityContractSource, /export interface PromptAppRuntimeBinding/);
@@ -1004,6 +1017,26 @@ test("local setup discovery can import Codex provider config and reset local dat
     assert.equal(populatedDiscovery.discovery.localData.counts.providers, 1);
     assert.equal(populatedDiscovery.discovery.localData.generatedCount >= 3, true);
 
+    await patchJson(`http://127.0.0.1:${appPort}/api/settings/language`, {
+      language: "zh-CN",
+    });
+    await patchJson(`http://127.0.0.1:${appPort}/api/settings/workspace-selection`, {
+      workspaceId: workspace.workspace.id,
+    });
+
+    const exportedBackup = await getJson(`http://127.0.0.1:${appPort}/api/local-data/backup`);
+    assert.equal(exportedBackup.backup.format, "ai-os-local-backup");
+    assert.equal(exportedBackup.backup.version, 1);
+    assert.equal(exportedBackup.backup.includes.providerApiKeys, false);
+    assert.equal(exportedBackup.backup.payload.tables.providers.length, 1);
+    assert.equal(exportedBackup.backup.payload.tables.workspaces.length, 1);
+    assert.equal(exportedBackup.backup.payload.tables.memories.length, 1);
+    assert.equal(
+      exportedBackup.backup.payload.tables.app_settings.some((entry) =>
+        entry.key === "uiLanguage" && entry.value === "zh-CN"),
+      true,
+    );
+
     const clearedGenerated = await postJson(`http://127.0.0.1:${appPort}/api/local-data/reset`, {
       mode: "generated-data",
       confirmText: "delete-local-data",
@@ -1029,6 +1062,26 @@ test("local setup discovery can import Codex provider config and reset local dat
     const workspacesAfterProfile = await getJson(`http://127.0.0.1:${appPort}/api/workspaces`);
     assert.equal(providersAfterProfile.providers.length, 0);
     assert.equal(workspacesAfterProfile.workspaces.length, 0);
+
+    const restoredBackup = await postJson(`http://127.0.0.1:${appPort}/api/local-data/restore`, {
+      backup: exportedBackup.backup,
+      confirmText: "restore-local-backup",
+    });
+    assert.equal(restoredBackup.discovery.localData.counts.providers, 1);
+    assert.equal(restoredBackup.discovery.localData.counts.workspaces, 1);
+    assert.equal(restoredBackup.discovery.localData.generatedCount >= 3, true);
+
+    const providersAfterRestore = await getJson(`http://127.0.0.1:${appPort}/api/providers`);
+    const workspacesAfterRestore = await getJson(`http://127.0.0.1:${appPort}/api/workspaces`);
+    const memoriesAfterRestore = await getJson(`http://127.0.0.1:${appPort}/api/memories`);
+    const artifactsAfterRestore = await getJson(`http://127.0.0.1:${appPort}/api/artifacts`);
+    const languageAfterRestore = await getJson(`http://127.0.0.1:${appPort}/api/settings/language`);
+    assert.equal(providersAfterRestore.providers.length, 1);
+    assert.equal(workspacesAfterRestore.workspaces.length, 1);
+    assert.equal(workspacesAfterRestore.activeWorkspaceId, workspace.workspace.id);
+    assert.equal(memoriesAfterRestore.memories.length, 1);
+    assert.equal(artifactsAfterRestore.artifacts.length, 1);
+    assert.equal(languageAfterRestore.language, "zh-CN");
   } finally {
     await appServer.stop();
     await rm(storageDir, { recursive: true, force: true });
