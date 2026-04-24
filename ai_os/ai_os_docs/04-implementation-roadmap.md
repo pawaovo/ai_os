@@ -2,7 +2,12 @@
 
 ## 1. Purpose
 
-This document defines how AI OS should move from the current V0.1 Product Preview to V1.0.
+This document originally defined how AI OS should move from the early V0.1 Product Preview to V1.0.
+
+At this point in the repository, that delivery path has largely been completed. The document now serves two purposes:
+
+- preserve the historical execution map from `V0.1 -> V1.0`
+- explain the planning assumptions that produced the current product baseline
 
 It is not a vision document. The vision is already covered by:
 
@@ -33,67 +38,58 @@ Important:
 
 ## 2. Current State
 
-The current product stage is:
+The current repository product stage is:
 
 ```text
-V0.1 Product Preview
+V1.0 Personal AI OS baseline
+plus additive P3/P4 exploratory product surfaces
 ```
 
-It is a clickable local macOS app and a working architecture preview. It is not yet a complete personal AI OS.
+The shipped product is now a packaged local-first desktop app with Electron as the primary shell for macOS and Windows. It is no longer just a V0.1 architecture preview, but it is also not yet the full end-state AI Space / AI OS vision described in the higher-level product docs.
 
-### 2.1 Current V0.1 Capabilities
+### 2.1 Current Product Capabilities
 
-The current V0.1 app can:
+The current product can:
 
-- open as `product/build/AI OS.app`
-- render a native macOS WebKit window
-- start a local Node server internally
-- configure an OpenAI-compatible or Anthropic-compatible model provider
-- save provider name, protocol, base URL, API key, and model locally
-- send real chat requests through the configured provider
-- keep chat messages in the current app session
-- run the deterministic mock executor path
-- call Codex through the local CLI adapter
-- call Claude Code through the local CLI adapter
-- show run status, event stream, and artifact preview
-- package as a local unsigned `.app`
+- run as an Electron desktop shell for macOS and Windows packaging flows
+- store local product state in SQLite
+- store provider secrets through macOS Keychain, Electron `safeStorage`, or protected local files depending on runtime
+- configure OpenAI-compatible or Anthropic-compatible providers
+- persist provider metadata, threads, messages, runs, approvals, artifacts, automations, memories, capabilities, and Forge recipes locally
+- run mock, Codex CLI, and Claude Code CLI executor paths
+- surface approval and trust controls
+- export and restore local product backups without including provider API keys
+- expose additive P3/P4 exploratory surfaces such as orchestration, hosted MCP, remote bridge, and mailbox
+- package as a local unsigned Electron app
 
-### 2.2 Current V0.1 Limits
+### 2.2 Current Product Limits
 
-The current V0.1 app does not yet provide:
+The current product still does not yet provide:
 
-- Keychain-backed credential storage
-- persistent threads
-- persistent chat history
-- multiple Spaces
-- workspace picker
-- durable artifact storage
-- approval UI
-- real executor run cancellation from UI
-- long-running task management
-- automation
-- proactive messages
-- local memory
-- Forge
-- signed or notarized installer
-- `.dmg` distribution
-- embedded Node runtime
+- signed or notarized macOS distribution
+- auto-update
+- cloud sync or hosted runtime
+- team collaboration or organization permissions
+- public marketplace
+- end-state Companion / Mission Board / canvas-style AI Space interface
+- mature connector ecosystem or App Surface platform
+- hardened long-lived managed executor runtime beyond the current local process path
 
-### 2.3 Current V0.1 Meaning
+### 2.3 Current Product Meaning
 
-V0.1 proves that AI OS can exist as a local app with:
+The current repo proves that AI OS can function as a real local-first daily assistant baseline with:
 
 ```text
-Companion entry
--> Model Provider chat
--> Control Plane
--> Code Executor Protocol
--> Codex / Claude Code adapters
--> Kernel Events
--> Artifact preview
+Providers
+-> persistent threads and messages
+-> workspace-aware runs
+-> approvals and artifacts
+-> automations and memory
+-> capabilities and Forge
+-> packaged Electron desktop delivery
 ```
 
-It does not yet prove that AI OS can be used as a long-term daily assistant.
+It does not yet prove the final AI Space end-state with a Companion-first canvas and richer object-native space model. Sections `5` through `14` below are therefore best read as the historical implementation path that led to the current baseline.
 
 ## 3. Version Principles
 
@@ -278,9 +274,9 @@ Recommended path:
 - V0.7: evaluate Pi-style extension/package mechanisms for capability system.
 - V0.8: evaluate Pi-style SDK embedding for Forge-generated capabilities.
 
-### 4.6 Best Current Technical Stack
+### 4.6 Historical V0.2 Technical Stack Recommendation
 
-For near-term product development:
+For the early V0.2 planning stage:
 
 | Layer | V0.2 Recommendation |
 |---|---|
@@ -294,7 +290,7 @@ For near-term product development:
 | Events | Current KernelEvent subset, stored locally |
 | Tests | Node test runner and mock provider/executor fixtures |
 
-Do not introduce Electron, Tauri, or a large UI framework until the product shape requires it.
+That recommendation applied to the early roadmap stage only. The current repository has since standardized on Electron as the primary desktop shell because the product shape now requires packaged cross-platform desktop behavior.
 
 ## 5. V0.1 Product Preview
 

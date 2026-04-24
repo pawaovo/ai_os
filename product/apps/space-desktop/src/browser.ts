@@ -1274,27 +1274,11 @@ async function initializeAppState(): Promise<void> {
   applyStaticTranslations();
   await loadLanguageSetting();
   await loadWorkspaces();
-  await loadExecutors();
-  await loadProviders();
-  await loadThreads();
-  await loadArtifacts();
-  await loadRuns();
-  await loadApprovals();
-  await loadAutomations();
-  await loadAutomationRuns();
-  await loadMemories();
-  await loadCapabilities();
-  await loadCapabilityRuns();
-  await loadRecipes();
-  await loadRecipeTests();
-  await loadAgentRuntimes();
-  await loadAgentOrchestrations();
-  await loadMcpConfig();
-  await loadHostedMcpServer();
-  await loadRemoteBridgePilot();
-  await loadMailbox();
-  await loadAppReadiness();
-  await loadLocalSetup();
+  await Promise.all([
+    loadExecutors(),
+    loadProviders(),
+    loadWorkspaceScopedData(),
+  ]);
 }
 
 function t(key: string, variables: Record<string, string | number> = {}): string {
@@ -1929,26 +1913,11 @@ async function saveLanguageSetting(): Promise<void> {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ language: nextLanguage }),
   });
-  await refreshWorkspaceScopedData();
-  await loadProviders();
-  await loadExecutors();
-  await loadThreads();
-  await loadRuns();
-  await loadApprovals();
-  await loadAutomations();
-  await loadAutomationRuns();
-  await loadMemories();
-  await loadCapabilities();
-  await loadCapabilityRuns();
-  await loadRecipes();
-  await loadRecipeTests();
-  await loadAgentRuntimes();
-  await loadAgentOrchestrations();
-  await loadHostedMcpServer();
-  await loadRemoteBridgePilot();
-  await loadMailbox();
-  await loadArtifacts();
-  await loadAppReadiness();
+  await Promise.all([
+    refreshWorkspaceScopedData(),
+    loadProviders(),
+    loadExecutors(),
+  ]);
   renderChatMessages();
   renderCurrentRunView();
 }
@@ -2520,25 +2489,32 @@ async function deleteSelectedWorkspace(): Promise<void> {
 
 async function refreshWorkspaceScopedData(): Promise<void> {
   await loadWorkspaces();
-  await loadThreads();
-  await loadArtifacts();
-  await loadRuns();
-  await loadApprovals();
-  await loadAutomations();
-  await loadAutomationRuns();
-  await loadMemories();
-  await loadCapabilities();
-  await loadRecipes();
-  await loadRecipeTests();
-  await loadAgentRuntimes();
-  await loadMultiAgentGovernance();
-  await loadAgentOrchestrations();
-  await loadMcpConfig();
-  await loadHostedMcpServer();
-  await loadRemoteBridgePilot();
-  await loadMailbox();
-  await loadAppReadiness();
-  await loadLocalSetup();
+  await loadWorkspaceScopedData();
+}
+
+async function loadWorkspaceScopedData(): Promise<void> {
+  await Promise.all([
+    loadThreads(),
+    loadArtifacts(),
+    loadRuns(),
+    loadApprovals(),
+    loadAutomations(),
+    loadAutomationRuns(),
+    loadMemories(),
+    loadCapabilities(),
+    loadCapabilityRuns(),
+    loadRecipes(),
+    loadRecipeTests(),
+    loadAgentRuntimes(),
+    loadMultiAgentGovernance(),
+    loadAgentOrchestrations(),
+    loadMcpConfig(),
+    loadHostedMcpServer(),
+    loadRemoteBridgePilot(),
+    loadMailbox(),
+    loadAppReadiness(),
+    loadLocalSetup(),
+  ]);
 }
 
 async function loadRemoteBridgePilot(): Promise<void> {

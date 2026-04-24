@@ -7294,5 +7294,5 @@ server.on("close", () => {
 });
 
 server.listen(port, "127.0.0.1", () => {
-  process.stdout.write(`AI Space Demo: http://127.0.0.1:${port}\n`);
+  process.stdout.write(`AI OS Personal: http://127.0.0.1:${port}\n`);
 });

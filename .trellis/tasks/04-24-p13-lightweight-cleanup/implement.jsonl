@@ -1,0 +1,6 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend development guide"}
+{"file": ".trellis/spec/backend/electron-desktop-shell.md", "reason": "Cleanup must keep Electron install/readiness/docs aligned with the actual product shell."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Lightweight cleanup should reduce duplication in initialization and refresh paths instead of adding new patterns."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "This cleanup updates docs and frontend initialization flow together."}
