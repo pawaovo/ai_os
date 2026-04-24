@@ -98,7 +98,10 @@ Enabled local dev server API for mock, Codex, and Claude Code executor demo runs
 
 ### Main Changes
 
-(Add details)
+- Updated the roadmap document so the current repository baseline is described as the Electron-based V1 product instead of the older V0.1 WebKit preview state.
+- Grouped independent frontend initialization and workspace-refresh loads with small parallel `Promise.all(...)` helpers instead of keeping the previous fully serial request chain.
+- Added `loadCapabilityRuns()` into the shared workspace refresh path so capability execution history now refreshes alongside the rest of the workspace-scoped state.
+- Replaced the dev-server startup banner text `AI Space Demo` with `AI OS Personal` to reduce an obvious demo-era naming residue in the active product path.
 
 ### Git Commits
 
@@ -108,7 +111,10 @@ Enabled local dev server API for mock, Codex, and Claude Code executor demo runs
 
 ### Testing
 
-- [OK] (Add test results)
+- [OK] `cd product && npm test`
+- [OK] `cd product && npm run validate:electron`
+- [OK] `cd product && npm run package:mac`
+- [OK] `cd product && npm run smoke:packaged:mac`
 
 ### Status
 
@@ -1036,6 +1042,39 @@ Added a minimal local backup/restore flow in Settings, backed by versioned local
 | Hash | Message |
 |------|---------|
 | `b8c287c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 30: P13 lightweight cleanup
+
+**Date**: 2026-04-24
+**Task**: P13 lightweight cleanup
+**Branch**: `codex/p13-lightweight-cleanup`
+
+### Summary
+
+Completed a low-risk cleanup pass: updated the roadmap baseline to match the current Electron-based product, grouped independent frontend startup and workspace-refresh loads, and removed an outdated demo-era startup label.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c8e8f24` | (see git log) |
 
 ### Testing
 
