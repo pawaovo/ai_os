@@ -42,7 +42,7 @@
       "action": "record-session"
     }
   ],
-  "commit": null,
+  "commit": "b8c287c",
   "pr_url": null,
   "subtasks": [],
   "children": [],

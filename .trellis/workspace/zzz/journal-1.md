@@ -59,7 +59,10 @@ Added browser-first local Space demo app with dev server, Companion -> Control P
 
 ### Main Changes
 
-(Add details)
+- Added backend-owned `GET /api/local-data/backup` and `POST /api/local-data/restore` endpoints with a versioned `ai-os-local-backup` manifest for structured local data export and restore.
+- Reused the existing Settings local-reset surface instead of creating a new admin workflow, adding export and restore actions plus a hidden backup-file picker.
+- Kept provider API keys out of first-cut backups and surfaced that limitation explicitly in UI copy and product docs.
+- Extended the local setup/reset regression test to verify backup export shape, destructive restore confirmation, and restoration of language, workspace selection, artifacts, and memories.
 
 ### Git Commits
 
@@ -69,7 +72,10 @@ Added browser-first local Space demo app with dev server, Companion -> Control P
 
 ### Testing
 
-- [OK] (Add test results)
+- [OK] `cd product && npm test`
+- [OK] `cd product && npm run validate:electron`
+- [OK] `cd product && npm run package:mac`
+- [OK] `cd product && npm run smoke:packaged:mac`
 
 ### Status
 
@@ -997,6 +1003,39 @@ Added selected-run input reuse on the Runs follow-up panel plus a real Codex suc
 | Hash | Message |
 |------|---------|
 | `967dbac` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 29: P12 local backup restore
+
+**Date**: 2026-04-24
+**Task**: P12 local backup restore
+**Branch**: `codex/p12-local-backup-restore`
+
+### Summary
+
+Added a minimal local backup/restore flow in Settings, backed by versioned local backup APIs that export product data without provider API keys, and verified it with tests, Electron validation, packaging, and packaged smoke.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b8c287c` | (see git log) |
 
 ### Testing
 
